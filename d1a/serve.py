@@ -1,5 +1,5 @@
 # Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); serves d1a-latest and keeps kev-latest and jev-latest as compatibility names; model cards name D1A.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); serves d1a-latest and keeps kev-latest and jev-latest as compatibility names; model cards name D1A; serves MLX export folders.
 """FastAPI sidecar for the playground: loads one checkpoint, exposes prefill-only decisions.
 
 Run: uv run --extra serve python -m d1a.serve --run runs/d1a --port 8008
@@ -20,7 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from .api import SystemOneRequest, to_record, to_answers, output_tokens, with_date_facts
-from .checkpoint import Checkpoint, LoadOptions, fused_available, is_hub_id
+from .checkpoint import EXPORT_CONFIG, Checkpoint, LoadOptions, fused_available, is_hub_id
 from .device import default_device, empty_cache, out_of_memory, sync
 from .model import SERVE_MAX_BRANCH, SERVE_MAX_STATE
 
@@ -276,7 +276,7 @@ def main():
     ap.add_argument("--host", default="127.0.0.1", help="interface to bind; 0.0.0.0 to serve beyond this machine (a container, a VM behind a proxy)")
     ap.add_argument("--port", type=int, default=8008)
     a = ap.parse_args()
-    run = a.run if is_hub_id(a.run) or os.path.exists(f"{a.run}/head.pt") else a.fallback
+    run = a.run if is_hub_id(a.run) or os.path.exists(f"{a.run}/head.pt") or os.path.exists(f"{a.run}/{EXPORT_CONFIG}") else a.fallback
     if run != a.run: print(f"{a.run} not found, falling back to {run}")
     dev = default_device()
     opts = LoadOptions.from_env()

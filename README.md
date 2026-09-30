@@ -30,7 +30,7 @@ uv sync --extra serve
 uv run --extra serve python -m d1a.serve --run JohnP1/kev-gemma4-e2b --port 8009
 ```
 
-This serves the prototype checkpoint: CUDA if you have a GPU, PyTorch MPS on Apple Silicon (Gemma is attention-only, so it does not use the MLX backend). The first run downloads the adapter and the base model. `--run` also takes a local checkpoint directory or a Hub revision (`repo@rev`). Once the D1A weights are published, `--run JohnP1/d1a-e2b` serves them the same way.
+This serves the prototype checkpoint: CUDA if you have a GPU, MLX on Apple Silicon (`D1A_BACKEND=torch` for PyTorch MPS; see [Apple Silicon (MLX)](#apple-silicon-mlx)). The first run downloads the adapter and the base model. `--run` also takes a local checkpoint directory or a Hub revision (`repo@rev`). Once the D1A weights are published, `--run JohnP1/d1a-e2b` serves them the same way.
 
 Send it a ticket:
 
@@ -84,6 +84,26 @@ print(answer["answers"]["team"]["probabilities"])
 
 `playground/` is a Next.js app for trying questions by hand, comparing packed and separate answers, permuting options and playing chess against the model. Start a server on :8009, then `cd playground && npm install && npm run dev` (set `D1A_API` to point it elsewhere).
 
+### Apple Silicon (MLX)
+
+On Apple Silicon `d1a.serve` runs Gemma 4 checkpoints through MLX (`d1a/mlx_model.py`, mlx-lm 0.31.3): the adapter is merged into the bf16 base at load and every request runs as the state once plus one row per question. `scripts/export_mlx.py` writes that merged model as a folder which loads without the base or the adapter, optionally quantized:
+
+```bash
+uv run --extra mlx python scripts/export_mlx.py --run JohnP1/d1a-e2b --out runs/exports/d1a-e2b-mlx-bf16
+uv run --extra mlx python scripts/export_mlx.py --run JohnP1/d1a-e2b --q-bits 4 --q-group-size 64 --out runs/exports/d1a-e2b-mlx-4bit
+uv run --extra serve python -m d1a.serve --run runs/exports/d1a-e2b-mlx-4bit --port 8009
+```
+
+Parity is measured against golden vectors from the fp32 PyTorch path (`scripts/golden_vectors.py`: 209 records, 274 questions: decision-v7 development records, the playground presets and three long-state records). For JohnP1/d1a-e2b on an M1 Max, |Δp| being the largest change of any option's probability in a question:
+
+| | Weights | Max \|Δp\| | Mean \|Δp\| | Argmax flips | Accuracy (dev, fp32 0.811) | ECE (fp32 0.056) |
+|---|---|---|---|---|---|---|
+| MLX bf16 | 8.7 GB | 0.043 | 0.003 | 5 (all on reference margins under 0.025) | 0.824 | 0.061 |
+| MLX 4-bit, group 64, embeddings included | 2.5 GB | 0.363 | 0.054 | 23 | 0.811 | 0.051 |
+| MLX 8-bit, per-layer embeddings 4-bit (`--q-bits 8 --q-per-layer-bits 4`) | 3.5 GB | 0.084 | 0.009 | 5 (margins under 0.053) | 0.824 | 0.062 |
+
+The 4-bit export keeps the accuracy but moves individual probabilities too far to stand in for the fp32 model (8% of the answers change), so it is not published. The error comes from the linear layers: with them in bf16 and both embeddings at 4 bits the maximum is 0.089. The mixed export (8-bit linear layers and token embeddings, 4-bit per-layer embeddings, which are half of E2B's weights) stays close to bf16. Process footprint on the M1 Max: 3.1 GB after loading the 4-bit export and 4.2 GB for the mixed one, about 1 GB more after serving, and a 60-question request peaks at 5.3 / 6.4 GB; a 6-question request takes about 0.4 s and a 60-question one about 4.5 s with either.
+
 ## Training
 
 The D1A recipe on Gemma 4 E2B (one L4 is enough, about 15 GB peak with a bf16 backbone). `google/gemma-4-E2B` at commit `d29ff6b45f081a49ee2733a859c9c9c2d95d1a6f` is the trainer's default base, so `--base` can be left out:
@@ -126,7 +146,7 @@ The prototype is behind the Qwen reference on sources it never trained on; the t
 ```bash
 uv sync --extra serve
 uv run python -m pytest tests/test_unit.py tests/test_research.py tests/test_generators.py tests/test_conventions.py \
-    tests/test_documents_tools.py tests/test_hard_v1.py tests/test_devtools_v1.py tests/test_breadth_v1.py -q
+    tests/test_documents_tools.py tests/test_hard_v1.py tests/test_devtools_v1.py tests/test_breadth_v1.py tests/test_mlx_export.py -q
 python scripts/check_license.py          # license and provenance rules (see CONTRIBUTING.md)
 ```
 

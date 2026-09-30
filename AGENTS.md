@@ -9,7 +9,7 @@ the question's `<decide>` token. README.md is the user guide; docs/UPSTREAM.md r
   `serve.py` (FastAPI System One server), `benchmark.py` (scores a checkpoint or a remote endpoint on a suite),
   `checkpoint.py` (loading; `D1A_*` load options are read only by `LoadOptions.from_env`), `suite.py` (frozen suites,
   Hub-mirrored partitions), `api.py` (request schema), `full_ft.py` / `shared_prefix.py` (full-weight training),
-  `mlx_model.py` (Apple Silicon backend for Qwen3.5), `experiment.py` / `rounds.py` / `budget.py` (study tooling used by
+  `mlx_model.py` (Apple Silicon backend for Qwen3.5 and Gemma 4, and the MLX export folders `scripts/export_mlx.py` writes), `experiment.py` / `rounds.py` / `budget.py` (study tooling used by
   `modal_app.py`).
 - `evals/` frozen suites from Kev (manifests pin every partition's sha256; never edit them in place).
 - `scripts/` suite builders and one-off tools; `playground/` the Next.js playground; `tools/review/` a label-review page;
