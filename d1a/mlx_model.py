@@ -1,12 +1,19 @@
 # Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables).
-"""Apple Silicon backend for the Qwen3.5 checkpoints: mlx-lm's Metal implementation of the hybrid backbone under Kev's
-own encoder and pointer head.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); Gemma 4 bases (sliding-window and KV-shared layers) and quantized MLX exports (export_mlx).
+"""Apple Silicon backend for the Qwen3.5 and Gemma 4 checkpoints: mlx-lm's Metal implementation of the backbone under
+D1A's own encoder and pointer head.
 
 MPS has no Gated DeltaNet kernels, so the PyTorch path runs reference code there (Kev-4B ~0.8 s per request). This module
 runs the same computation on Metal through mlx-lm and keeps everything Kev-specific unchanged: `d1a.model.encode` builds the
 tokens, `rows_of` splits them into one causal row per question (the hybrid form the torch path uses too), and the readout is
 the very same `PointerHead` (fp32, with the checkpoint's temperature) applied to the branch hidden states.
+
+Gemma 4 (attention-only, sliding layers with a 512-token window, KV-shared layers) runs the same row form. Its state cache
+holds a full KVCache per global layer and a RotatingKVCache per sliding layer (mlx-lm keeps the whole state in a sliding
+cache after a multi-token prefill and trims it to the last window - 1 keys when the branch rows arrive, so every branch
+token sees exactly the keys the packed torch mask gives it); the KV-shared layers read their source layer's keys, so
+they need no cache of their own. `export_mlx` writes a merged (optionally quantized) copy that loads without the base
+or the adapter (d1a.checkpoint: EXPORT_CONFIG).
 
 Same contract as `DecisionModel` for serving and scoring: encode / forward / probs / probs_and_prefix / probs_with_prefix /
 head / dtype. Selected by `LoadOptions(backend="mlx")` (or "auto" on Apple Silicon) in `d1a.checkpoint`; never by the
@@ -14,6 +21,7 @@ benchmark, whose reported numbers stay on the fp32 torch path. Parity against th
 tests/test_mlx.py (max |dp| and argmax flips on development records, prefix vs full pass, one question vs several).
 """
 import json
+import re
 from pathlib import Path
 
 import mlx.core as mx
@@ -21,9 +29,10 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from mlx.utils import tree_flatten
-from mlx_lm.models.cache import make_prompt_cache
+from mlx_lm.models.cache import KVCache, RotatingKVCache, make_prompt_cache
 from mlx_lm.utils import load_model
 
+from .checkpoint import weight_shards
 from .model import PointerHead, encode, probs_one, rows_of, rows_per_pass
 
 CACHE_LIMIT = 1 << 30   # MLX's buffer cache keeps a buffer per new request shape; Kev-4B on an M5, 50 requests: 1.0 GB cached vs 3.7 GB unbounded, same latency
@@ -60,21 +69,79 @@ def merge_lora(lm, adapter_dir, scale=1.0):
     return len(merged)
 
 
+UNUSED_SHARED_KV = re.compile(r"language_model\.model\.layers\.(\d+)\.self_attn\.(k_proj|v_proj|k_norm)\.weight")
+
+
+def load_mlx_lm(path):
+    """mlx-lm's load_model, strict except for one known gap: Gemma 4 checkpoints store key/value projections for the
+    KV-shared layers, which read an earlier layer's keys and never use their own (transformers does not build them, so no
+    adapter targets them either); mlx-lm does not build them and its strict load refuses the file. So the load is
+    non-strict and this checks what strict would: every parameter is in the file, and the only file tensors left over are
+    those projections of layers the model shares. -> (model, config)"""
+    path = Path(path)
+    lm, config = load_model(path, strict=False)
+    stored = {}
+    for f in weight_shards(path): stored.update(mx.load(str(f)))
+    stored = set(lm.sanitize(stored) if hasattr(lm, "sanitize") else stored)
+    params = {k for k, _ in tree_flatten(lm.parameters())}
+    text = getattr(getattr(lm, "language_model", None), "model", None)
+    shared = {i for i, src in enumerate(getattr(text, "previous_kvs", [])) if src != i}   # Gemma 4: layer i reads layer src's keys
+    missing = sorted(params - stored)
+    extra = sorted(k for k in stored - params if not ((m := UNUSED_SHARED_KV.fullmatch(k)) and int(m[1]) in shared))
+    if missing or extra:
+        raise ValueError(f"{path}: {len(missing)} parameters not in the weights (e.g. {missing[:2]}), {len(extra)} unexpected tensors (e.g. {extra[:2]})")
+    return lm, config
+
+
+def replicate(cache, n):
+    """n copies of a one-sequence attention cache as one batch-n cache of the same kind, scalar offset kept. Every branch
+    row continues the same state, so one offset serves the batch and mlx-lm's single-sequence masks (causal, and the
+    sliding window of a RotatingKVCache) apply unchanged; the arrays are copied, so the source prefix stays pristine."""
+    if isinstance(cache, RotatingKVCache):
+        out = RotatingKVCache(max_size=cache.max_size, keep=cache.keep)
+        k, v = cache._temporal_order(cache.keys), cache._temporal_order(cache.values)
+    elif type(cache) is KVCache:
+        out, (k, v) = KVCache(), cache.state
+    else:
+        raise TypeError(f"cannot replicate a {type(cache).__name__}")
+    out.keys, out.values = mx.repeat(k, n, axis=0), mx.repeat(v, n, axis=0)
+    out.offset = cache.offset
+    if isinstance(cache, RotatingKVCache): out._idx = k.shape[2]
+    return out
+
+
 class MLXDecisionModel:
     """Prefill-only scorer: hidden states from mlx-lm, logits from the shared torch PointerHead."""
-    backend, device, hybrid, option_isolation = "mlx", "mlx", True, False
+    backend, device, option_isolation = "mlx", "mlx", False
     prefix_min_tokens = 0   # d1a.serve caches the state prefix for every request: on Metal the branch-only pass is always the cheaper one
 
     def __init__(self, base_dir, pad_id, head_dim=256):
-        self.lm, _ = load_model(Path(base_dir))                       # weights as stored (bf16 for the Qwen3.5 bases)
+        """base_dir: an mlx-lm loadable directory: the base snapshot (weights as stored, bf16) or an export_mlx folder
+        (merged, optionally quantized; the `quantization` block of its config.json)."""
+        lm, config = load_mlx_lm(base_dir)
+        self._init(lm, pad_id, head_dim, config.get("quantization"))
+
+    @classmethod
+    def from_lm(cls, lm, pad_id, head_dim=256, quantization=None):
+        """Wrap an already built mlx-lm model (export_mlx, tests)."""
+        m = cls.__new__(cls); m._init(lm, pad_id, head_dim, quantization); return m
+
+    def _init(self, lm, pad_id, head_dim, quantization):
+        self.lm, self.quantization = lm, quantization
         mx.set_cache_limit(CACHE_LIMIT)
-        self.text = self.lm.language_model.model                      # Qwen3_5TextModel: embeddings -> layers -> final norm = `.model.last_hidden_state`
+        self.text = self.lm.language_model.model                      # Qwen3_5TextModel / Gemma4TextModel: embeddings -> layers -> final norm = `.model.last_hidden_state`
+        # hybrid (Qwen3.5): the state cache holds DeltaNet conv + recurrent states, replicated by mlx-lm's batch merge as
+        # before; attention-only (Gemma 4): plain and rotating KV caches, replicated with their scalar offset (replicate)
+        self.hybrid = not all(type(c) in (KVCache, RotatingKVCache) for c in make_prompt_cache(self.lm))
         self.pad_id = pad_id
-        self.head = PointerHead(self.text.embed_tokens.weight.shape[1], dp=head_dim).eval()
+        self.head = PointerHead(self.text.norm.weight.shape[0], dp=head_dim).eval()   # the final norm's width: a quantized embedding's weight is packed
 
     @property
     def dtype(self):
-        return str(self.text.embed_tokens.weight.dtype).removeprefix("mlx.core.")
+        """The activation dtype (the final norm's), prefixed by the weight format of a quantized export ("4bit-g64-bfloat16")."""
+        dtype = str(self.text.norm.weight.dtype).removeprefix("mlx.core.")
+        q = self.quantization
+        return f"{q['bits']}bit-g{q['group_size']}-{dtype}" if q else dtype
 
     def eval(self):
         self.head.eval(); return self
@@ -126,7 +193,7 @@ class MLXDecisionModel:
         chunk, out = rows_per_pass([r["ids"] for r in rows], enc["seg"].count(0)), []
         for start in range(0, len(rows), chunk):
             part = rows[start:start + chunk]
-            batch = [type(c).merge([c] * len(part)) for c in cache]      # merge copies the arrays: `cache` is not mutated
+            batch = [type(c).merge([c] * len(part)) if self.hybrid else replicate(c, len(part)) for c in cache]   # both copy the arrays: `cache` is not mutated
             h = self._hidden([r["ids"] for r in part], batch)
             out += [self._logits(h[i], r["decide"], r["opts"]) for i, r in enumerate(part)]
         return out
@@ -154,3 +221,48 @@ class MLXDecisionModel:
         """d1a.serve's batch call: one request at a time on Metal."""
         out = [probs_one(self, e, p, k) for e, p, k in zip(encs, prefixes, keep)]
         return [o[0] for o in out], [o[1] for o in out]
+
+
+TOKENIZER_FILES = ("tokenizer.json", "tokenizer_config.json", "special_tokens_map.json", "chat_template.jinja")
+
+
+def export_mlx(ck, out, bits=None, group_size=64, embeddings=True):
+    """Write `ck` (a LoRA checkpoint, d1a.checkpoint.Checkpoint) as an MLX export folder that d1a.checkpoint serves
+    through this backend without the base or the adapter: the adapter merged into the base in fp32 on the CPU stream
+    (merge_lora, the same bits the MLX backend computes at load), then optionally quantized (`bits` per weight, affine,
+    `group_size` per scale; `embeddings` also quantizes embed_tokens and the per-layer embeddings, Gemma 4's largest
+    tensors), saved by mlx-lm (config.json + model*.safetensors), with the pointer head in fp32 (head.safetensors), the
+    checkpoint's tokenizer files and d1a_config.json. -> the d1a_config dict."""
+    import shutil
+
+    import mlx.nn as nn
+    from mlx_lm.utils import quantize_model, save_config, save_model
+    from safetensors.torch import save_file
+
+    from .checkpoint import EXPORT_CONFIG, EXPORT_HEAD, export_config, resolve_run
+    from .model import layout, load_tokenizer, pad_id
+
+    if ck.export is not None: raise ValueError(f"{ck.path} is already an MLX export")
+    if ck.full: raise ValueError("export_mlx merges an adapter; full-weight checkpoints are not supported")
+    if ck.meta.option_isolation: raise ValueError("option_isolation needs the packed mask; not available on the MLX backend")
+    meta, out = ck.meta, Path(out)
+    tok = load_tokenizer(meta.base, revision=meta.base_revision)
+    lm, config = load_mlx_lm(resolve_run(f"{meta.base}@{meta.base_revision or ''}"))
+    merge_lora(lm, ck.path)
+    quantization = None
+    if bits:
+        keep = None if embeddings else (lambda path, module: not isinstance(module, nn.Embedding))
+        lm, config = quantize_model(lm, config, group_size, bits, quant_predicate=keep)
+        quantization = {**config["quantization"], "embeddings": bool(embeddings)}
+    norm = lm.language_model.model.norm.weight   # read before save_model donates the weights
+    hidden, dtype = norm.shape[0], str(norm.dtype).removeprefix("mlx.core.")
+    out.mkdir(parents=True, exist_ok=True)
+    save_model(out, lm, donate_model=True)
+    save_config(config, out / "config.json")
+    save_file({k: v.float().contiguous() for k, v in meta.head.items()}, str(out / EXPORT_HEAD))
+    for name in TOKENIZER_FILES:
+        if ck.file(name).exists(): shutil.copyfile(ck.file(name), out / name)
+    leading, delimiters, _ = layout(tok)
+    cfg = export_config(ck, leading, delimiters, pad_id(tok), hidden, quantization, dtype)
+    (out / EXPORT_CONFIG).write_text(json.dumps(cfg, indent=2) + "\n", encoding="utf-8")
+    return cfg
