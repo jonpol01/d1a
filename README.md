@@ -314,6 +314,29 @@ uv run python -m kev.train --suite evals/v7/decision-v7 --base google/gemma-4-E2
 uv run --extra serve python -m kev.serve --run JohnP1/kev-gemma4-e2b --port 8009
 ```
 
+The prototype against the Qwen3.5-0.8B base recipe, on the development partitions (one epoch against two, so not like for like):
+
+| Model | Base | Accuracy: Trained Sources (dev) | Accuracy: New Sources (dev) |
+|---|---|---|---|
+| Kev-Gemma4-E2B, 1 epoch | Gemma-4-E2B | 0.794 | 0.569 |
+| Kev-0.8B base recipe, 2 epochs (`q35-08b/00-trial-0`) | Qwen3.5-0.8B-Base | 0.817 | 0.622 |
+
+The API, the TypeSafe SDK and the playground don't change for a Gemma checkpoint, and it reads non-English text:
+
+```python
+from typesafe_sdk import Choice, TypeSafeClient
+
+client = TypeSafeClient(api_key="local", base_url="http://127.0.0.1:8009", model="kev-latest")
+r = client.system_one(
+    state="注文した靴が2週間遅れて届き、サイズも間違っていました。",
+    questions={"team": Choice(instructions="Which team should handle this?",
+                              criteria={"returns": None, "shipping": None, "billing": None})},
+)
+print(r.choices["team"].choice, r.choices["team"].probabilities)
+```
+
+To fine-tune on your own data, start from the checkpoint with `--init_from JohnP1/kev-gemma4-e2b --base google/gemma-4-E2B --base_revision d29ff6b45f081a49ee2733a859c9c9c2d95d1a6f`.
+
 The frozen suites were admitted under Qwen tokenizers, so `kev.train` re-admits their records under Gemma's tokenizer with the suite's own rule (70 of decision-v7's 12,576 records are dropped).
 
 ### Modal
