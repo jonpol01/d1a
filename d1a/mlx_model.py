@@ -130,6 +130,10 @@ class MLXDecisionModel:
         self.lm, self.quantization = lm, quantization
         mx.set_cache_limit(CACHE_LIMIT)
         self.text = self.lm.language_model.model                      # Qwen3_5TextModel / Gemma4TextModel: embeddings -> layers -> final norm = `.model.last_hidden_state`
+        # mlx-lm keeps some constants as lazy arrays outside the parameters (Gemma 4's proportional RoPE frequencies). A lazy
+        # array belongs to the stream of the thread that built it, and d1a.serve runs the model on its own thread ("There is
+        # no Stream(gpu, 1) in current thread"), so they are evaluated here, on the loading thread.
+        mx.eval([v for _, module in self.lm.named_modules() for v in module.values() if isinstance(v, mx.array)])   # `_freqs`: in the module's dict, not among its parameters
         # hybrid (Qwen3.5): the state cache holds DeltaNet conv + recurrent states, replicated by mlx-lm's batch merge as
         # before; attention-only (Gemma 4): plain and rotating KV caches, replicated with their scalar offset (replicate)
         self.hybrid = not all(type(c) in (KVCache, RotatingKVCache) for c in make_prompt_cache(self.lm))
