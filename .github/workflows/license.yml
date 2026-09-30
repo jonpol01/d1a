@@ -1,0 +1,16 @@
+name: license
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  license:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      # Apache-2.0 compliance and Kev provenance (see CONTRIBUTING.md); fetches Kev at the upstream base commit
+      - run: python scripts/check_license.py
