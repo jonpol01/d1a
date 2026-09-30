@@ -1,5 +1,5 @@
 # Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); serves d1a-latest and keeps kev-latest and jev-latest as compatibility names; model cards name D1A; serves MLX export folders; --device with a GPU usability probe; a startup self-check of the readout.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); serves d1a-latest and keeps kev-latest and jev-latest as compatibility names; model cards name D1A; serves MLX export folders; --device with a GPU usability probe; a startup self-check of the readout; recent batch latency in /v1/models.
 """FastAPI sidecar for the playground: loads one checkpoint, exposes prefill-only decisions.
 
 Run: uv run --extra serve python -m d1a.serve --run runs/d1a --port 8008
@@ -12,6 +12,7 @@ date preprocessing (api.with_date_facts). Backend and precision follow LoadOptio
 Silicon the hybrid Qwen3.5 checkpoints run on MLX by default, elsewhere on torch in bf16.
 """
 import argparse, asyncio, atexit, hmac, math, os, queue, random, subprocess, sys, threading, time, traceback, uuid
+from collections import deque
 from concurrent.futures import Future
 import torch
 from dataclasses import dataclass, field, replace
@@ -88,6 +89,7 @@ class Server:
     batches: int = 0
     batched_requests: int = 0
     release_date: str = field(default="")   # for the TypeSafe model card; resolved once (may ask the Hub)
+    batch_ms: deque = field(default_factory=lambda: deque(maxlen=512))   # model time of the most recent batches (latency_summary)
 
     def __post_init__(self):
         self.release_date = self.release_date or self.checkpoint.release_date()
@@ -159,6 +161,7 @@ class Server:
             cached = None; self.prefix_cache.clear(); self.prefix_cache.oom_retries += 1   # after the except: its traceback holds the failed pass's tensors
             empty_cache(self.device)
         sync(self.device); dt = round((time.time() - t) * 1000, 1)
+        self.batch_ms.append(dt)
         self.prefix_cache.store(keys, cached, prefixes)
         self.batches += 1; self.batched_requests += len(encs)
         return [([q.tolist() for q in p], {"tokens": len(enc["ids"]), "state_tokens": enc["seg"].count(0), "latency_ms": dt, "prefix_cache_hit": c is not None})
@@ -185,6 +188,13 @@ class Server:
     def _body(self, req, meta, ps, m):
         answers = to_answers(ps, meta)
         return {"model": req.model, "answers": answers, "usage": {"input_tokens": m["tokens"], "output_tokens": output_tokens(self.tok, answers)}, "latency_ms": m["latency_ms"]}
+
+
+def latency_summary(ms):
+    """Model time of recent batches: count, p50, p95 and max in ms (nearest rank), or None before the first batch."""
+    if not ms: return None
+    xs = sorted(ms); rank = lambda q: xs[min(len(xs) - 1, max(0, math.ceil(q * len(xs)) - 1))]
+    return {"recent": len(xs), "p50_ms": rank(0.5), "p95_ms": rank(0.95), "max_ms": xs[-1]}
 
 
 def prepare(req):
@@ -265,7 +275,7 @@ def models():
             "cuda_graphs": graphs.stats() if (graphs := getattr(s.model, "graphs", None)) else None,
             "prefix_cache": {"size": s.prefix_cache.size, "min_state_tokens": s.prefix_cache.min_tokens, "max_tokens": s.prefix_cache.max_tokens, "hits": s.prefix_cache.hits,
                              "misses": s.prefix_cache.misses, "cached_states": len(s.prefix_cache.entries), "oom_retries": s.prefix_cache.oom_retries},
-            "batches": {"count": s.batches, "requests": s.batched_requests, "queued": s.queue.qsize()}}
+            "batches": {"count": s.batches, "requests": s.batched_requests, "queued": s.queue.qsize(), "latency": latency_summary(s.batch_ms)}}
     return {"models": [{"name": name, **card} for name in MODEL_NAMES]}
 
 

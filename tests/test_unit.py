@@ -344,6 +344,7 @@ def test_out_of_memory_drops_the_prefix_cache_and_retries_once():
     s = Server(SimpleNamespace(release_date=lambda: "2026-01-01"), None, model, "cpu")
     try:
         assert s.probs(enc("abc"))[1]["prefix_cache_hit"] is False and len(s.prefix_cache.entries) == 1
+        assert len(s.batch_ms) == 1   # the batch's model time feeds /v1/models' latency
         model.fail, model.calls = "cached", 0
         ps, stats = s.probs(enc("abc"))                       # the hit fails, the retry runs it as a miss
         assert ps == [[0.5, 0.5]] and stats["prefix_cache_hit"] is False and model.calls == 2
@@ -2088,3 +2089,11 @@ def test_library_decide_matches_the_server(tiny_base, tmp_path, monkeypatch):
     try: want = server.answer(SystemOneRequest(model="d1a-latest", state="the customer is charged twice", questions=questions))["answers"]
     finally: server.close()
     assert got == want and set(got) == {"team", "angry"} and got["team"]["choice"] in ("billing", "shipping")
+
+
+def test_serve_latency_summary():
+    """/v1/models reports the recent batches' model time by nearest rank; nothing before the first batch."""
+    from d1a.serve import latency_summary
+    assert latency_summary([]) is None
+    assert latency_summary([float(i) for i in range(1, 101)]) == {"recent": 100, "p50_ms": 50.0, "p95_ms": 95.0, "max_ms": 100.0}
+    assert latency_summary([7.0]) == {"recent": 1, "p50_ms": 7.0, "p95_ms": 7.0, "max_ms": 7.0}
