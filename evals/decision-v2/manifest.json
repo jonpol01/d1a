@@ -1,0 +1,207 @@
+{
+  "version": 2,
+  "seed": 20260919,
+  "holdout_sources": [],
+  "eval_only": false,
+  "trainable_sources": [
+    "banking77",
+    "boolq",
+    "agnews",
+    "mnli",
+    "sst5",
+    "yelp",
+    "trec",
+    "dbpedia14",
+    "amazon",
+    "imdb",
+    "contrastive"
+  ],
+  "eval_only_sources": [],
+  "policy": {
+    "trainable": [
+      "banking77",
+      "boolq",
+      "agnews",
+      "mnli",
+      "sst5",
+      "yelp",
+      "trec",
+      "dbpedia14",
+      "amazon",
+      "imdb"
+    ],
+    "eval_only": [
+      "mmlu",
+      "emotion",
+      "tweet_offensive",
+      "qnli",
+      "paws",
+      "sciq"
+    ]
+  },
+  "dataset_revisions": {
+    "CogComp/trec": "65752bf53af25bc935a0dce92fb5b6c930728450",
+    "legacy-datasets/banking77": "f54121560de48f2852f90be299010d1d6dc612ec",
+    "stanfordnlp/imdb": "e6281661ce1c48d982bc483cf8a173c1bbeb5d31",
+    "fancyzhx/ag_news": "eb185aade064a813bc0b7f42de02595523103ca4",
+    "SetFit/amazon_reviews_multi_en": "ec73b665e4be0f567b69d39425355401cfe0d29b",
+    "fancyzhx/dbpedia_14": "9abd46cf7fc8b4c64290f26993c540b92aa145ac",
+    "google/boolq": "35b264d03638db9f4ce671b711558bf7ff0f80d5",
+    "SetFit/sst5": "e51bdcd8cd3a30da231967c1a249ba59361279a3",
+    "nyu-mll/multi_nli": "da70db2af9d09693783c3320c4249840212ee221",
+    "Yelp/yelp_review_full": "c1f9ee939b7d05667af864ee1cb066393154bf85"
+  },
+  "base_revisions": {
+    "Qwen/Qwen2.5-0.5B": "060db6499f32faf8b98477b0a26969ef7d8b9987",
+    "Qwen/Qwen3-0.6B-Base": "da87bfb608c14b7cf20ba1ce41287e8de496c0cd"
+  },
+  "context": {
+    "max_state": 384,
+    "max_branch": 1024,
+    "max_packed": 2048,
+    "truncate": false
+  },
+  "selection": "Normalized exact-state deduplication across partitions; common tokenizer context admission; no fuzzy decontamination or pretraining-contamination claim.",
+  "legacy_checkpoints": "Training/calibration overlap for pre-manifest checkpoints is unknown; exploratory only.",
+  "objective": "Negative macro-average clean development NLL, equal weight per task; raw probabilities.",
+  "excluded_training_states_from": null,
+  "files": {
+    "train.jsonl": {
+      "sha256": "06aa8aa3b50a093fd24eb6899ef83159da94c669f1d6b0b90d9b1a1c083451d9",
+      "records": 3432,
+      "questions": 4332
+    },
+    "calibration.jsonl": {
+      "sha256": "a41dc98443d1dd168e8d4325c37e462b4a863543f0f4bf009033fff528e8ef41",
+      "records": 448,
+      "questions": 568
+    },
+    "development.jsonl": {
+      "sha256": "10e5a72102b844a167ade94c60cf4556cc63950b2ded17fb87bf96028cb557f1",
+      "records": 1176,
+      "questions": 1440
+    },
+    "test.jsonl": {
+      "sha256": "cd7d129a84232e0c7a4e92b4840a6dfe14c8bb93c5d1904b526fa8c085325d2d",
+      "records": 1176,
+      "questions": 1440
+    }
+  },
+  "admission": {
+    "banking77": {
+      "considered": 500,
+      "accepted": 500
+    },
+    "boolq": {
+      "considered": 511,
+      "accepted": 500,
+      "duplicate_state": 9,
+      "context_rejected": 2
+    },
+    "agnews": {
+      "considered": 500,
+      "accepted": 500
+    },
+    "mnli": {
+      "considered": 504,
+      "accepted": 500,
+      "duplicate_state": 4
+    },
+    "sst5": {
+      "considered": 500,
+      "accepted": 500
+    },
+    "yelp": {
+      "considered": 500,
+      "accepted": 500
+    },
+    "trec": {
+      "considered": 500,
+      "accepted": 500
+    },
+    "dbpedia14": {
+      "considered": 500,
+      "accepted": 500
+    },
+    "amazon": {
+      "considered": 500,
+      "accepted": 500
+    },
+    "imdb": {
+      "considered": 500,
+      "accepted": 500
+    }
+  },
+  "excluded_training_state_hashes": 0,
+  "contrastive": {
+    "pairs_per_family_train": 60,
+    "pairs_per_family_eval": 40,
+    "eval_families": [
+      "return_window",
+      "spend_threshold",
+      "age_eligibility",
+      "quantity_limit"
+    ],
+    "trainable_families": [
+      "return_window",
+      "spend_threshold",
+      "age_eligibility",
+      "quantity_limit"
+    ],
+    "eval_only_families": [
+      "authorization",
+      "deadline"
+    ],
+    "train_report": {
+      "return_window": {
+        "pairs": 60,
+        "rejected": 0,
+        "reasons": {}
+      },
+      "spend_threshold": {
+        "pairs": 60,
+        "rejected": 0,
+        "reasons": {}
+      },
+      "age_eligibility": {
+        "pairs": 60,
+        "rejected": 0,
+        "reasons": {}
+      },
+      "quantity_limit": {
+        "pairs": 60,
+        "rejected": 0,
+        "reasons": {}
+      }
+    },
+    "eval_report": {
+      "return_window": {
+        "pairs": 40,
+        "rejected": 0,
+        "reasons": {}
+      },
+      "spend_threshold": {
+        "pairs": 40,
+        "rejected": 0,
+        "reasons": {}
+      },
+      "age_eligibility": {
+        "pairs": 40,
+        "rejected": 0,
+        "reasons": {}
+      },
+      "quantity_limit": {
+        "pairs": 40,
+        "rejected": 0,
+        "reasons": {}
+      }
+    },
+    "note": "labels from rule evaluators; ablation + invariance checks passed for every kept pair; no LLM"
+  },
+  "code_hashes": {
+    "data.py": "147ddbe271c07d14c4988651374c873d26f53e97a18d42ad492102ea7d4da7df",
+    "api.py": "cdb0602684d798ccd3fc2c86be622f2a8e7bcdeee64d07f95604c7d3fd4701ec",
+    "model.py": "1366fc0c08154d9bffca5b0bb293f6732344b8fb157377083039de303441a383",
+    "suite.py": "c4db818f83d7abaf4d8349a5b58f20f70439e04127b0989eb1f831be85578d87"
+  }
+}

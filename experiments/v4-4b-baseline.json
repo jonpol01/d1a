@@ -1,0 +1,4 @@
+[
+  {"base": "Qwen/Qwen3-4B-Base", "seed": 0, "epochs": 2, "batch": 4, "accum": 2, "dtype": "bf16", "checkpointing": 1, "p_none_pair": 0.25},
+  {"base": "Qwen/Qwen3-4B-Base", "seed": 1, "epochs": 2, "batch": 4, "accum": 2, "dtype": "bf16", "checkpointing": 1, "p_none_pair": 0.25}
+]

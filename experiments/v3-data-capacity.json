@@ -1,0 +1,10 @@
+[
+  {"base": "Qwen/Qwen3-0.6B-Base", "seed": 0, "epochs": 2, "batch": 8, "accum": 1, "dtype": "bf16",
+   "train_sources": "banking77,boolq,agnews,mnli,sst5,yelp,trec,dbpedia14,amazon,imdb,legacy_policy"},
+  {"base": "Qwen/Qwen3-0.6B-Base", "seed": 0, "epochs": 2, "batch": 8, "accum": 1, "dtype": "bf16",
+   "train_sources": "banking77,boolq,agnews,mnli,sst5,yelp,trec,dbpedia14,amazon,imdb,compositional"},
+  {"base": "Qwen/Qwen3-4B-Base", "seed": 0, "epochs": 2, "batch": 4, "accum": 2, "dtype": "bf16", "checkpointing": 1,
+   "train_sources": "banking77,boolq,agnews,mnli,sst5,yelp,trec,dbpedia14,amazon,imdb,legacy_policy"},
+  {"base": "Qwen/Qwen3-4B-Base", "seed": 0, "epochs": 2, "batch": 4, "accum": 2, "dtype": "bf16", "checkpointing": 1,
+   "train_sources": "banking77,boolq,agnews,mnli,sst5,yelp,trec,dbpedia14,amazon,imdb,compositional"}
+]

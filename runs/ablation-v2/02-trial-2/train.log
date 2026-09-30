@@ -1,0 +1,49 @@
+device=cuda trainable params=9.3M
+ablation: training on ['agnews', 'banking77', 'boolq', 'mnli', 'sst5', 'yelp'] -> 1800 records
+1800 training requests (holdout=[]), questions by type {'choice': 900, 'noul': 1200, 'score': 600}
+ep0 step 10/450 loss 7.138 kl 0.000 0.030s/rec
+ep0 step 20/450 loss 7.030 kl 0.000 0.024s/rec
+ep0 step 30/450 loss 8.007 kl 0.000 0.022s/rec
+ep0 step 40/450 loss 3.639 kl 0.000 0.021s/rec
+ep0 step 50/450 loss 2.168 kl 0.000 0.020s/rec
+ep0 step 60/450 loss 1.653 kl 0.000 0.020s/rec
+ep0 step 70/450 loss 1.505 kl 0.000 0.020s/rec
+ep0 step 80/450 loss 1.619 kl 0.000 0.019s/rec
+ep0 step 90/450 loss 1.739 kl 0.000 0.019s/rec
+ep0 step 100/450 loss 1.594 kl 0.000 0.019s/rec
+ep0 step 110/450 loss 1.531 kl 0.000 0.019s/rec
+ep0 step 120/450 loss 1.517 kl 0.000 0.018s/rec
+ep0 step 130/450 loss 1.343 kl 0.000 0.018s/rec
+ep0 step 140/450 loss 1.673 kl 0.000 0.018s/rec
+ep0 step 150/450 loss 1.636 kl 0.000 0.018s/rec
+ep0 step 160/450 loss 1.372 kl 0.000 0.018s/rec
+ep0 step 170/450 loss 1.373 kl 0.000 0.018s/rec
+ep0 step 180/450 loss 1.407 kl 0.000 0.018s/rec
+ep0 step 190/450 loss 1.544 kl 0.000 0.018s/rec
+ep0 step 200/450 loss 1.344 kl 0.000 0.018s/rec
+ep0 step 210/450 loss 1.330 kl 0.000 0.018s/rec
+ep0 step 220/450 loss 1.390 kl 0.000 0.018s/rec
+ep1 step 230/450 loss 1.122 kl 0.000 0.018s/rec
+ep1 step 240/450 loss 1.288 kl 0.000 0.018s/rec
+ep1 step 250/450 loss 1.211 kl 0.000 0.018s/rec
+ep1 step 260/450 loss 1.092 kl 0.000 0.018s/rec
+ep1 step 270/450 loss 1.188 kl 0.000 0.018s/rec
+ep1 step 280/450 loss 1.037 kl 0.000 0.017s/rec
+ep1 step 290/450 loss 1.180 kl 0.000 0.017s/rec
+ep1 step 300/450 loss 0.874 kl 0.000 0.017s/rec
+ep1 step 310/450 loss 1.253 kl 0.000 0.017s/rec
+ep1 step 320/450 loss 1.191 kl 0.000 0.017s/rec
+ep1 step 330/450 loss 1.297 kl 0.000 0.017s/rec
+ep1 step 340/450 loss 1.076 kl 0.000 0.017s/rec
+ep1 step 350/450 loss 1.247 kl 0.000 0.017s/rec
+ep1 step 360/450 loss 1.202 kl 0.000 0.017s/rec
+ep1 step 370/450 loss 1.173 kl 0.000 0.017s/rec
+ep1 step 380/450 loss 1.013 kl 0.000 0.017s/rec
+ep1 step 390/450 loss 0.993 kl 0.000 0.017s/rec
+ep1 step 400/450 loss 1.118 kl 0.000 0.017s/rec
+ep1 step 410/450 loss 1.243 kl 0.000 0.017s/rec
+ep1 step 420/450 loss 0.871 kl 0.000 0.017s/rec
+ep1 step 430/450 loss 0.941 kl 0.000 0.017s/rec
+ep1 step 440/450 loss 1.081 kl 0.000 0.017s/rec
+ep1 step 450/450 loss 1.162 kl 0.000 0.017s/rec
+saved /runs/ablation-v2/02-trial-2/checkpoint

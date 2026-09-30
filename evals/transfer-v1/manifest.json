@@ -1,0 +1,105 @@
+{
+  "version": 1,
+  "seed": 20260918,
+  "holdout_sources": [
+    "trec",
+    "dbpedia14",
+    "emotion",
+    "imdb",
+    "amazon",
+    "qnli",
+    "tweet_offensive",
+    "mmlu"
+  ],
+  "eval_only": true,
+  "dataset_revisions": {
+    "CogComp/trec": "65752bf53af25bc935a0dce92fb5b6c930728450",
+    "nyu-mll/glue": "bcdcba79d07bc864c1c254ccfcedcce55bcc9a8c",
+    "stanfordnlp/imdb": "e6281661ce1c48d982bc483cf8a173c1bbeb5d31",
+    "fancyzhx/dbpedia_14": "9abd46cf7fc8b4c64290f26993c540b92aa145ac",
+    "dair-ai/emotion": "cab853a1dbdf4c42c2b3ef2173804746df8825fe",
+    "cais/mmlu": "c30699e8356da336a370243923dbaf21066bb9fe",
+    "SetFit/amazon_reviews_multi_en": "ec73b665e4be0f567b69d39425355401cfe0d29b",
+    "cardiffnlp/tweet_eval": "b3a375baf0f409c77e6bc7aa35102b7b3534f8be"
+  },
+  "base_revisions": {
+    "Qwen/Qwen2.5-0.5B": "060db6499f32faf8b98477b0a26969ef7d8b9987",
+    "Qwen/Qwen3-0.6B-Base": "da87bfb608c14b7cf20ba1ce41287e8de496c0cd"
+  },
+  "context": {
+    "max_state": 384,
+    "max_branch": 1024,
+    "max_packed": 2048,
+    "truncate": false
+  },
+  "selection": "Normalized exact-state deduplication across partitions; common tokenizer context admission; no fuzzy decontamination or pretraining-contamination claim.",
+  "legacy_checkpoints": "Training/calibration overlap for pre-manifest checkpoints is unknown; exploratory only.",
+  "objective": "Negative macro-average clean development NLL, equal weight per task; raw probabilities.",
+  "excluded_training_states_from": "evals/decision-v1",
+  "files": {
+    "train.jsonl": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "records": 0,
+      "questions": 0
+    },
+    "calibration.jsonl": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "records": 0,
+      "questions": 0
+    },
+    "development.jsonl": {
+      "sha256": "c8a325cd2e04b4b4831e53a4e3165dbeed21d1db8c4b4520c942f38b936c0636",
+      "records": 784,
+      "questions": 784
+    },
+    "test.jsonl": {
+      "sha256": "63d51ef4d81320b24c8208ffa4b493800931c3989a1a3f1d3bc5d15f6d075be3",
+      "records": 784,
+      "questions": 784
+    }
+  },
+  "admission": {
+    "trec": {
+      "considered": 160,
+      "accepted": 160
+    },
+    "dbpedia14": {
+      "considered": 160,
+      "accepted": 160
+    },
+    "emotion": {
+      "considered": 160,
+      "accepted": 160
+    },
+    "imdb": {
+      "considered": 160,
+      "accepted": 160
+    },
+    "amazon": {
+      "considered": 160,
+      "accepted": 160
+    },
+    "qnli": {
+      "considered": 161,
+      "accepted": 160,
+      "duplicate_state": 1
+    },
+    "tweet_offensive": {
+      "considered": 162,
+      "accepted": 160,
+      "duplicate_state": 2
+    },
+    "mmlu": {
+      "considered": 162,
+      "accepted": 160,
+      "context_rejected": 2
+    }
+  },
+  "excluded_training_state_hashes": 1360,
+  "code_hashes": {
+    "data.py": "160b317c6a78378612865c4a7a0317d9d4492465cb2d90e7a907ca82e2ec2e39",
+    "api.py": "cdb0602684d798ccd3fc2c86be622f2a8e7bcdeee64d07f95604c7d3fd4701ec",
+    "model.py": "526a5f85a15d23beecc9c290e6f7865d2787ed2e5083c2c22adf514dbbe37b96",
+    "suite.py": "59372f2aa6d4480f066646dc005bffadc30afe030092e1fd574f5bb42ee5cb05"
+  }
+}

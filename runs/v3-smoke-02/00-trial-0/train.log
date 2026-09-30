@@ -1,0 +1,4 @@
+device=cuda trainable params=10.6M
+ablation: training on ['agnews', 'amazon', 'banking77', 'boolq', 'compositional', 'dbpedia14', 'imdb', 'mnli', 'sst5', 'trec', 'yelp'] -> 28 records
+28 training requests (holdout=[]), questions by type {'score': 6, 'choice': 18, 'noul': 10}
+saved /runs/v3-smoke-02/00-trial-0/checkpoint
