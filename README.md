@@ -2,29 +2,77 @@
 
 **A small decision model on Gemma 4.** One document and a set of typed questions in, a calibrated probability for every option out, in one forward pass. No text generation.
 
-> Early preview. The name is reserved while the first models are trained; code and weights land here next.
+> **Built on Kev.** D1A is built on [Kev](https://github.com/jaredpalmer/kev) by Jared Palmer, licensed under the [Apache License 2.0](LICENSE). The model code, trainer, benchmark, frozen evaluation suites and playground here started as a copy of Kev (upstream commit `0fe8fc9`); [docs/UPSTREAM.md](docs/UPSTREAM.md) lists every file taken from Kev and what D1A changed. D1A is an independent project. It is not affiliated with, sponsored by or endorsed by Jared Palmer or the Kev authors.
 
-## What it is
+## What It Is
 
 D1A answers yes/no, multiple-choice and rating questions about a piece of text, the way an API call answers a function: routing a support ticket, gating an agent's tool call, triaging an inbox, ranking passages, grading an LLM's answer. Every answer comes with probabilities, so your code can act on the confident cases and send the rest to a person.
 
-It is built on [Kev](https://github.com/jaredpalmer/kev) by Jared Palmer (Apache-2.0), with Gemma 4 E2B and E4B backbones, and speaks the same System One API, so the TypeSafe SDK works against it.
+A causal LM backbone with a LoRA adapter runs one prefill pass over the document and the questions under a block-causal mask (each question sees the document and itself, never the other questions). A small pointer head scores each option's end token against the question's `<decide>` token, and a softmax turns the scores into probabilities. D1A's backbones are Gemma 4 E2B and E4B; the Qwen bases Kev was built for still work. It speaks the TypeSafe System One API (`POST /v1/systemone`), so the TypeSafe SDK and existing clients work against it.
 
-## Status
+## What Works Today
 
 | | |
 |---|---|
-| Gemma 4 support for Kev | done: [jonpol01/kev](https://github.com/jonpol01/kev) |
-| Prototype checkpoint (Gemma 4 E2B, 1 epoch) | [JohnP1/kev-gemma4-e2b](https://huggingface.co/JohnP1/kev-gemma4-e2b) |
-| D1A E2B, E4B | training: [JohnP1/d1a-e2b](https://huggingface.co/JohnP1/d1a-e2b), [JohnP1/d1a-e4b](https://huggingface.co/JohnP1/d1a-e4b) |
+| Training and serving on Gemma 4 E2B / E4B (and Qwen) | yes, this repo |
+| Prototype checkpoint (Gemma 4 E2B, 1 epoch) | [JohnP1/kev-gemma4-e2b](https://huggingface.co/JohnP1/kev-gemma4-e2b) (trained before the rename, hence the name) |
+| D1A E2B, E4B | training; weights will land in [JohnP1/d1a-e2b](https://huggingface.co/JohnP1/d1a-e2b) and [JohnP1/d1a-e4b](https://huggingface.co/JohnP1/d1a-e4b) |
 | Live demos of nine use cases | [jonpol01/kev-usecases-poc](https://github.com/jonpol01/kev-usecases-poc) |
+| Thin clients (Python, JS) | [`clients/`](clients) |
 
-## Clients
+## Quick Start
 
-A minimal client for a running D1A (or Kev) server is in [`python/`](python) (`pip install d1a`) and [`js/`](js) (`npm install d1a`).
+You need Python 3.12 or 3.13 and [uv](https://docs.astral.sh/uv/).
+
+```bash
+git clone https://github.com/jonpol01/d1a.git && cd d1a
+uv sync --extra serve
+uv run --extra serve python -m d1a.serve --run JohnP1/kev-gemma4-e2b --port 8009
+```
+
+This serves the prototype checkpoint: CUDA if you have a GPU, PyTorch MPS on Apple Silicon (Gemma is attention-only, so it does not use the MLX backend). The first run downloads the adapter and the base model. `--run` also takes a local checkpoint directory or a Hub revision (`repo@rev`). Once the D1A weights are published, `--run JohnP1/d1a-e2b` serves them the same way.
+
+Send it a ticket:
+
+```bash
+curl -s localhost:8009/v1/systemone -H 'content-type: application/json' -d '{
+  "state": "Shoes arrived two weeks late and in the wrong size. Also I see two charges on my card.",
+  "model": "d1a-latest",
+  "questions": {
+    "team":   {"type": "choice", "instructions": "Which team should handle this?",
+               "criteria": {"returns": null, "shipping": null, "billing": null}},
+    "urgent": {"type": "noul", "instructions": "Does this need a reply today?"}
+  }
+}'
+```
+
+### The System One API
+
+`POST /v1/systemone` takes a `state` (the document), a `model` name and up to many `questions`, each a `noul` (yes/no), `choice` (one of named options) or `score` (an ordered scale). The response has one answer per question with a probability per option, plus token usage and latency. `GET /v1/models` lists the accepted model names with the serving details.
+
+Model names: the server answers any name and lists `d1a-latest`, `kev-latest` and `jev-latest`. `d1a-latest` is D1A's own name. `kev-latest` stays accepted so clients written against Kev keep working unchanged, and `jev-latest` is the TypeSafe SDK's default, so an unconfigured SDK client works too. Set `D1A_API_KEY` to require `Authorization: Bearer <key>`.
+
+With the TypeSafe SDK (included in `uv sync --extra serve`); it reads non-English text too:
 
 ```python
-from d1a import Client
+from typesafe_sdk import Choice, TypeSafeClient
+
+client = TypeSafeClient(api_key="local", base_url="http://127.0.0.1:8009", model="d1a-latest")
+r = client.system_one(
+    state="注文した靴が2週間遅れて届き、サイズも間違っていました。",
+    questions={"team": Choice(instructions="Which team should handle this?",
+                              criteria={"returns": None, "shipping": None, "billing": None})},
+)
+print(r.choices["team"].choice, r.choices["team"].probabilities)
+```
+
+### Clients
+
+Dependency-free clients for any System One server live in [`clients/python`](clients/python) (PyPI `d1a-client`, import `d1a_client`) and [`clients/js`](clients/js) (npm `d1a-client`):
+
+```python
+from d1a_client import Client
+
 client = Client("http://127.0.0.1:8009")
 answer = client.decide("Shoes arrived late and I was charged twice.",
                        {"team": {"type": "choice", "instructions": "Which team should handle this?",
@@ -32,6 +80,64 @@ answer = client.decide("Shoes arrived late and I was charged twice.",
 print(answer["answers"]["team"]["probabilities"])
 ```
 
+### Playground
+
+`playground/` is a Next.js app for trying questions by hand, comparing packed and separate answers, permuting options and playing chess against the model. Start a server on :8009, then `cd playground && npm install && npm run dev` (set `D1A_API` to point it elsewhere).
+
+## Training
+
+The D1A recipe on Gemma 4 E2B (one L4 is enough, about 15 GB peak with a bf16 backbone). `google/gemma-4-E2B` at commit `d29ff6b45f081a49ee2733a859c9c9c2d95d1a6f` is the trainer's default base, so `--base` can be left out:
+
+```bash
+uv run python -m d1a.train --suite evals/v7/decision-v7 \
+    --epochs 2 --lr 1e-4 --batch 4 --accum 2 --dtype bf16 --weights_dtype bf16 --checkpointing 1 \
+    --p_none_pair 0.25 --device cuda --out runs/d1a-e2b
+```
+
+For E4B pass `--base google/gemma-4-E4B --base_revision <sha>`. To fine-tune on your own data, start from a checkpoint: `--data mine.jsonl --init_from JohnP1/kev-gemma4-e2b`. `python -m d1a.train --help` lists every option.
+
+Score a checkpoint on the frozen suites:
+
+```bash
+uv run python -m d1a.benchmark --run runs/d1a-e2b/checkpoint --suite evals/v4/transfer-v4 --out runs/d1a-e2b-transfer
+```
+
+The frozen suites (`evals/`) come from Kev. Their manifests and small partitions are in git; partitions over about 10 MB are fetched from Kev's Hugging Face dataset [`jaredpalmer/kev-suites`](https://huggingface.co/datasets/jaredpalmer/kev-suites) on first use and verified by sha256. A few held-out suites name a private mirror and cannot be loaded without access to it. The suites were admitted under Qwen tokenizers, so the trainer re-admits their records under Gemma's tokenizer with each suite's own rule (70 of decision-v7's 12,576 records are dropped).
+
+Gemma's tokenizer has none of the Qwen delimiter tokens, so D1A uses Gemma's reserved `<unused0>`–`<unused4>` tokens and a leading `<bos>`. The sliding-window attention layers get their own copy of the packed mask, and only the text model is loaded.
+
+## Status and Limitations
+
+Early. The only trained Gemma checkpoint so far is the one-epoch prototype. On the development partitions of decision-v7 (one epoch against two, so not like for like):
+
+| Model | Base | Accuracy: Trained Sources (dev) | Accuracy: New Sources (dev) |
+|---|---|---|---|
+| Prototype (JohnP1/kev-gemma4-e2b), 1 epoch | Gemma-4-E2B | 0.794 | 0.569 |
+| Kev-0.8B base recipe, 2 epochs (reference) | Qwen3.5-0.8B-Base | 0.817 | 0.622 |
+
+The prototype is behind the Qwen reference on sources it never trained on; the two-epoch D1A runs are meant to close that gap, and no D1A number is claimed until they are measured.
+
+- On one Windows/WSL2 machine with an NVIDIA GPU, PyTorch's fused SDPA attention kernel corrupted memory during Gemma training. Loading the model with eager attention fixed it. If training crashes or produces NaNs there, try eager attention first.
+- Options within one question can still influence each other; asking questions together or separately gives the same probabilities, but option order is not irrelevant.
+- The benchmark numbers Kev publishes are for Kev's own Qwen checkpoints, not D1A.
+
+## Development
+
+```bash
+uv sync --extra serve
+uv run python -m pytest tests/test_unit.py tests/test_research.py tests/test_generators.py tests/test_conventions.py \
+    tests/test_documents_tools.py tests/test_hard_v1.py tests/test_devtools_v1.py tests/test_breadth_v1.py -q
+python scripts/check_license.py          # license and provenance rules (see CONTRIBUTING.md)
+```
+
+These suites need no model weights (the tokenizer, about 10 MB, is downloaded from the Hub). `tests/test_model.py`, `tests/test_mlx.py` and `tests/test_api.py` need weights or a running server. `modal_app.py` runs training and benchmarks on [Modal](https://modal.com) under your own workspace (app and volume names are `d1a-*`, set `D1A_APP_NAME` to change the app).
+
 ## License
 
-Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE). Gemma 4 is licensed by Google under Apache-2.0.
+Apache-2.0: see [LICENSE](LICENSE) and [NOTICE](NOTICE).
+
+- D1A's code comes from [Kev](https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0. Files taken from Kev and changed carry a notice at the top; [docs/UPSTREAM.md](docs/UPSTREAM.md) lists them and every change.
+- D1A's changes are Copyright 2026 John Soliva, Apache-2.0.
+- Gemma 4 is released by Google under Apache-2.0; the Qwen base models are also Apache-2.0. Training datasets have their own licenses.
+- Authors: Kev by Jared Palmer ([@jaredpalmer](https://github.com/jaredpalmer)), built with [Devin](https://devin.ai); D1A by John Soliva ([@jonpol01](https://github.com/jonpol01)).
+- Credits carried over from Kev: Kev thanks [Archer Hume](https://archerhume.com/posts/jevs-architecture-unmasked) for the architecture write-up, [TypeSafe](https://docs.typesafe.ai/api) for the API design, [Qwen](https://huggingface.co/Qwen/Qwen3.5-9B-Base) for the base models, [3x3xX3N0N](https://github.com/jaredpalmer/kev/issues/8) and [Radexito](https://github.com/Radexito) for their contributions. Related work: [Hydragen](https://arxiv.org/abs/2402.05099), [DeFT](https://arxiv.org/abs/2404.00242), [FIRST](https://arxiv.org/abs/2406.15657).
