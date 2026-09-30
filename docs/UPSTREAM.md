@@ -16,6 +16,9 @@ the Apache License 2.0. This file records where D1A's code came from and what D1
   `d1a/train.py` (Gemma's reserved `<unused0>`–`<unused4>` tokens as delimiters with a leading `<bos>`, a packed mask for
   the sliding-window layers, text-only loading, re-admission of suite records under Gemma's tokenizer) with tests in
   `tests/test_unit.py` and `tests/test_model.py`.
+- **Training robustness**: `d1a/train.py` writes resume points for LoRA runs too (`--save_every_steps`,
+  `--save_every_minutes`, `--resume`; Kev had them for full-weight runs only), and a non-finite loss or gradient skips
+  its micro-batch or step (up to `MAX_NONFINITE` in a row) instead of ending the run.
 - **MLX backend for Gemma 4 and MLX exports**: `d1a/mlx_model.py` runs Gemma 4 bases on Apple Silicon (row form on
   replicated plain and sliding-window caches, KV-shared layers) besides Kev's Qwen3.5 path, and writes merged, optionally
   quantized export folders (`scripts/export_mlx.py`) that `d1a/checkpoint.py` loads from `d1a_config.json` and

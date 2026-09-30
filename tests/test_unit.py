@@ -776,10 +776,10 @@ def test_master_adamw_is_adamw_on_fp32_masters():
 
 
 @pytest.mark.parametrize("weights", ["lora", "full"])
-def test_nonfinite_gradient_aborts_before_any_weight_moves(tiny_base, tmp_path, monkeypatch, weights):
-    """A finite loss whose gradient is NaN passes batch_loss's loss check; the optimizer step refuses it
-    (clip_grad_norm_(error_if_nonfinite=True) for a LoRA, MasterAdamW's global norm for full weights). No update runs and
-    no checkpoint is written."""
+def test_nonfinite_gradient_never_moves_a_weight(tiny_base, tmp_path, monkeypatch, weights):
+    """A finite loss whose gradient is NaN passes batch_loss's loss check, and no update runs with it: a LoRA run skips
+    that optimizer step (counted in training_metrics.json) and finishes; a full-weight run refuses it (MasterAdamW's
+    global norm) and writes no checkpoint."""
     from d1a import full_ft, train
 
     class NanGrad(torch.autograd.Function):   # the value passes through, its gradient becomes NaN
@@ -796,8 +796,13 @@ def test_nonfinite_gradient_aborts_before_any_weight_moves(tiny_base, tmp_path, 
     real_adamw, real_step = full_ft.adamw, torch.optim.AdamW.step
     monkeypatch.setattr(full_ft, "adamw", lambda *a, **k: (updates.append(1), real_adamw(*a, **k)))
     monkeypatch.setattr(torch.optim.AdamW, "step", lambda self, *a, **k: (updates.append(1), real_step(self, *a, **k))[1])
+    if weights == "lora":
+        from d1a.suite import read_json
+        train_tiny(tiny_base, tmp_path / weights, "--accum", "2", "--max_steps", "2", "--lora", "4", monkeypatch=monkeypatch)
+        assert updates == [1] and read_json(tmp_path / weights / "training_metrics.json")["nonfinite_skipped"] == {"steps": 1}   # step 1 skipped, step 2 ran
+        return
     with pytest.raises(RuntimeError, match="non-finite"):
-        train_tiny(tiny_base, tmp_path / weights, "--accum", "2", "--max_steps", "2", *(FULL if weights == "full" else ("--lora", "4")), monkeypatch=monkeypatch)
+        train_tiny(tiny_base, tmp_path / weights, "--accum", "2", "--max_steps", "2", *FULL, monkeypatch=monkeypatch)
     assert len(calls) >= 3 and updates == [] and not (tmp_path / weights / "head.pt").exists()
 
 
@@ -2031,3 +2036,39 @@ def test_serve_device_probe():
     """A device that cannot run a kernel is reported unusable instead of crashing the server process."""
     from d1a.serve import usable
     assert usable("cpu") and not usable("no-such-device")
+
+
+def test_lora_resume_is_bit_identical(tiny_base, tmp_path):
+    """A LoRA run stopped after step 3 (resume point: the adapter and head tensors, AdamW moments, scheduler, RNG, data
+    position) and continued with --resume 1 ends with the same bits as an uninterrupted run, across an epoch boundary."""
+    from safetensors.torch import load_file
+    from d1a.checkpoint import read_meta
+    args = ["--base", str(tiny_base / "base"), "--data", str(tiny_base / "data.jsonl"), "--device", "cpu", "--batch", "2", "--accum", "2",
+            "--lr", "1e-3", "--epochs", "2", "--lora", "4"]
+    _run_train(args, tmp_path / "whole")
+    _run_train([*args, "--save_every_steps", "3", "--stop_after", "3"], tmp_path / "split")
+    assert (tmp_path / "split/resume/latest.json").exists() and not (tmp_path / "split/adapter_model.safetensors").exists()
+    _run_train([*args, "--resume", "1"], tmp_path / "split")
+    a, b = load_file(tmp_path / "whole/adapter_model.safetensors"), load_file(tmp_path / "split/adapter_model.safetensors")
+    head_a, head_b = read_meta(tmp_path / "whole").head, read_meta(tmp_path / "split").head
+    assert all(torch.equal(a[k], b[k]) for k in a) and all(torch.equal(head_a[k], head_b[k]) for k in head_a)
+    assert not (tmp_path / "split/resume").exists()
+
+
+def test_nonfinite_loss_skips_its_batch(tiny_base, tmp_path, monkeypatch):
+    """A non-finite loss skips its micro-batch and the run finishes (counted in training_metrics.json); MAX_NONFINITE in a
+    row end it. (A NaN gradient from a finite loss: test_nonfinite_gradient_never_moves_a_weight.)"""
+    from d1a import train
+    from d1a.suite import read_json
+    real, calls = train.batch_loss, []
+    def flaky(bad):
+        def batch_loss(*args, **kw):
+            calls.append(1)
+            if len(calls) in bad: raise train.NonFinite("non-finite training loss")
+            return real(*args, **kw)
+        return batch_loss
+    monkeypatch.setattr(train, "batch_loss", flaky({2}))
+    train_tiny(tiny_base, tmp_path / "one", "--lora", "4", monkeypatch=monkeypatch)
+    assert read_json(tmp_path / "one/training_metrics.json")["nonfinite_skipped"] == {"microbatches": 1}
+    calls.clear(); monkeypatch.setattr(train, "batch_loss", flaky(set(range(2, 2 + train.MAX_NONFINITE))))
+    with pytest.raises(train.NonFinite): train_tiny(tiny_base, tmp_path / "many", "--lora", "4", monkeypatch=monkeypatch)
