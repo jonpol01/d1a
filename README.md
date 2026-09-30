@@ -4,6 +4,16 @@
 
 > **Built on Kev.** D1A is built on [Kev](https://github.com/jaredpalmer/kev) by Jared Palmer, licensed under the [Apache License 2.0](LICENSE). The model code, trainer, benchmark, frozen evaluation suites and playground here started as a copy of Kev (upstream commit `0fe8fc9`); [docs/UPSTREAM.md](docs/UPSTREAM.md) lists every file taken from Kev and what D1A changed. D1A is an independent project. It is not affiliated with, sponsored by or endorsed by Jared Palmer or the Kev authors.
 
+## See It Running
+
+Nine use cases, each answered by D1A-E2B in one forward pass (recorded live from the [playground](https://github.com/jonpol01/d1a-playground) on an M4 Mac mini, MLX 8-bit):
+
+<table>
+<tr><td align="center" width="33%"><img src="https://raw.githubusercontent.com/jonpol01/d1a-playground/129a15d464f6731dcbeaf390d0cf54f3126cd643/docs/gifs/en/routing.gif" alt="Model routing demo running on D1A" width="100%"><br><b>1. Model routing</b></td><td align="center" width="33%"><img src="https://raw.githubusercontent.com/jonpol01/d1a-playground/129a15d464f6731dcbeaf390d0cf54f3126cd643/docs/gifs/en/guardrails.gif" alt="Guardrails demo running on D1A" width="100%"><br><b>2. Guardrails</b></td><td align="center" width="33%"><img src="https://raw.githubusercontent.com/jonpol01/d1a-playground/129a15d464f6731dcbeaf390d0cf54f3126cd643/docs/gifs/en/tools.gif" alt="Tool-call gating demo running on D1A" width="100%"><br><b>3. Tool-call gating</b></td></tr>
+<tr><td align="center" width="33%"><img src="https://raw.githubusercontent.com/jonpol01/d1a-playground/129a15d464f6731dcbeaf390d0cf54f3126cd643/docs/gifs/en/inbox.gif" alt="Inbox triage demo running on D1A" width="100%"><br><b>4. Inbox triage</b></td><td align="center" width="33%"><img src="https://raw.githubusercontent.com/jonpol01/d1a-playground/129a15d464f6731dcbeaf390d0cf54f3126cd643/docs/gifs/en/rerank.gif" alt="Reranking demo running on D1A" width="100%"><br><b>5. Reranking</b></td><td align="center" width="33%"><img src="https://raw.githubusercontent.com/jonpol01/d1a-playground/129a15d464f6731dcbeaf390d0cf54f3126cd643/docs/gifs/en/evals.gif" alt="LLM evals demo running on D1A" width="100%"><br><b>6. LLM evals</b></td></tr>
+<tr><td align="center" width="33%"><img src="https://raw.githubusercontent.com/jonpol01/d1a-playground/129a15d464f6731dcbeaf390d0cf54f3126cd643/docs/gifs/en/labeling.gif" alt="Bulk labeling demo running on D1A" width="100%"><br><b>7. Bulk labeling</b></td><td align="center" width="33%"><img src="https://raw.githubusercontent.com/jonpol01/d1a-playground/129a15d464f6731dcbeaf390d0cf54f3126cd643/docs/gifs/en/control.gif" alt="Real-time control demo running on D1A" width="100%"><br><b>8. Real-time control</b></td><td align="center" width="33%"><img src="https://raw.githubusercontent.com/jonpol01/d1a-playground/129a15d464f6731dcbeaf390d0cf54f3126cd643/docs/gifs/en/gate.gif" alt="Confidence gate demo running on D1A" width="100%"><br><b>9. Confidence gate</b></td></tr>
+</table>
+
 ## What It Is
 
 D1A answers yes/no, multiple-choice and rating questions about a piece of text, the way an API call answers a function: routing a support ticket, gating an agent's tool call, triaging an inbox, ranking passages, grading an LLM's answer. Every answer comes with probabilities, so your code can act on the confident cases and send the rest to a person.
@@ -15,9 +25,10 @@ A causal LM backbone with a LoRA adapter runs one prefill pass over the document
 | | |
 |---|---|
 | Training and serving on Gemma 4 E2B / E4B (and Qwen) | yes, this repo |
-| Prototype checkpoint (Gemma 4 E2B, 1 epoch) | [JohnP1/kev-gemma4-e2b](https://huggingface.co/JohnP1/kev-gemma4-e2b) (trained before the rename, hence the name) |
-| D1A E2B, E4B | training; weights will land in [JohnP1/d1a-e2b](https://huggingface.co/JohnP1/d1a-e2b) and [JohnP1/d1a-e4b](https://huggingface.co/JohnP1/d1a-e4b) |
-| Live demos of nine use cases | [jonpol01/kev-usecases-poc](https://github.com/jonpol01/kev-usecases-poc) |
+| D1A-E2B (Gemma 4 E2B, 2 epochs) | [JohnP1/d1a-e2b](https://huggingface.co/JohnP1/d1a-e2b) (tag `v0.2-2epoch`; `v0.1-1epoch` keeps the first version) |
+| D1A-E2B for Apple Silicon (MLX, 8-bit) | [JohnP1/d1a-e2b-mlx-q8](https://huggingface.co/JohnP1/d1a-e2b-mlx-q8) (4.2 GB in memory) |
+| D1A-E4B | training; weights will land in [JohnP1/d1a-e4b](https://huggingface.co/JohnP1/d1a-e4b) |
+| Live demos of nine use cases | [jonpol01/d1a-playground](https://github.com/jonpol01/d1a-playground) |
 | Thin clients (Python, JS) | [`clients/`](clients) |
 
 ## Quick Start
@@ -27,7 +38,7 @@ You need Python 3.12 or 3.13 and [uv](https://docs.astral.sh/uv/).
 ```bash
 git clone https://github.com/jonpol01/d1a.git && cd d1a
 uv sync --extra serve
-uv run --extra serve python -m d1a.serve --run JohnP1/kev-gemma4-e2b --port 8009
+uv run --extra serve python -m d1a.serve --run JohnP1/d1a-e2b --port 8009
 ```
 
 This serves the prototype checkpoint: CUDA if you have a GPU, MLX on Apple Silicon (`D1A_BACKEND=torch` for PyTorch MPS; see [Apple Silicon (MLX)](#apple-silicon-mlx)). The first run downloads the adapter and the base model. `--run` also takes a local checkpoint directory or a Hub revision (`repo@rev`). Once the D1A weights are published, `--run JohnP1/d1a-e2b` serves them the same way.
@@ -114,7 +125,7 @@ uv run python -m d1a.train --suite evals/v7/decision-v7 \
     --p_none_pair 0.25 --device cuda --out runs/d1a-e2b
 ```
 
-For E4B pass `--base google/gemma-4-E4B --base_revision <sha>`. To fine-tune on your own data, start from a checkpoint: `--data mine.jsonl --init_from JohnP1/kev-gemma4-e2b`. `python -m d1a.train --help` lists every option.
+For E4B pass `--base google/gemma-4-E4B --base_revision <sha>`. To fine-tune on your own data, start from a checkpoint: `--data mine.jsonl --init_from JohnP1/d1a-e2b`. `python -m d1a.train --help` lists every option.
 
 Score a checkpoint on the frozen suites:
 
@@ -128,14 +139,15 @@ Gemma's tokenizer has none of the Qwen delimiter tokens, so D1A uses Gemma's res
 
 ## Status and Limitations
 
-Early. The only trained Gemma checkpoint so far is the one-epoch prototype. On the development partitions of decision-v7 (one epoch against two, so not like for like):
+Early. On the development partitions of decision-v7:
 
 | Model | Base | Accuracy: Trained Sources (dev) | Accuracy: New Sources (dev) |
 |---|---|---|---|
-| Prototype (JohnP1/kev-gemma4-e2b), 1 epoch | Gemma-4-E2B | 0.794 | 0.569 |
+| D1A-E2B v0.2 (JohnP1/d1a-e2b), 2 epochs | Gemma-4-E2B | 0.824 | 0.602 |
+| D1A-E2B v0.1, 1 epoch | Gemma-4-E2B | 0.794 | 0.569 |
 | Kev-0.8B base recipe, 2 epochs (reference) | Qwen3.5-0.8B-Base | 0.817 | 0.622 |
 
-The prototype is behind the Qwen reference on sources it never trained on; the two-epoch D1A runs are meant to close that gap, and no D1A number is claimed until they are measured.
+Two epochs put D1A-E2B ahead of the Qwen reference on sources it trained on and still behind it on new ones; its calibration error also rose (ECE 0.040 to 0.057), which is being looked at. E4B is training.
 
 - On one Windows/WSL2 machine with an NVIDIA GPU, PyTorch's fused SDPA attention kernel corrupted memory during Gemma training. Loading the model with eager attention fixed it. If training crashes or produces NaNs there, try eager attention first.
 - Options within one question can still influence each other; asking questions together or separately gives the same probabilities, but option order is not irrelevant.
