@@ -1,0 +1,52 @@
+# Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
+# Changes for D1A Copyright 2026 John Soliva: reduced to local outputs and Hub-mirrored suite partitions after Kev's research runs were pruned.
+# python
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+*.egg-info/
+
+# local outputs: training runs, benchmark reads, checkpoints
+runs/
+
+# logs
+*.log
+
+# os
+.DS_Store
+
+# frozen-suite partitions that are not in git: large public ones live on the Hub mirror (jaredpalmer/kev-suites, pinned in
+# d1a/suite.py), private ones only in their manifest's own mirror; manifests (with sha256) stay in git and load_split
+# fetches + verifies the rest on first use
+evals/v5/decision-v5/train.jsonl
+evals/v6/decision-v6/train.jsonl
+evals/v4/decision-v4/train.jsonl
+evals/public-pool-v5/train.jsonl
+evals/public-pool-v6/train.jsonl
+evals/public-pool-v4/train.jsonl
+evals/v7/decision-v7/train.jsonl
+evals/v8/decision-v8/train.jsonl
+evals/round3/decision-r3/train.jsonl
+evals/round4/longstate-v1/train.jsonl
+evals/round4/distill-9b-v1/soft.jsonl
+evals/round4/distill-9b-v1/hard.jsonl
+evals/round5/longstate-v2/train.jsonl
+evals/round5/combined-v1/soft.jsonl
+evals/round5/combined-v1/hard.jsonl
+evals/documents-v1/train.jsonl
+evals/documents-v2/*.jsonl
+evals/breadth-v1/*.jsonl
+evals/longdoc-v1/*.jsonl
+evals/sft-v1/*.jsonl
+evals/round6/b1v2/train.jsonl
+evals/hard-v1/train.jsonl
+evals/tasksource-heldout-v1/*.jsonl
+evals/sft-v2/*.jsonl
+evals/sft-v2-r21/*.jsonl
+evals/sft-v2-r22/*.jsonl
+evals/sft-v2-r25/*.jsonl
+evals/sft-v2-r26/*.jsonl
+evals/ood-v2/*.jsonl
+evals/agents-ood-v1/*.jsonl
+evals/guardrails-ood-v1/*.jsonl

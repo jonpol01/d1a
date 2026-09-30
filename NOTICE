@@ -2,5 +2,15 @@ D1A
 Copyright 2026 John Soliva (jonpol01)
 
 This product includes software from Kev (https://github.com/jaredpalmer/kev),
-Copyright Jared Palmer, licensed under the Apache License, Version 2.0.
+Copyright 2026 Jared Palmer, licensed under the Apache License, Version 2.0.
+D1A starts from Kev's upstream commit 0fe8fc9; docs/UPSTREAM.md lists the files
+taken from Kev and the changes D1A made to them. Modifications Copyright 2026
+John Soliva, also licensed under the Apache License, Version 2.0.
+
+D1A is an independent project and is not affiliated with or endorsed by the
+Kev authors.
+
 D1A models are built on Google's Gemma 4 models (Apache License, Version 2.0).
+The frozen evaluation suites in evals/ come from Kev; their large partitions are
+downloaded from the Hugging Face dataset jaredpalmer/kev-suites. The datasets
+they are drawn from keep their own licenses.
