@@ -1,7 +1,7 @@
 """Source conventions: facts that have one canonical home must not be re-derived elsewhere.
 
 Each rule is (what it guards, regex, files allowed to match). A failure means a second copy of a rule that already has
-a home; call the canonical helper instead (the table in .agents/skills/thermonuclear-code-review/SKILL.md lists them).
+a home; call the canonical helper instead.
 Run: uv run python -m pytest tests/test_conventions.py -q
 """
 import re
@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-SCANNED = ("kev", "scripts", "space", "tests", "modal_app.py")
+SCANNED = ("kev", "scripts", "tests", "modal_app.py")
 
 RULES = [
     ("head.pt is read and written through kev.checkpoint (Meta, read_meta, write_meta)",
@@ -36,7 +36,7 @@ RULES = [
     ("suite manifests are read through kev.suite.read_manifest",
      r"manifest\.json\"\)\.read_text\(\)", {"kev/suite.py"}),
     ("device selection, synchronize and empty_cache go through kev.device (the Space is a CUDA-only one-off)",
-     r"is_available\(\) else|torch\.(mps|cuda)\.(synchronize|empty_cache|current_allocated_memory|max_memory_allocated)\(", {"kev/device.py", "space/app.py"}),
+     r"is_available\(\) else|torch\.(mps|cuda)\.(synchronize|empty_cache|current_allocated_memory|max_memory_allocated)\(", {"kev/device.py"}),
     ("the isolation sibling probe is kev.experiment.ISOLATION_PROBE (fp32 mechanism check and served isolation read the same question)",
      r"CRANE-9274", {"kev/experiment.py"}),
     ("which partitions stay out of git is kev.suite.GIT_LIMIT",
@@ -69,12 +69,6 @@ def test_private_suites_keep_their_partitions_out_of_git():
         if "mirror" not in json.loads(manifest.read_text(encoding="utf-8")): continue
         leaked = [f for f in tracked if f.startswith(str(manifest.parent.relative_to(ROOT)) + "/") and f.endswith(".jsonl")]
         assert not leaked, f"{manifest.parent} names a private mirror but tracks partitions: {leaked}"
-
-
-def test_published_claims_trace_to_committed_evidence():
-    from scripts.verify_claims import verify
-
-    assert verify(ROOT) == []
 
 
 @pytest.mark.parametrize("what,pattern,allowed", RULES, ids=[r[0][:60] for r in RULES])

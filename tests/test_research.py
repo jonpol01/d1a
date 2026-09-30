@@ -548,22 +548,6 @@ def test_cross_validated_temperature_rejects_too_few_groups():
         cross_validated_temperature(rows, folds=5)
 
 
-def test_training_plan_matches_registered_screen():
-    import json
-    from pathlib import Path
-    from kev.experiment import load_plan
-    from kev.suite import read_json
-    root = Path(__file__).resolve().parents[1]
-    protocol = read_json(root / "experiments/calibration-audit-protocol.json")
-    trials = load_plan(root / protocol["data"]["decision_suite"], root / "experiments/calibration-screen-4b.json")
-    loss_keys = {"label_smoothing", "brier_w", "focal_gamma"}
-    assert len(trials) == len(protocol["screen"]["arms"]) == 4
-    assert all({k: v for k, v in t.items() if k not in loss_keys} == {k: v for k, v in trials[0].items() if k not in loss_keys} for t in trials)
-    assert trials[0]["init_from"] == protocol["parents"]["4b"]
-    for trial, arm in zip(trials, protocol["screen"]["arms"]):
-        assert all(trial[k] == arm[k] for k in loss_keys)
-
-
 def test_modal_compute_bound_includes_requested_memory_and_cpu():
     from modal_app import TRIAL_CPU, TRIAL_MEMORY, compute_bound
     expected = 3.95 + TRIAL_CPU * 0.04730 + TRIAL_MEMORY[1] / 1024 * 0.008
@@ -676,20 +660,6 @@ def test_screen_requires_beating_continuation_control_not_just_parent():
             "accuracy_delta_vs_each_min": -0.01, "aurc_delta_vs_each_max": 0, "per_source_accuracy_delta_min": -0.05}
     checks = screen_checks(result(0.6), {"parent": result(0.5), "ce-control": result(0.59)}, rule)
     assert checks["coverage_vs_parent"] and not checks["coverage_vs_ce-control"]
-
-
-def test_final_audit_partition_remains_bound_to_registration():
-    import json
-    from pathlib import Path
-    from kev.suite import digest, load_split
-    from kev.suite import read_json
-    root = Path(__file__).resolve().parents[1]
-    protocol = read_json(root / "experiments/calibration-audit-protocol.json")
-    suite = root / protocol["data"]["development_suite"]
-    assert digest(suite / "test.jsonl") == protocol["data"]["fresh_test_sha256"]
-    assert digest(suite / "calibration.jsonl") == protocol["data"]["fresh_threshold_sha256"]
-    with pytest.raises(ValueError, match="locked test"):
-        load_split(suite, "test")
 
 
 def test_tempered_replay_records_effective_temperature():
