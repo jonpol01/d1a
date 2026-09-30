@@ -1,0 +1,6 @@
+[
+  {"base": "Qwen/Qwen3-8B-Base", "base_revision": "49e3418fbbbca6ecbdf9608b4d22e5a407081db4", "seed": 0, "epochs": 2, "batch": 2, "accum": 4, "dtype": "bf16", "checkpointing": 1,
+   "train_sources": "banking77,boolq,agnews,mnli,sst5,yelp,trec,dbpedia14,amazon,imdb,legacy_policy"},
+  {"base": "Qwen/Qwen3-8B-Base", "base_revision": "49e3418fbbbca6ecbdf9608b4d22e5a407081db4", "seed": 0, "epochs": 2, "batch": 2, "accum": 4, "dtype": "bf16", "checkpointing": 1,
+   "train_sources": "banking77,boolq,agnews,mnli,sst5,yelp,trec,dbpedia14,amazon,imdb,compositional"}
+]

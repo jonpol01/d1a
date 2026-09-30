@@ -1,0 +1,6 @@
+[
+  {"base": "Qwen/Qwen3-4B-Base", "seed": 0, "epochs": 2, "batch": 4, "accum": 2, "dtype": "bf16", "checkpointing": 1, "p_none_pair": 0.25, "lora": 8, "lora_targets": "attn", "lr": 0.0001},
+  {"base": "Qwen/Qwen3-4B-Base", "seed": 0, "epochs": 2, "batch": 4, "accum": 2, "dtype": "bf16", "checkpointing": 1, "p_none_pair": 0.25, "lr": 0.00005},
+  {"base": "Qwen/Qwen3-4B-Base", "seed": 0, "epochs": 1, "batch": 4, "accum": 2, "dtype": "bf16", "checkpointing": 1, "p_none_pair": 0.25, "lora_targets": "attn"},
+  {"base": "Qwen/Qwen3-4B-Base", "seed": 0, "epochs": 2, "batch": 4, "accum": 2, "dtype": "bf16", "checkpointing": 1, "p_none_pair": 0.25, "lora": 4, "lora_targets": "qv", "lr": 0.0002}
+]

@@ -1,0 +1,145 @@
+{
+  "version": 2,
+  "seed": 20260919,
+  "holdout_sources": [],
+  "eval_only": false,
+  "trainable_sources": [
+    "banking77",
+    "boolq",
+    "agnews",
+    "mnli",
+    "sst5",
+    "yelp",
+    "trec",
+    "dbpedia14",
+    "amazon",
+    "imdb"
+  ],
+  "eval_only_sources": [],
+  "policy": {
+    "trainable": [
+      "banking77",
+      "boolq",
+      "agnews",
+      "mnli",
+      "sst5",
+      "yelp",
+      "trec",
+      "dbpedia14",
+      "amazon",
+      "imdb"
+    ],
+    "eval_only": [
+      "mmlu",
+      "emotion",
+      "tweet_offensive",
+      "qnli",
+      "paws",
+      "sciq"
+    ]
+  },
+  "dataset_revisions": {
+    "legacy-datasets/banking77": "f54121560de48f2852f90be299010d1d6dc612ec",
+    "fancyzhx/ag_news": "eb185aade064a813bc0b7f42de02595523103ca4",
+    "google/boolq": "35b264d03638db9f4ce671b711558bf7ff0f80d5",
+    "nyu-mll/multi_nli": "da70db2af9d09693783c3320c4249840212ee221",
+    "stanfordnlp/imdb": "e6281661ce1c48d982bc483cf8a173c1bbeb5d31",
+    "fancyzhx/dbpedia_14": "9abd46cf7fc8b4c64290f26993c540b92aa145ac",
+    "SetFit/amazon_reviews_multi_en": "ec73b665e4be0f567b69d39425355401cfe0d29b",
+    "CogComp/trec": "65752bf53af25bc935a0dce92fb5b6c930728450",
+    "SetFit/sst5": "e51bdcd8cd3a30da231967c1a249ba59361279a3",
+    "Yelp/yelp_review_full": "c1f9ee939b7d05667af864ee1cb066393154bf85"
+  },
+  "base_revisions": {
+    "Qwen/Qwen2.5-0.5B": "060db6499f32faf8b98477b0a26969ef7d8b9987",
+    "Qwen/Qwen3-0.6B-Base": "da87bfb608c14b7cf20ba1ce41287e8de496c0cd"
+  },
+  "context": {
+    "max_state": 384,
+    "max_branch": 1024,
+    "max_packed": 2048,
+    "truncate": false
+  },
+  "selection": "Normalized exact-state deduplication across partitions; common tokenizer context admission; no fuzzy decontamination or pretraining-contamination claim.",
+  "legacy_checkpoints": "Training/calibration overlap for pre-manifest checkpoints is unknown; exploratory only.",
+  "objective": "Negative macro-average clean development NLL, equal weight per task; raw probabilities.",
+  "excluded_training_states_from": null,
+  "files": {
+    "train.jsonl": {
+      "sha256": "0ea9aebb770439bb10cf5bdd469616eb39804695ff5b37d40280ece1ddfa40b4",
+      "records": 20000,
+      "questions": 26000
+    },
+    "calibration.jsonl": {
+      "sha256": "f991de65c76db4eace300269daed4dda373a6795a41e2215ee5f38470414891a",
+      "records": 600,
+      "questions": 780
+    },
+    "development.jsonl": {
+      "sha256": "1542b2def96f9c86510ea2976bbc68f878acef0c36aff4cd6ed19868c2d2349f",
+      "records": 980,
+      "questions": 1244
+    },
+    "test.jsonl": {
+      "sha256": "34b527ea42bfcf23c321fac642118e50434c54fa5756a208dc7dccfa98586613",
+      "records": 980,
+      "questions": 1244
+    }
+  },
+  "admission": {
+    "banking77": {
+      "considered": 2220,
+      "accepted": 2220
+    },
+    "boolq": {
+      "considered": 2382,
+      "accepted": 2220,
+      "context_rejected": 16,
+      "duplicate_state": 146
+    },
+    "agnews": {
+      "considered": 2220,
+      "accepted": 2220
+    },
+    "mnli": {
+      "considered": 2235,
+      "accepted": 2220,
+      "duplicate_state": 15
+    },
+    "sst5": {
+      "considered": 2222,
+      "accepted": 2220,
+      "duplicate_state": 2
+    },
+    "yelp": {
+      "considered": 2224,
+      "accepted": 2220,
+      "context_rejected": 4
+    },
+    "trec": {
+      "considered": 2249,
+      "accepted": 2220,
+      "duplicate_state": 29
+    },
+    "dbpedia14": {
+      "considered": 2220,
+      "accepted": 2220
+    },
+    "amazon": {
+      "considered": 2220,
+      "accepted": 2220
+    },
+    "imdb": {
+      "considered": 2224,
+      "accepted": 2220,
+      "duplicate_state": 4
+    }
+  },
+  "excluded_training_state_hashes": 0,
+  "code_hashes": {
+    "data.py": "6060db6e5d0f0eb3f0180529f285e1ff37a8173a31b5de7c39f46db6ca0da418",
+    "api.py": "cdb0602684d798ccd3fc2c86be622f2a8e7bcdeee64d07f95604c7d3fd4701ec",
+    "model.py": "be0ae93c3e486d96548da46036e14e6f650e9039cc60ed1008a37f5d5a20c133",
+    "suite.py": "c4db818f83d7abaf4d8349a5b58f20f70439e04127b0989eb1f831be85578d87"
+  }
+}

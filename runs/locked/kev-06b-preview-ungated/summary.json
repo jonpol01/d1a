@@ -1,0 +1,147 @@
+{
+  "trial": "v4-06b-hardened/00-trial-0",
+  "hub": "jaredpalmer/kev-0.6b",
+  "read": "exploratory, ungated (trial fails heldout_pairs_at_least_70pct); one read only",
+  "trial_result_sha256": "44edfc8ec6cb7e4f9ba2aac8378c2b445cc7cab36a80d8415cb2c32548ccea24",
+  "eval_device": "mps (fp32)",
+  "suites": {
+    "decision": {
+      "suite_sha256": "1b33e566d114f9eafeff55b36c221fadb2a4ae358a1b9cc68006e82c7cfad8f1",
+      "clean": {
+        "n": 1200,
+        "nll": 0.5203706683639157,
+        "acc": 0.8191666666666667,
+        "ece": 0.07211285031344711,
+        "brier": 0.2643747109069927,
+        "mean_conf": 0.8912795169801139,
+        "confident_error_rate": 0.04083333333333333,
+        "coverage_at_0_9": 0.6741666666666667,
+        "accuracy_at_0_9": 0.9394313967861557,
+        "selective": {
+          "0.5": {
+            "coverage": 0.5,
+            "accuracy": 0.9733333333333334,
+            "confidence_cutoff": 0.9933156611641936
+          },
+          "0.8": {
+            "coverage": 0.8,
+            "accuracy": 0.8927083333333333,
+            "confidence_cutoff": 0.7504611081828996
+          }
+        },
+        "score_mae": 0.5395967454772129,
+        "ranked_probability_score": 0.09024302581369309
+      },
+      "paired_flip": {
+        "pairs": 80,
+        "flip_rate": 0.875,
+        "both_correct_rate": 0.8375
+      },
+      "permutation": {
+        "n": 72,
+        "mean_max_delta": 0.026030773777765078,
+        "flip_rate": 0.027777777777777776
+      },
+      "variants": {
+        "clean": 0.8191666666666667,
+        "none_absent": 0.9305555555555556,
+        "none_present": 0.7916666666666666,
+        "permuted": 0.9166666666666666
+      },
+      "coverage": {
+        "requested_records": 1176,
+        "requested_questions": 1440,
+        "evaluated_records": 1176,
+        "evaluated_questions": 1440,
+        "rejected_records": 0,
+        "truncated_records": 0
+      },
+      "tasks": {
+        "agnews": 0.887,
+        "agnews_yn": 0.931,
+        "amazon": 0.512,
+        "banking77": 0.787,
+        "boolq": 0.662,
+        "contrastive_age_eligibility": 1.0,
+        "contrastive_quantity_limit": 0.925,
+        "contrastive_return_window": 0.75,
+        "contrastive_spend_threshold": 1.0,
+        "dbpedia14": 0.975,
+        "imdb": 0.9,
+        "mnli": 0.775,
+        "sst5": 0.562,
+        "trec": 0.975,
+        "yelp": 0.65,
+        "yelp_yn": 0.9
+      }
+    },
+    "transfer": {
+      "suite_sha256": "31677c2256b406222e7d94ffdc0a02a70ce05746b9efe307876024c4e77291d1",
+      "clean": {
+        "n": 656,
+        "nll": 0.8222320302305982,
+        "acc": 0.6310975609756098,
+        "ece": 0.11528399754141899,
+        "brier": 0.4889630020688961,
+        "mean_conf": 0.7392953611321106,
+        "confident_error_rate": 0.036585365853658534,
+        "coverage_at_0_9": 0.2972560975609756,
+        "accuracy_at_0_9": 0.8769230769230769,
+        "selective": {
+          "0.5": {
+            "coverage": 0.5,
+            "accuracy": 0.7530487804878049,
+            "confidence_cutoff": 0.7341682533671932
+          },
+          "0.8": {
+            "coverage": 0.8003048780487805,
+            "accuracy": 0.6704761904761904,
+            "confidence_cutoff": 0.5596123337745667
+          }
+        },
+        "score_mae": 0.6778246845282115,
+        "ranked_probability_score": 0.2255668403386614
+      },
+      "paired_flip": {
+        "pairs": 64,
+        "flip_rate": 0.1875,
+        "both_correct_rate": 0.078125,
+        "invariant_pairs": 24,
+        "invariance_rate": 1.0,
+        "invariant_both_correct_rate": 0.4583333333333333
+      },
+      "permutation": {
+        "n": 36,
+        "mean_max_delta": 0.10571618648714098,
+        "flip_rate": 0.19444444444444445
+      },
+      "variants": {
+        "clean": 0.6310975609756098,
+        "none_absent": 0.8333333333333334,
+        "none_present": 0.25,
+        "permuted": 0.5555555555555556
+      },
+      "coverage": {
+        "requested_records": 764,
+        "requested_questions": 764,
+        "evaluated_records": 764,
+        "evaluated_questions": 764,
+        "rejected_records": 0,
+        "truncated_records": 0
+      },
+      "tasks": {
+        "composition_final_combination": 0.375,
+        "composition_final_exception": 0.625,
+        "composition_final_negation": 0.5,
+        "contrastive_authorization": 0.5,
+        "contrastive_deadline": 0.425,
+        "emotion": 0.575,
+        "mmlu": 0.463,
+        "paws": 0.463,
+        "qnli": 0.787,
+        "sciq": 0.95,
+        "tweet_offensive": 0.875
+      }
+    }
+  }
+}

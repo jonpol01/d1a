@@ -1,0 +1,5 @@
+device=cpu trainable params=9.3M
+mix: public_frac 0.5 -> 4 public + 0 synthetic records
+mix: synthetic_repeat 2 -> +0 records
+4 training requests (holdout=['mnli', 'sst5']), questions by type {'choice': 2, 'noul': 4, 'score': 1}
+saved /Users/jared/dev/kev/runs/smoke-mix/00-trial-0/checkpoint

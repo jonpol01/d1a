@@ -1,0 +1,33 @@
+device=cuda trainable params=9.3M
+1200 training requests (holdout=['mnli', 'sst5']), questions by type {'choice': 600, 'noul': 1200, 'score': 300}
+ep0 step 10/300 loss 10.599 kl 0.000 0.034s/rec
+ep0 step 20/300 loss 8.428 kl 0.000 0.029s/rec
+ep0 step 30/300 loss 4.488 kl 0.000 0.027s/rec
+ep0 step 40/300 loss 2.475 kl 0.000 0.026s/rec
+ep0 step 50/300 loss 2.089 kl 0.000 0.025s/rec
+ep0 step 60/300 loss 1.729 kl 0.000 0.024s/rec
+ep0 step 70/300 loss 1.012 kl 0.000 0.024s/rec
+ep0 step 80/300 loss 1.504 kl 0.000 0.024s/rec
+ep0 step 90/300 loss 1.133 kl 0.000 0.024s/rec
+ep0 step 100/300 loss 1.214 kl 0.000 0.023s/rec
+ep0 step 110/300 loss 1.098 kl 0.000 0.023s/rec
+ep0 step 120/300 loss 0.865 kl 0.000 0.023s/rec
+ep0 step 130/300 loss 0.737 kl 0.000 0.023s/rec
+ep0 step 140/300 loss 0.976 kl 0.000 0.023s/rec
+ep0 step 150/300 loss 0.845 kl 0.000 0.023s/rec
+ep1 step 160/300 loss 0.566 kl 0.000 0.023s/rec
+ep1 step 170/300 loss 0.774 kl 0.000 0.023s/rec
+ep1 step 180/300 loss 0.649 kl 0.000 0.022s/rec
+ep1 step 190/300 loss 0.823 kl 0.000 0.022s/rec
+ep1 step 200/300 loss 0.791 kl 0.000 0.022s/rec
+ep1 step 210/300 loss 0.609 kl 0.000 0.022s/rec
+ep1 step 220/300 loss 0.739 kl 0.000 0.022s/rec
+ep1 step 230/300 loss 0.506 kl 0.000 0.022s/rec
+ep1 step 240/300 loss 0.550 kl 0.000 0.022s/rec
+ep1 step 250/300 loss 0.832 kl 0.000 0.022s/rec
+ep1 step 260/300 loss 0.524 kl 0.000 0.022s/rec
+ep1 step 270/300 loss 0.680 kl 0.000 0.022s/rec
+ep1 step 280/300 loss 0.573 kl 0.000 0.022s/rec
+ep1 step 290/300 loss 0.438 kl 0.000 0.022s/rec
+ep1 step 300/300 loss 0.544 kl 0.000 0.022s/rec
+saved /runs/backbone-v1/03-trial-3/checkpoint

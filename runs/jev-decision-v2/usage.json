@@ -1,0 +1,14 @@
+{
+  "model": "typesafe-ai/jev",
+  "model_revision": "Gateway alias; provider revision not exposed by SDK result",
+  "started_at": "2026-09-18T22:03:09.733279+00:00",
+  "calls": 1176,
+  "input_tokens": 614328,
+  "output_tokens": 149353,
+  "retries_after_5xx": 0,
+  "listed_input_usd_per_million": 0.042,
+  "estimated_usd": 0.025801776000000002,
+  "budget_usd": 0.15,
+  "sdk": "ai@7.0.105",
+  "zero_data_retention_requested": true
+}

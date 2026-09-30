@@ -1,0 +1,158 @@
+{
+  "version": 2,
+  "seed": 20260920,
+  "holdout_sources": [
+    "mmlu",
+    "emotion",
+    "tweet_offensive",
+    "qnli",
+    "paws",
+    "sciq"
+  ],
+  "eval_only": true,
+  "trainable_sources": [],
+  "eval_only_sources": [
+    "mmlu",
+    "emotion",
+    "tweet_offensive",
+    "qnli",
+    "paws",
+    "sciq",
+    "contrastive"
+  ],
+  "policy": {
+    "trainable": [
+      "banking77",
+      "boolq",
+      "agnews",
+      "mnli",
+      "sst5",
+      "yelp",
+      "trec",
+      "dbpedia14",
+      "amazon",
+      "imdb"
+    ],
+    "eval_only": [
+      "mmlu",
+      "emotion",
+      "tweet_offensive",
+      "qnli",
+      "paws",
+      "sciq"
+    ]
+  },
+  "dataset_revisions": {
+    "dair-ai/emotion": "cab853a1dbdf4c42c2b3ef2173804746df8825fe",
+    "nyu-mll/glue": "bcdcba79d07bc864c1c254ccfcedcce55bcc9a8c",
+    "cardiffnlp/tweet_eval": "b3a375baf0f409c77e6bc7aa35102b7b3534f8be",
+    "google-research-datasets/paws": "161ece9501cf0a11f3e48bd356eaa82de46d6a09",
+    "allenai/sciq": "2c94ad3e1aafab77146f384e23536f97a4849815",
+    "cais/mmlu": "c30699e8356da336a370243923dbaf21066bb9fe"
+  },
+  "base_revisions": {
+    "Qwen/Qwen2.5-0.5B": "060db6499f32faf8b98477b0a26969ef7d8b9987",
+    "Qwen/Qwen3-0.6B-Base": "da87bfb608c14b7cf20ba1ce41287e8de496c0cd"
+  },
+  "context": {
+    "max_state": 384,
+    "max_branch": 1024,
+    "max_packed": 2048,
+    "truncate": false
+  },
+  "selection": "Normalized exact-state deduplication across partitions; common tokenizer context admission; no fuzzy decontamination or pretraining-contamination claim.",
+  "legacy_checkpoints": "Training/calibration overlap for pre-manifest checkpoints is unknown; exploratory only.",
+  "objective": "Negative macro-average clean development NLL, equal weight per task; raw probabilities.",
+  "excluded_training_states_from": "evals/decision-v2",
+  "files": {
+    "train.jsonl": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "records": 0,
+      "questions": 0
+    },
+    "calibration.jsonl": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "records": 0,
+      "questions": 0
+    },
+    "development.jsonl": {
+      "sha256": "02732ee2e662b7ec0c276f7f89ae29f44e7ce262ffac8e9c116c5bc82e5608b8",
+      "records": 668,
+      "questions": 668
+    },
+    "test.jsonl": {
+      "sha256": "96c06100b7e94772c4eddbd61b42c1a1a9d60911ddb2c23767c11c8980618dde",
+      "records": 668,
+      "questions": 668
+    }
+  },
+  "admission": {
+    "mmlu": {
+      "considered": 161,
+      "accepted": 160,
+      "context_rejected": 1
+    },
+    "emotion": {
+      "considered": 160,
+      "accepted": 160
+    },
+    "tweet_offensive": {
+      "considered": 161,
+      "accepted": 160,
+      "duplicate_state": 1
+    },
+    "qnli": {
+      "considered": 161,
+      "accepted": 160,
+      "duplicate_state": 1
+    },
+    "paws": {
+      "considered": 160,
+      "accepted": 160
+    },
+    "sciq": {
+      "considered": 163,
+      "accepted": 160,
+      "context_rejected": 3
+    }
+  },
+  "excluded_training_state_hashes": 3878,
+  "contrastive": {
+    "pairs_per_family_train": 60,
+    "pairs_per_family_eval": 40,
+    "eval_families": [
+      "authorization",
+      "deadline"
+    ],
+    "trainable_families": [
+      "return_window",
+      "spend_threshold",
+      "age_eligibility",
+      "quantity_limit"
+    ],
+    "eval_only_families": [
+      "authorization",
+      "deadline"
+    ],
+    "train_report": {},
+    "eval_report": {
+      "authorization": {
+        "pairs": 40,
+        "rejected": 0,
+        "reasons": {}
+      },
+      "deadline": {
+        "pairs": 40,
+        "rejected": 0,
+        "reasons": {}
+      }
+    },
+    "note": "labels from rule evaluators; ablation + invariance checks passed for every kept pair; no LLM"
+  },
+  "code_hashes": {
+    "data.py": "147ddbe271c07d14c4988651374c873d26f53e97a18d42ad492102ea7d4da7df",
+    "api.py": "cdb0602684d798ccd3fc2c86be622f2a8e7bcdeee64d07f95604c7d3fd4701ec",
+    "model.py": "1366fc0c08154d9bffca5b0bb293f6732344b8fb157377083039de303441a383",
+    "suite.py": "c4db818f83d7abaf4d8349a5b58f20f70439e04127b0989eb1f831be85578d87"
+  }
+}

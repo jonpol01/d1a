@@ -1,0 +1,94 @@
+{
+  "models": {
+    "kev-0.8b": {
+      "path": "runs/r15-08b/00-trial-0/result.json",
+      "transfer_acc": 0.6478658536585366,
+      "transfer_brier": 0.48125328370231507,
+      "tasks": {
+        "composition_held_and_or": 0.65625,
+        "composition_held_conditional": 0.65625,
+        "composition_held_or_not": 0.5625,
+        "contrastive_authorization": 0.95,
+        "contrastive_deadline": 0.35,
+        "emotion": 0.5,
+        "mmlu": 0.425,
+        "paws": 0.6,
+        "qnli": 0.8125,
+        "sciq": 0.9,
+        "tweet_offensive": 0.675
+      }
+    },
+    "kev-4b": {
+      "path": "runs/r10-skills/00-trial-0/result.json",
+      "transfer_acc": 0.8170731707317073,
+      "transfer_brier": 0.2690850170373655,
+      "tasks": {
+        "composition_held_and_or": 1.0,
+        "composition_held_conditional": 1.0,
+        "composition_held_or_not": 0.9375,
+        "contrastive_authorization": 1.0,
+        "contrastive_deadline": 0.65,
+        "emotion": 0.55,
+        "mmlu": 0.725,
+        "paws": 0.7875,
+        "qnli": 0.9125,
+        "sciq": 0.975,
+        "tweet_offensive": 0.75
+      }
+    },
+    "kev-9b": {
+      "path": "runs/night2-9b-du/00-trial-0/result.json",
+      "transfer_acc": 0.8216463414634146,
+      "transfer_brier": 0.28559177791910795,
+      "tasks": {
+        "composition_held_and_or": 0.90625,
+        "composition_held_conditional": 0.90625,
+        "composition_held_or_not": 0.875,
+        "contrastive_authorization": 1.0,
+        "contrastive_deadline": 0.8,
+        "emotion": 0.6,
+        "mmlu": 0.7375,
+        "paws": 0.7625,
+        "qnli": 0.925,
+        "sciq": 0.9625,
+        "tweet_offensive": 0.775
+      }
+    },
+    "kev-27b": {
+      "path": "runs/release/kev-27b-v2/result.json",
+      "transfer_acc": 0.8475609756097561,
+      "transfer_brier": 0.23605235368270622,
+      "tasks": {
+        "composition_held_and_or": 0.90625,
+        "composition_held_conditional": 0.875,
+        "composition_held_or_not": 0.90625,
+        "contrastive_authorization": 1.0,
+        "contrastive_deadline": 0.925,
+        "emotion": 0.5875,
+        "mmlu": 0.8375,
+        "paws": 0.7875,
+        "qnli": 0.9375,
+        "sciq": 0.975,
+        "tweet_offensive": 0.7875
+      }
+    }
+  },
+  "jev": {
+    "path": "runs/jev-transfer-v4/report.json",
+    "transfer_acc": 0.8567073170731707,
+    "transfer_brier": 0.2109920731707317,
+    "tasks": {
+      "composition_held_and_or": 0.90625,
+      "composition_held_conditional": 0.78125,
+      "composition_held_or_not": 0.96875,
+      "contrastive_authorization": 1.0,
+      "contrastive_deadline": 0.925,
+      "emotion": 0.5875,
+      "mmlu": 0.9,
+      "paws": 0.7875,
+      "qnli": 0.925,
+      "sciq": 0.9875,
+      "tweet_offensive": 0.8125
+    }
+  }
+}
