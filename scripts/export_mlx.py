@@ -2,6 +2,7 @@
 d1a.checkpoint / d1a.serve from the folder (or its Hub copy) without the base or the adapter. Apple Silicon only.
 
     uv run --extra mlx python scripts/export_mlx.py --run JohnP1/d1a-e2b --q-bits 4 --q-group-size 64 --out runs/exports/d1a-e2b-mlx-4bit
+    uv run --extra mlx python scripts/export_mlx.py --run JohnP1/d1a-e2b --q-bits 8 --q-per-layer-bits 4 --out runs/exports/d1a-e2b-mlx-8bit-ple4
     uv run --extra mlx python scripts/export_mlx.py --run JohnP1/d1a-e2b --out runs/exports/d1a-e2b-mlx-bf16    # unquantized (bf16)
 
 --no-quantize-embeddings keeps embed_tokens and the per-layer embeddings in bf16 (on Gemma 4 E2B they are ~60% of the
@@ -20,10 +21,12 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--q-bits", type=int, default=0, help="bits per weight (4 or 8); 0 = no quantization (bf16)")
     ap.add_argument("--q-group-size", type=int, default=64)
+    ap.add_argument("--q-per-layer-bits", type=int, default=0, help="bits for Gemma 4's per-layer embeddings; 0 = the same as --q-bits")
     ap.add_argument("--no-quantize-embeddings", action="store_true")
     a = ap.parse_args()
     t = time.time()
-    cfg = export_mlx(Checkpoint(a.run), a.out, bits=a.q_bits or None, group_size=a.q_group_size, embeddings=not a.no_quantize_embeddings)
+    cfg = export_mlx(Checkpoint(a.run), a.out, bits=a.q_bits or None, group_size=a.q_group_size, embeddings=not a.no_quantize_embeddings,
+                     per_layer_bits=a.q_per_layer_bits or None)
     print(json.dumps(cfg, indent=2))
     print(f"exported {a.run} to {a.out} in {time.time() - t:.0f} s")
 

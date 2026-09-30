@@ -226,12 +226,13 @@ class MLXDecisionModel:
 TOKENIZER_FILES = ("tokenizer.json", "tokenizer_config.json", "special_tokens_map.json", "chat_template.jinja")
 
 
-def export_mlx(ck, out, bits=None, group_size=64, embeddings=True):
+def export_mlx(ck, out, bits=None, group_size=64, embeddings=True, per_layer_bits=None):
     """Write `ck` (a LoRA checkpoint, d1a.checkpoint.Checkpoint) as an MLX export folder that d1a.checkpoint serves
     through this backend without the base or the adapter: the adapter merged into the base in fp32 on the CPU stream
     (merge_lora, the same bits the MLX backend computes at load), then optionally quantized (`bits` per weight, affine,
     `group_size` per scale; `embeddings` also quantizes embed_tokens and the per-layer embeddings, Gemma 4's largest
-    tensors), saved by mlx-lm (config.json + model*.safetensors), with the pointer head in fp32 (head.safetensors), the
+    tensors; `per_layer_bits` gives the per-layer embeddings their own width: on Gemma 4 E2B they are half the weights and
+    take 4 bits well, while the linear layers need 8), saved by mlx-lm (config.json + model*.safetensors), with the pointer head in fp32 (head.safetensors), the
     checkpoint's tokenizer files and d1a_config.json. -> the d1a_config dict."""
     import shutil
 
@@ -251,8 +252,11 @@ def export_mlx(ck, out, bits=None, group_size=64, embeddings=True):
     merge_lora(lm, ck.path)
     quantization = None
     if bits:
-        keep = None if embeddings else (lambda path, module: not isinstance(module, nn.Embedding))
-        lm, config = quantize_model(lm, config, group_size, bits, quant_predicate=keep)
+        def widths(path, module):
+            if isinstance(module, nn.Embedding) and not embeddings: return False
+            if per_layer_bits and path.endswith("embed_tokens_per_layer"): return {"group_size": group_size, "bits": per_layer_bits, "mode": "affine"}
+            return True
+        lm, config = quantize_model(lm, config, group_size, bits, quant_predicate=widths)
         quantization = {**config["quantization"], "embeddings": bool(embeddings)}
     norm = lm.language_model.model.norm.weight   # read before save_model donates the weights
     hidden, dtype = norm.shape[0], str(norm.dtype).removeprefix("mlx.core.")
