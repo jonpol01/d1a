@@ -2017,3 +2017,17 @@ def test_jev_counts_a_hosted_error_on_an_oversize_request_as_a_refusal(monkeypat
         j = P.JevPredictor("key", count_refusals=True, budget=100)
         with pytest.raises(raised): j(record)
         assert w.lines == lines and j.accounting()["refusals"] == refusals
+
+
+def test_serve_self_check():
+    """The startup self-check passes sound probabilities and refuses the silent failures: non-finite or unnormalised."""
+    from d1a.serve import self_check
+    self_check(lambda rec: ([[0.7, 0.3], [0.2, 0.8]], {}))
+    for bad in ([[float("nan"), 0.5], [0.2, 0.8]], [[0.7, 0.7], [0.2, 0.8]]):
+        with pytest.raises(SystemExit, match="probabilities"): self_check(lambda rec, bad=bad: (bad, {}))
+
+
+def test_serve_device_probe():
+    """A device that cannot run a kernel is reported unusable instead of crashing the server process."""
+    from d1a.serve import usable
+    assert usable("cpu") and not usable("no-such-device")
