@@ -2072,3 +2072,19 @@ def test_nonfinite_loss_skips_its_batch(tiny_base, tmp_path, monkeypatch):
     assert read_json(tmp_path / "one/training_metrics.json")["nonfinite_skipped"] == {"microbatches": 1}
     calls.clear(); monkeypatch.setattr(train, "batch_loss", flaky(set(range(2, 2 + train.MAX_NONFINITE))))
     with pytest.raises(train.NonFinite): train_tiny(tiny_base, tmp_path / "many", "--lora", "4", monkeypatch=monkeypatch)
+
+
+def test_library_decide_matches_the_server(tiny_base, tmp_path, monkeypatch):
+    """d1a.D1A answers a question set exactly as d1a.serve's Server does for the same checkpoint and request."""
+    import d1a
+    from d1a.api import SystemOneRequest
+    from d1a.serve import Server
+    train_tiny(tiny_base, tmp_path / "ck", "--lora", "4", "--max_steps", "2", monkeypatch=monkeypatch)
+    m = d1a.D1A.load(str(tmp_path / "ck"), device="cpu")
+    questions = {"team": {"type": "choice", "instr": "which team", "criteria": {"billing": "billing", "shipping": "shipping"}},
+                 "angry": {"type": "noul", "instr": "is the customer angry"}}
+    got = m.decide("the customer is charged twice", questions)
+    server = Server(m.checkpoint, m.tok, m.model, "cpu")
+    try: want = server.answer(SystemOneRequest(model="d1a-latest", state="the customer is charged twice", questions=questions))["answers"]
+    finally: server.close()
+    assert got == want and set(got) == {"team", "angry"} and got["team"]["choice"] in ("billing", "shipping")

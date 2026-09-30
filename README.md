@@ -77,6 +77,21 @@ r = client.system_one(
 print(r.choices["team"].choice, r.choices["team"].probabilities)
 ```
 
+### In Your Own Code (No Server)
+
+Load a checkpoint once and ask questions in-process. Questions and answers use the same shape as the System One API, so code moves between the two unchanged:
+
+```python
+from d1a import D1A
+
+m = D1A.load("JohnP1/d1a-e2b-mlx-q8")   # Apple Silicon (MLX, 4.2 GB); JohnP1/d1a-e2b on NVIDIA or CPU
+answers = m.decide("Shoes arrived late and I was charged twice.",
+                   {"team": {"type": "choice", "instr": "Which team should handle this?",
+                             "criteria": {"returns": "returns", "shipping": "shipping", "billing": "billing"}},
+                    "urgent": {"type": "noul", "instr": "Is this urgent?"}})
+print(answers["team"]["probabilities"], answers["urgent"]["noul"])
+```
+
 ### Clients
 
 Dependency-free clients for any System One server live in [`clients/python`](clients/python) (PyPI `d1a-client`, import `d1a_client`) and [`clients/js`](clients/js) (npm `d1a-client`):
