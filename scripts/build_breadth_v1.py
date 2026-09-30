@@ -1,3 +1,5 @@
+# Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables).
 """breadth-v1: a frozen, eval-only panel for generalisation across the five areas of the community Decision Index, built from
 public evaluation splits of datasets that Kev's SFT corpus never trains on.
 
@@ -21,7 +23,7 @@ Datasets with a native development/validation and test split keep it (ContractNL
 are split into halves by group (story, video, dialogue, query, position, user, ...) in a seeded hash order (deal_groups), so
 no group spans the two partitions. Selection inside a partition is round-robin over each dataset's strata (subset, domain,
 category, label) in a seeded order. Every state is deduplicated by normalised text across all datasets and both
-partitions (test first). Every record is checked with kev.model.fits against the Qwen3.5 tokenizer at ADMISSION (row =
+partitions (test first). Every record is checked with d1a.model.fits against the Qwen3.5 tokenizer at ADMISSION (row =
 state + one question <= 7,680 tokens, so it also fits the 8,192-token limits of Kev's server and AutoJev's).
 Deterministic: the same downloads give byte-identical partitions and manifest (BM25 ties are broken by document id; scores
 are rounded before ranking so platform float noise cannot reorder them).
@@ -32,16 +34,16 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from kev.data import materialize  # noqa: E402
-from kev.model import fits, load_tokenizer, user_tokens  # noqa: E402
-from kev.suite import ADMISSION_TOKENIZER as TOKENIZER, GIT_LIMIT, SERVING_CONTEXT_8K as SERVING_CONTEXT, digest, normalise_text, read_json, read_jsonl, text_digest, write_json, write_jsonl  # noqa: E402
+from d1a.data import materialize  # noqa: E402
+from d1a.model import fits, load_tokenizer, user_tokens  # noqa: E402
+from d1a.suite import ADMISSION_TOKENIZER as TOKENIZER, GIT_LIMIT, SERVING_CONTEXT_8K as SERVING_CONTEXT, digest, normalise_text, read_json, read_jsonl, text_digest, write_json, write_jsonl  # noqa: E402
 from scripts.build_devtools_v1 import deal_groups, fetch, hub_file, line_safe, parquet_rows, round_robin, state_key  # noqa: E402
 
 VERSION = SEED = "breadth-v1"
 PARTITIONS = ("development", "test")
 EVAL_RECORDS = 150
 CONTRACTNLI_DOCS, CONTRACTNLI_PER_DOC = 40, 4
-MAX_OPTIONS = 10            # Kev's supported option count today (kev.api accepts up to 255; AutoJev too)
+MAX_OPTIONS = 10            # Kev's supported option count today (d1a.api accepts up to 255; AutoJev too)
 # stricter than SERVING_CONTEXT (which the manifest records): 1,024 tokens of headroom on the state and 512 on the row, so a
 # record also fits servers that count their own template tokens against 8,192 (AutoJev refuses longer requests with a 422)
 ADMISSION = {**SERVING_CONTEXT, "max_state": SERVING_CONTEXT["max_state"] - 1024, "max_branch": SERVING_CONTEXT["max_branch"] - 512}
@@ -929,7 +931,7 @@ def main():
     for split in PARTITIONS:
         path = out / f"{split}.jsonl"
         write_jsonl(path, parts[split])
-        if read_jsonl(path) != parts[split]: raise AssertionError(f"{path} does not round-trip through kev.suite.read_jsonl")
+        if read_jsonl(path) != parts[split]: raise AssertionError(f"{path} does not round-trip through d1a.suite.read_jsonl")
         files[path.name] = {"sha256": digest(path), "records": len(parts[split]), "questions": sum(len(r["questions"]) for r in parts[split]),
                             "bytes": path.stat().st_size, "in_git": path.stat().st_size <= GIT_LIMIT, "by_source": counts[split]}
     source_pins = pins()
@@ -951,7 +953,7 @@ def main():
                      "round-robin over each dataset's strata in a seeded order; normalised-text state dedupe across all datasets and both partitions (test first); no group spans the partitions",
         "label_protocol": "no LLM labels: every label is the source dataset's own (human, engine, recorded execution or by construction); candidate subsets always contain the reference answer",
         "build_report": report, "code_sha256": digest(Path(__file__)),
-        "large_partitions": "partitions with in_git false are gitignored; upload them to the Hub mirror (kev.suite.SUITES_DATASET) and bump SUITES_REVISION before load_split can fetch them elsewhere",
+        "large_partitions": "partitions with in_git false are gitignored; upload them to the Hub mirror (d1a.suite.SUITES_DATASET) and bump SUITES_REVISION before load_split can fetch them elsewhere",
     })
     print(json.dumps({"counts": counts, "questions": questions, "files": {k: {kk: v[kk] for kk in ("records", "bytes", "in_git")} for k, v in files.items()}}, indent=1))
 

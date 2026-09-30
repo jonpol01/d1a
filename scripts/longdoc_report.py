@@ -1,3 +1,5 @@
+# Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables).
 """Accuracy, ECE and Brier by length bucket and part on evals/longdoc-v1, for one or more benchmark results.
 
     uv run python scripts/longdoc_report.py --suite evals/longdoc-v1 --out runs/longdoc-v1-report \
@@ -5,8 +7,8 @@
         --result "r19 SFT (raw T=1)=runs/longdoc-v1-r19-sft@1.0" --result "r19 SFT (T=1.59, exploratory)=runs/longdoc-v1-r19-sft@1.59" \
         --result "Jev=runs/longdoc-v1-jev"
 
-A result is NAME=DIR[@T]: DIR holds kev.benchmark / kev.jev rows.json; @T serves the rows at temperature T from their raw logits
-(kev.metrics.served_at; the rows' recorded inference temperature is undone first), otherwise they are scored as returned.
+A result is NAME=DIR[@T]: DIR holds d1a.benchmark / d1a.jev rows.json; @T serves the rows at temperature T from their raw logits
+(d1a.metrics.served_at; the rows' recorded inference temperature is undone first), otherwise they are scored as returned.
 Records a system did not answer (rejected.json: Jev refusals) are listed per bucket and left out of that system's metrics;
 `coverage` says how many. Per bucket: accuracy / ECE (10 bins) / Brier over the questions of both parts and of each part and
 kind, the difference in accuracy from the 4k control with a 95 % record-clustered bootstrap interval (2,000 resamples, seed 0;
@@ -26,8 +28,8 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from kev.metrics import metrics, served_at  # noqa: E402
-from kev.suite import read_json, write_json  # noqa: E402
+from d1a.metrics import metrics, served_at  # noqa: E402
+from d1a.suite import read_json, write_json  # noqa: E402
 
 BUCKETS = ("4k", "8k", "16k", "32k", "64k")
 SAMPLES, SEED = 2000, 0
@@ -109,7 +111,7 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--parity", action="append", default=[], help="NAME=OLD_DIR:NEW_DIR, two reads of one checkpoint to compare row by row")
     a = ap.parse_args()
-    from kev.suite import load_split
+    from d1a.suite import load_split
     meta = {r["_meta"]["id"]: r["_meta"] for r in load_split(a.suite, "development")}
     overlap = Path(a.suite) / "overlap.json"
     seen_ledgar = set(read_json(overlap)["cuad_targets"]["sft_v1_ledgar"]["titles_with_contained_item"]) if overlap.exists() else set()

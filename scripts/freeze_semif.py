@@ -1,3 +1,5 @@
+# Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables).
 """Freeze SemIf's committed fixtures as an eval-only Kev suite, so Kev and live Jev can be scored on them with our harness.
 
     uv run python scripts/freeze_semif.py --repo /tmp/semif --out evals/external/semif-v1
@@ -5,7 +7,7 @@
 Source: github.com/TheoLeeCJ/SemIf benchmarks/data/{authored144,perturbations108}.jsonl (MIT). Each row is one 3-way
 choice; option ids and descriptions are carried over verbatim, the label index becomes the option id. Perturbation rows
 keep their variant (option_reversal / criterion_wrapper / irrelevant_context) and base_id so paired flips can be read.
-SemIf reports balanced accuracy per family; we report accuracy per task plus everything kev.benchmark reports.
+SemIf reports balanced accuracy per family; we report accuracy per task plus everything d1a.benchmark reports.
 """
 import argparse
 import hashlib
@@ -13,7 +15,7 @@ import json
 import subprocess
 from pathlib import Path
 
-from kev.suite import CONTEXT, digest, read_jsonl, record_digest, write_json, write_jsonl
+from d1a.suite import CONTEXT, digest, read_jsonl, record_digest, write_json, write_jsonl
 
 
 def convert(row, source, variant="clean", parent=None):

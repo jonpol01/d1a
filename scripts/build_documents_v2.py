@@ -1,7 +1,9 @@
+# Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables).
 """documents-v2 candidates: a held-out test set only (PLAN.md round 7, confirmation 5), drawn exactly as documents-v1
 (scripts/build_documents_v1.py: same source snapshot, products, issues, length buckets, per-cell test count and record
 shape) from the narratives v1 never drew: every v1 candidate (all three splits, dropped questions included) is excluded
-by text hash and complaint id. Its partitions go only to the private mirror (kev.suite.PRIVATE_DATASET); never commit them.
+by text hash and complaint id. Its partitions go only to the private mirror (d1a.suite.PRIVATE_DATASET); never commit them.
 
     uv run python scripts/build_documents_v2.py --out runs/documents-v2-work/candidates
 """
@@ -13,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import build_documents_v1  # noqa: E402
 from build_documents_v1 import BUCKETS, REPO, REVISION, SPLITS, prepare, record, rows  # noqa: E402
-from kev.suite import digest, read_jsonl, write_json, write_jsonl  # noqa: E402
+from d1a.suite import digest, read_jsonl, write_json, write_jsonl  # noqa: E402
 
 PER_CELL = SPLITS["test"]   # documents per (product, bucket) cell, as documents-v1 test
 RIGHTS = "consumer narratives published by the CFPB with consent; the CFPB considers them public domain for FOIA purposes"

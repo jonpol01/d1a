@@ -1,3 +1,5 @@
+# Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables).
 """Diagnostic: how much knowledge does the *base* model show on the frozen MMLU/SciQ transfer items with a plain
 letter-token readout, versus what our trained pointer head gets on the same items?
 
@@ -13,8 +15,8 @@ from pathlib import Path
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from kev.device import default_device
-from kev.suite import load_split
+from d1a.device import default_device
+from d1a.suite import load_split
 
 
 def main():
@@ -74,8 +76,8 @@ def main():
     summary = {"base": a.base, "readout": "zero-shot next-token letter logits" + (" (SemIf prompt, chat template)" if a.prompt == "semif" else ""), "suite": a.suite, "split": a.split, "revision": a.revision, "adapter": a.adapter,
                "sources": {k: {"n": n[k], "acc": round(hits[k] / n[k], 3)} for k in n}}   # namespaced: a source called "unknowable" must not shadow the report's unknowable block
     if a.out:
-        from kev.benchmark import summarize
-        from kev.suite import write_json
+        from d1a.benchmark import summarize
+        from d1a.suite import write_json
         out = Path(a.out); out.mkdir(parents=True, exist_ok=True)
         write_json(out / "rows.json", rows)
         rep = summarize(rows, heldout_sources=tuple(n)); rep.update(summary); write_json(out / "report.json", rep)

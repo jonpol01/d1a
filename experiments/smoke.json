@@ -1,0 +1,1 @@
+[{"base":"Qwen/Qwen2.5-0.5B","epochs":1,"accum":2,"batch":2,"perm_kl":0.1,"perm_frac":1,"ord_w":0.1}]

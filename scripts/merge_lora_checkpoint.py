@@ -1,17 +1,19 @@
+# Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables).
 """Merge a LoRA checkpoint into its base and write it as a full-weight checkpoint, so full-weight training can start from it
-(`kev.train --full_ft 1 --init_from <out>`; round 25 continues from Kev-27B instead of from the base).
+(`d1a.train --full_ft 1 --init_from <out>`; round 25 continues from Kev-27B instead of from the base).
 
     uv run python scripts/merge_lora_checkpoint.py --lora jaredpalmer/kev-27b@01b81998019be550f0ae858727df49bac9511195 \\
         --out runs/r25-init/kev-27b-merged [--like <a full-weight checkpoint of the same base>]    # -> <out>/checkpoint
-    KEV_APP_NAME=kev-r25 uv run modal run modal_app.py::merge_adapter --lora jaredpalmer/kev-27b@<sha> --out /runs/r25-init/kev-27b-merged
+    D1A_APP_NAME=kev-r25 uv run modal run modal_app.py::merge_adapter --lora jaredpalmer/kev-27b@<sha> --out /runs/r25-init/kev-27b-merged
 
-The backbone is the LoRA checkpoint's base built as its loader builds it (kev.model.DecisionModel in the checkpoint's
+The backbone is the LoRA checkpoint's base built as its loader builds it (d1a.model.DecisionModel in the checkpoint's
 weights dtype, bf16 for Kev-27B), and every adapted weight becomes round(fp32(W) + fp32(delta)) in that dtype, where delta
 is peft's own get_delta_weight of the layer (the fp32 value peft's merge adds): exactly the backbone
 scripts/interpolate_checkpoint.py writes at alpha 0 toward the same checkpoint (tests/test_unit.py), without streaming a
 second full-weight checkpoint (round 23 read and hashed a 51 GB SFT checkpoint to use it only for names and shapes). The
-backbone is written by kev.full_ft.write_backbone, the function a full-weight run saves with (save_pretrained, 5 GB shards),
-so names, shard layout and config.json are what kev.train --full_ft writes. Refused like interpolate_checkpoint's --toward:
+backbone is written by d1a.full_ft.write_backbone, the function a full-weight run saves with (save_pretrained, 5 GB shards),
+so names, shard layout and config.json are what d1a.train --full_ft writes. Refused like interpolate_checkpoint's --toward:
 DoRA and other LoRA variants, LoRA biases, modules_to_save, trained token embeddings.
 
 head.pt: the LoRA checkpoint's meta and pointer head unchanged (same tensors, head_dim, temperature and its fit, training
@@ -19,7 +21,7 @@ args), with lora = 0 and weights = "full" (the loader rule and --init_from's COM
 added: {source: {path, resolved, weights_sha256, head_sha256}, base, adapted_tensors, formula}. Tokenizer files are copied;
 the source run's training records (training_config.json, provenance.json, ...) are not. `--like` checks, from safetensors
 headers only, that the result has the same tensor names and shapes as another full-weight checkpoint of the same base
-(what kev.train --full_ft --init_from will load it over). Written to <out>/checkpoint.partial and renamed when complete;
+(what d1a.train --full_ft --init_from will load it over). Written to <out>/checkpoint.partial and renamed when complete;
 <out>/merge.json reports the hashes and the seconds of each phase.
 """
 import argparse
@@ -33,9 +35,9 @@ from pathlib import Path
 import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from kev.checkpoint import Checkpoint, write_meta  # noqa: E402
-from kev.full_ft import write_backbone  # noqa: E402
-from kev.suite import digest, write_json  # noqa: E402
+from d1a.checkpoint import Checkpoint, write_meta  # noqa: E402
+from d1a.full_ft import write_backbone  # noqa: E402
+from d1a.suite import digest, write_json  # noqa: E402
 from scripts.interpolate_checkpoint import load_lora, shard_layout  # noqa: E402
 
 NOT_COPIED = {"head.pt", "adapter_config.json", "adapter_model.safetensors", "training_config.json", "training_metrics.json",
@@ -80,7 +82,7 @@ def merge(lora, out, like=None, log=print):
             w.copy_((w.float() + module.get_delta_weight("default").float()).to(w.dtype))   # the backbone's own parameter (shared storage)
     lm = model.unload()   # peft: the LoRA layers replaced by their base layers, nothing merged again (they hold W + delta already)
     adapted = len(layers)
-    lm.config.use_cache = False   # as kev.train sets it before a full-weight save: config.json is a full-weight run's (scoring passes use_cache itself)
+    lm.config.use_cache = False   # as d1a.train sets it before a full-weight save: config.json is a full-weight run's (scoring passes use_cache itself)
     phase("merge", started)
     if partial.exists(): shutil.rmtree(partial)   # an earlier attempt that died before its rename: never a checkpoint
     partial.mkdir(parents=True)

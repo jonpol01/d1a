@@ -1,3 +1,5 @@
+# Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables).
 """Soft targets from a teacher's predictions on decision-v7/train, as a mixture of the label and the teacher.
 
     # 4.9 ambiguity targets: only where an open teacher confidently disagrees with a public label (round-3 C5)
@@ -5,12 +7,12 @@
     # 4.11 self-distillation: every question, teacher = Kev-9B's served probabilities
     uv run python scripts/build_soft_targets.py --teacher runs/r4-kev-9b-v7-train --select all --out evals/round4/distill-9b-v1
 
-Reads the teacher's rows.json (scripts/base_mmlu_probe.py --all_questions, or kev.benchmark --split train) and the same
+Reads the teacher's rows.json (scripts/base_mmlu_probe.py --all_questions, or d1a.benchmark --split train) and the same
 training records. With --select ambiguous a question is softened when the teacher's top option is not the label and
 holds >= --threshold of the mass; with --select all every scored question is. A softened question's target is
 (1 - lam) * one_hot(label) + lam * teacher. Writes two files with the same records:
 
-    soft.jsonl   ambiguous questions carry `target` (kev.data.materialize trains soft-target cross-entropy on it)
+    soft.jsonl   ambiguous questions carry `target` (d1a.data.materialize trains soft-target cross-entropy on it)
     hard.jsonl   the identical records with hard labels: the matched continuation control
 
 Other questions of a selected record keep their hard label in both files. Teacher outputs are open-weight (never Jev's).
@@ -20,7 +22,7 @@ from collections import Counter
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from kev.suite import digest, load_split, read_json, read_manifest, write_json, write_jsonl  # noqa: E402
+from d1a.suite import digest, load_split, read_json, read_manifest, write_json, write_jsonl  # noqa: E402
 
 SUITE = "evals/v7/decision-v7"
 
@@ -54,7 +56,7 @@ def main():
     write_jsonl(out / "soft.jsonl", soft); write_jsonl(out / "hard.jsonl", hard)
     teacher_report = read_json(Path(a.teacher) / "report.json")
     manifest = {"suite": SUITE, "suite_manifest_sha256": digest(Path(SUITE) / "manifest.json"), "partition": "train",
-                "teacher": {"base": teacher_report.get("base") or teacher_report.get("run"), "revision": teacher_report.get("revision"), "readout": teacher_report.get("readout") or "kev.benchmark served probabilities",
+                "teacher": {"base": teacher_report.get("base") or teacher_report.get("run"), "revision": teacher_report.get("revision"), "readout": teacher_report.get("readout") or "d1a.benchmark served probabilities",
                             "rows_sha256": digest(Path(a.teacher) / "rows.json")},
                 "rule": {"select": a.select, "threshold": a.threshold if a.select == "ambiguous" else None, "lam": a.lam,
                          "ambiguous": "teacher top option != label and teacher top probability >= threshold",

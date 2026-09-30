@@ -1,4 +1,6 @@
-"""Serving latency and parity on CUDA: the kev.serve path with and without CUDA graphs (kev.cuda_graphs).
+# Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables).
+"""Serving latency and parity on CUDA: the d1a.serve path with and without CUDA graphs (d1a.cuda_graphs).
 
     uv run modal run modal_app.py::serving --run jaredpalmer/kev-4b --gpu A100-80GB --name serving-4b-a100
     python scripts/serving_bench.py --run jaredpalmer/kev-4b --out runs/serving-4b      # on a CUDA machine
@@ -9,8 +11,8 @@ the state-pass miss path and the cached-state hit path) against the fp32 eager p
 mean |dp|, argmax flips). Latency: model time (what /v1/systemone reports as latency_ms) for four request shapes, each
 with a new state per request (the usual API call: every ticket is a new state) and with a repeated state (prefix cache
 hit), eager and with graphs. Isolation (--isolation): on the same records through the served bf16 path, each question
-alone against (a) the full request and (b) the question plus an unrelated sibling (kev.experiment.ISOLATION_PROBE); the
-fp32 mechanism check (kev.experiment.mechanism_checks, 8 records, tolerance 1e-3) is exact arithmetic, this is the
+alone against (a) the full request and (b) the question plus an unrelated sibling (d1a.experiment.ISOLATION_PROBE); the
+fp32 mechanism check (d1a.experiment.mechanism_checks, 8 records, tolerance 1e-3) is exact arithmetic, this is the
 precision the API serves. Writes report.json.
 """
 import argparse, gc, json, statistics, time
@@ -18,13 +20,13 @@ from pathlib import Path
 
 import torch
 
-from kev.api import SystemOneRequest
-from kev.checkpoint import Checkpoint, LoadOptions
-from kev.data import materialize
-from kev.device import allocated_bytes, empty_cache
-from kev.experiment import ISOLATION_PROBE
-from kev.serve import Server
-from kev.suite import load_split, write_json
+from d1a.api import SystemOneRequest
+from d1a.checkpoint import Checkpoint, LoadOptions
+from d1a.data import materialize
+from d1a.device import allocated_bytes, empty_cache
+from d1a.experiment import ISOLATION_PROBE
+from d1a.serve import Server
+from d1a.suite import load_split, write_json
 
 QUESTIONS = {
     "department": {"type": "choice", "instructions": "Which team should handle this?",
@@ -78,7 +80,7 @@ def throughput(server, suite, levels=(1, 8, 32, 64)):
     state."""
     import random
     from concurrent.futures import ThreadPoolExecutor
-    from kev.api import to_record
+    from d1a.api import to_record
     samples = {"6 questions, new short state": [to_record(request("6 questions, short state", 1000 + i))[0] for i in range(256)],
                "decision-v7 development": random.Random(0).choices([materialize(r) for r in load_split(suite, "development")], k=256),
                "5 questions, 2,200-token state": [to_record(request("5 questions, 2,200-token state", 1000 + i))[0] for i in range(64)]}
@@ -122,15 +124,15 @@ def isolation(m, tok, raw):
 
 def long_states(ck, lengths, reps, out):
     """--state_tokens: per state length, a request of 5 decision-v7 questions on a state of exactly that many tokens of
-    decision-v7 text (scripts/sft_probe.build_long), through kev.benchmark's path (kev.predictors.LocalPredictor, bf16 as a
+    decision-v7 text (scripts/sft_probe.build_long), through d1a.benchmark's path (d1a.predictors.LocalPredictor, bf16 as a
     bf16-trained checkpoint loads, the admission context lifted to the longest length; then evaluate_records on one record
     per length) and through the served one (bf16, fused kernels, CUDA graphs; a state past the graphed state pass runs its
     state eagerly). The two load one after the other (both would not fit with a 27B). Model time for a new state (median
     of `reps`, each a different record) and a cached one, peak GPU memory (the allocator's) per path, and the agreement of
     the served answers with the benchmark's."""
-    from kev.benchmark import evaluate_records
-    from kev.model import training_context
-    from kev.predictors import LocalPredictor
+    from d1a.benchmark import evaluate_records
+    from d1a.model import training_context
+    from d1a.predictors import LocalPredictor
     from scripts.sft_probe import build_long
     report, save = {"run": str(ck.path), "gpu": torch.cuda.get_device_name(0), "lengths": {}}, lambda: write_json(Path(out) / "report.json", report)
     context = {**training_context(max(lengths)), "truncate": False}   # what a 64k-state suite's manifest would admit under
@@ -146,7 +148,7 @@ def long_states(ck, lengths, reps, out):
         except Exception as error:
             row = {"error": f"{type(error).__name__}: {str(error)[:500]}"}
         report["lengths"][n] = {"benchmark": row}; print(n, row, flush=True); save()
-    try:   # kev.benchmark's scoring loop end to end on one record per length
+    try:   # d1a.benchmark's scoring loop end to end on one record per length
         bench, _ = evaluate_records([recs[0] for recs in records.values()], predictor, Path(out) / "benchmark")
         report["evaluate_records"] = {"coverage": bench["coverage"], "latency_ms": bench["latency_ms"]}
     except Exception as error:
@@ -191,7 +193,7 @@ def main():
     ck = Checkpoint(a.run)
     report = {"run": a.run, "gpu": torch.cuda.get_device_name(0), "records": len(recs)}
     targets = None
-    if a.reference == "fp32":   # fp32 as the evaluation path runs (kev.predictors.LocalPredictor): no TF32, no fused SDPA; probs() is the prefix form, within fp32 rounding of its rows
+    if a.reference == "fp32":   # fp32 as the evaluation path runs (d1a.predictors.LocalPredictor): no TF32, no fused SDPA; probs() is the prefix form, within fp32 rounding of its rows
         tok, ref = ck.load("cuda")
         torch.backends.cuda.enable_flash_sdp(False); torch.backends.cuda.enable_mem_efficient_sdp(False)
         targets = [ref.probs(ref.encode(tok, r)) for r in recs]

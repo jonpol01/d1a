@@ -1,16 +1,18 @@
-"""The two remote baseline reads of evals/breadth-v1, as kev.benchmark result directories: the development partition, or
+# Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables).
+"""The two remote baseline reads of evals/breadth-v1, as d1a.benchmark result directories: the development partition, or
 the locked test with --allow-test (a registered confirmation stage only: round 24's report-only Jev / AutoJev test reads).
 
     AI_GATEWAY_API_KEY=... uv run python scripts/breadth_reads.py jev --out runs/breadth-v1-jev
-    KEV_REMOTE_API_KEY=... uv run python scripts/breadth_reads.py autojev --url https://<workspace>--autojev-breadth-api.modal.run --out runs/breadth-v1-autojev
+    D1A_REMOTE_API_KEY=... uv run python scripts/breadth_reads.py autojev --url https://<workspace>--autojev-breadth-api.modal.run --out runs/breadth-v1-autojev
     AI_GATEWAY_API_KEY=... uv run python scripts/breadth_reads.py jev --allow-test --out runs/r24c-jev-breadthtest
 
-Both use kev.benchmark.evaluate_records with skip_overlong, so a record a server will not answer is counted in
+Both use d1a.benchmark.evaluate_records with skip_overlong, so a record a server will not answer is counted in
 coverage["rejected_records"], listed in rejected.json and scored wrong by scripts/breadth_report.py (the Decision Index
 rule: unanswered = wrong), instead of aborting the read.
 
-jev: kev.predictors.JevPredictor (the kev.jev path) with a longer retry: Vercel AI Gateway answered some long ContractNLI
-  documents with HTTP 503 several times in a row, and kev.jev's four attempts over 7 s stopped two full reads (at 829 and
+jev: d1a.predictors.JevPredictor (the d1a.jev path) with a longer retry: Vercel AI Gateway answered some long ContractNLI
+  documents with HTTP 503 several times in a row, and d1a.jev's four attempts over 7 s stopped two full reads (at 829 and
   575 records). Here a 5xx is retried ATTEMPTS times with exponential backoff capped at 60 s; a 4xx still surfaces.
 autojev: denis-pplx/autojev-27b behind its own server (research-archive-2026-09-24:scripts/serve_autojev.py, app renamed
   autojev-breadth); it answers one request at a time (529 while busy: waited out) and refuses requests over its 8,192-token
@@ -20,11 +22,11 @@ import argparse, json, os, sys, time, urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from kev.benchmark import evaluate_records  # noqa: E402
-from kev.data import api_request  # noqa: E402
-from kev.model import ContextOverflow  # noqa: E402
-from kev.predictors import PRICE_PER_MILLION, JevPredictor, RemotePredictor  # noqa: E402
-from kev.suite import digest, load_split, read_manifest, write_json  # noqa: E402
+from d1a.benchmark import evaluate_records  # noqa: E402
+from d1a.data import api_request  # noqa: E402
+from d1a.model import ContextOverflow  # noqa: E402
+from d1a.predictors import PRICE_PER_MILLION, JevPredictor, RemotePredictor  # noqa: E402
+from d1a.suite import digest, load_split, read_manifest, write_json  # noqa: E402
 
 SUITE = "evals/breadth-v1"
 ATTEMPTS = 8
@@ -102,7 +104,7 @@ def main():
         predictor = PatientJev(os.environ["AI_GATEWAY_API_KEY"], a.budget, 5000)
     else:
         if not a.url: ap.error("autojev needs --url")
-        key = os.environ["KEV_REMOTE_API_KEY"]
+        key = os.environ["D1A_REMOTE_API_KEY"]
         extra["models"] = wait_ready(a.url.rstrip("/"), key)
         predictor = AutoJev(a.url, "jev-latest", key, timeout=300)
     try:

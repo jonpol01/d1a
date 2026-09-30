@@ -1,3 +1,5 @@
+# Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables).
 """Freeze SemIf's pinned third-party selections (WANLI-256, TypeSafe public 102) as eval-only Kev suites.
 
     python benchmarks/build_wanli.py    --source SRC/wanli-test.jsonl --selection benchmarks/manifests/source-selection.jsonl --output OUT/wanli256.jsonl
@@ -19,15 +21,15 @@ import json
 import subprocess
 from pathlib import Path
 
-from kev.suite import CONTEXT, SERVING_CONTEXT_8K as SERVING_CONTEXT, digest, read_jsonl, record_digest, write_json, write_jsonl
+from d1a.suite import CONTEXT, SERVING_CONTEXT_8K as SERVING_CONTEXT, digest, read_jsonl, record_digest, write_json, write_jsonl
 
 SOURCES = {
     "wanli": {"source": "wanli", "rows": 256, "context": CONTEXT,
-              "protocol": "SemIf reports balanced accuracy on the 256 (direct Qwen3.5-4B logits 0.637); we report accuracy plus everything kev.benchmark reports"},
+              "protocol": "SemIf reports balanced accuracy on the 256 (direct Qwen3.5-4B logits 0.637); we report accuracy plus everything d1a.benchmark reports"},
     "typesafe": {"source": "typesafe", "rows": 102, "context": SERVING_CONTEXT,
                  "protocol": "SemIf reports equal-case modal agreement with the reference argmax (direct 0.845, published Jev 0.883) and total-variation distance to the "
-                             "reference distribution (0.177, 0.127) over the 20 cases; scripts/compare_typesafe.py computes both from a kev.benchmark output. "
-                             "Records over the serving context are rejected by kev.benchmark; the headline is over answered rows with the rejected count stated, and the all-rows figure (rejected = wrong) alongside"},
+                             "reference distribution (0.177, 0.127) over the 20 cases; scripts/compare_typesafe.py computes both from a d1a.benchmark output. "
+                             "Records over the serving context are rejected by d1a.benchmark; the headline is over answered rows with the rejected count stated, and the all-rows figure (rejected = wrong) alongside"},
 }
 
 

@@ -1,4 +1,6 @@
-# Kev label review
+<!-- Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0. -->
+<!-- Changes for D1A Copyright 2026 John Soliva: rebranded to D1A. -->
+# D1A label review
 
 A keyboard-first page for one person to accept, relabel or drop AI-proposed labels, one item at a time.
 Nothing leaves the browser: decisions autosave to localStorage (keyed by a hash of the file), so a reload resumes where you were.

@@ -1,3 +1,5 @@
+# Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables).
 """Two-checkpoint averaging (PLAN.md round 4, item 4.5; round-3 C6): mean probabilities of several seeds of one recipe,
 read from saved rows, against the released seed. Each arm gets a temperature fitted on its own development rows (the
 ensemble's development rows are averaged the same way), so the comparison is served-vs-served.
@@ -10,8 +12,8 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from kev.metrics import metrics, paired_bootstrap, scored_rows, served  # noqa: E402
-from kev.suite import read_json, write_json  # noqa: E402
+from d1a.metrics import metrics, paired_bootstrap, scored_rows, served  # noqa: E402
+from d1a.suite import read_json, write_json  # noqa: E402
 
 KEYS = ("n", "acc", "brier", "nll", "ece", "confident_error_rate", "coverage_at_5pct_error", "aurc")
 

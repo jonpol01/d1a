@@ -1,3 +1,5 @@
+# Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables).
 """Equal-case modal agreement and total-variation distance on evals/external/typesafe-v1, SemIf's protocol for the public
 TypeSafe cases: per row, agreement = argmax(p) == reference argmax and TVD = 1/2 * sum |p - reference|; rows are averaged
 within each case (group) and cases are averaged with equal weight. Published answers carried in the suite (TypeSafe's
@@ -12,9 +14,9 @@ agreement 0 and TVD 1.
 import argparse
 from pathlib import Path
 
-from kev.data import materialize
-from kev.model import MAX_STATE, load_tokenizer, user_tokens
-from kev.suite import SERVING_CONTEXT_8K, load_split, read_json, write_json
+from d1a.data import materialize
+from d1a.model import MAX_STATE, load_tokenizer, user_tokens
+from d1a.suite import SERVING_CONTEXT_8K, load_split, read_json, write_json
 
 LENGTH_BUCKETS = ((0, MAX_STATE), (MAX_STATE, 2048), (2048, SERVING_CONTEXT_8K["max_state"]))   # inside the training context / longer / much longer (typesafe-v1's admission)
 
@@ -69,7 +71,7 @@ def score_published(records):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--suite", default="evals/external/typesafe-v1")
-    ap.add_argument("--run", action="append", default=[], help="kev.benchmark output directory (repeatable)")
+    ap.add_argument("--run", action="append", default=[], help="d1a.benchmark output directory (repeatable)")
     ap.add_argument("--out", help="write the comparison as JSON")
     ap.add_argument("--tokenizer", help="base tokenizer (e.g. Qwen/Qwen3.5-4B-Base): also report accuracy by state length")
     a = ap.parse_args()

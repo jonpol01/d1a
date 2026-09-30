@@ -1,12 +1,14 @@
+# Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables).
 """Long-document serving cost on CUDA, for one checkpoint on evals/longdoc-v1 development records.
 
     uv run modal run --detach modal_app.py::script --script longdoc_serving.py --name longdoc-serving-27b-h200 --gpu H200 \
         --args "--run jaredpalmer/kev-27b"
 
-K records of each part per bucket (--per-bucket) through kev.serve.Server as `kev.serve` loads a checkpoint on CUDA (bf16,
-fused kernels, CUDA graphs) and at its default request limits (kev.model.SERVE_MAX_STATE: 64k-token states). Each request is
+K records of each part per bucket (--per-bucket) through d1a.serve.Server as `d1a.serve` loads a checkpoint on CUDA (bf16,
+fused kernels, CUDA graphs) and at its default request limits (d1a.model.SERVE_MAX_STATE: 64k-token states). Each request is
 a new state (the prefix cache is cleared before it, so its peak memory is its own); latency is the server's model time
-(latency_ms) and the wall time of Server.probs; peak memory is kev.device.allocated_bytes (CUDA: the peak) during the
+(latency_ms) and the wall time of Server.probs; peak memory is d1a.device.allocated_bytes (CUDA: the peak) during the
 request, and resident memory the weights and graph buffers before it. One repeat of the last record per bucket measures a
 cached state. Writes <out>/report.json. (Scoring parity, exact path vs the long-row path, is read from the benchmark rows:
 scripts/longdoc_report.py --parity.)
@@ -16,11 +18,11 @@ from pathlib import Path
 
 import torch
 
-from kev.checkpoint import Checkpoint, LoadOptions
-from kev.data import materialize
-from kev.device import allocated_bytes, empty_cache
-from kev.serve import Server
-from kev.suite import load_split, write_json
+from d1a.checkpoint import Checkpoint, LoadOptions
+from d1a.data import materialize
+from d1a.device import allocated_bytes, empty_cache
+from d1a.serve import Server
+from d1a.suite import load_split, write_json
 
 GB = 1e9
 

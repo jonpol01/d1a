@@ -1,3 +1,5 @@
+# Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables).
 """hard-v1: a frozen suite of programmatically labelled decision records aimed at the skills where Kev is weak.
 
     uv run python scripts/build_hard_v1.py --out evals/hard-v1
@@ -18,8 +20,8 @@ Every label is computed: the builder takes it from the family's solver applied t
 round trip, so the stored facts alone determine it), never from the generator. Templates 0-3 are training templates,
 template 4 is development only and template 5 test only (TEMPLATE_SPLITS), so development and test measure transfer to an
 unseen phrasing and layout; seeds differ per (family, split). States are deduplicated by normalised rendered text across
-all partitions. Every record is validated through kev.data.materialize and must encode, untruncated, in the long-state
-training context (kev.model.training_context(MAX_TRAIN_STATE)) and in the serving context under the Qwen3.5 tokenizer.
+all partitions. Every record is validated through d1a.data.materialize and must encode, untruncated, in the long-state
+training context (d1a.model.training_context(MAX_TRAIN_STATE)) and in the serving context under the Qwen3.5 tokenizer.
 Deterministic: the same arguments give the same bytes.
 """
 import argparse, json, random, sys
@@ -28,10 +30,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from kev.api import render  # noqa: E402
-from kev.data import materialize  # noqa: E402
-from kev.model import MAX_TRAIN_STATE_8K as MAX_TRAIN_STATE, fits, load_tokenizer, training_context  # noqa: E402
-from kev.suite import ADMISSION_TOKENIZER as TOKENIZER, GIT_LIMIT, SERVING_CONTEXT_8K as SERVING_CONTEXT, digest, text_digest, write_json, write_jsonl  # noqa: E402
+from d1a.api import render  # noqa: E402
+from d1a.data import materialize  # noqa: E402
+from d1a.model import MAX_TRAIN_STATE_8K as MAX_TRAIN_STATE, fits, load_tokenizer, training_context  # noqa: E402
+from d1a.suite import ADMISSION_TOKENIZER as TOKENIZER, GIT_LIMIT, SERVING_CONTEXT_8K as SERVING_CONTEXT, digest, text_digest, write_json, write_jsonl  # noqa: E402
 from scripts.hard_v1_common import Ctx  # noqa: E402
 from scripts.hard_v1_families import ABSTAIN_KEYS, FAMILIES, labels  # noqa: E402
 
@@ -40,7 +42,7 @@ TEMPLATE_SPLITS = {"train": (0, 1, 2, 3), "development": (4,), "test": (5,)}
 SIZES = {"train": 6000, "development": 700, "test": 700}
 LONG_POLICY_TOKENS = (800, 5000)
 CODE = ("scripts/build_hard_v1.py", "scripts/hard_v1_common.py", "scripts/hard_v1_policy.py", "scripts/hard_v1_families.py",
-        "scripts/hard_v1_numeric.py", "kev/api.py", "kev/data.py", "kev/model.py")
+        "scripts/hard_v1_numeric.py", "d1a/api.py", "d1a/data.py", "d1a/model.py")
 
 
 def family_counts(total):
@@ -59,7 +61,7 @@ def family_counts(total):
 
 
 def normalised(state):
-    """The deduplication key of a state: text_digest of the text the model reads (kev.api.render)."""
+    """The deduplication key of a state: text_digest of the text the model reads (d1a.api.render)."""
     return text_digest(render(state))
 
 

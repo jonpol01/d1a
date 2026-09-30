@@ -1,5 +1,7 @@
+# Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables).
 """Accuracy by state length on evals/round4/longstate-v1 (PLAN.md round 4, item 4.12; PLAN_27b A3; both at git tag
-research-archive-2026-09-24), paired against the same primaries unburied (longstate_control), from a kev.benchmark rows.json.
+research-archive-2026-09-24), paired against the same primaries unburied (longstate_control), from a d1a.benchmark rows.json.
 
     uv run python scripts/longstate_report.py runs/r4-kev-4b-longstate-2 [runs/<other> ...]
 """
@@ -10,15 +12,15 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from kev.metrics import cluster_resamples, scored_rows  # noqa: E402
-from kev.suite import read_json, write_json  # noqa: E402
+from d1a.metrics import cluster_resamples, scored_rows  # noqa: E402
+from d1a.suite import read_json, write_json  # noqa: E402
 
 LENGTH = re.compile(r"^longstate_(\d+)_")   # build_long_states tags each buried question's task with its length
 
 
 def by_length(rows, samples=2000, seed=0):
     """{length: accuracy buried, accuracy of the same questions unburied, n, and the paired 95% CI of the difference}.
-    The bootstrap resamples record groups (kev.metrics.cluster_resamples), so sibling questions of one primary move
+    The bootstrap resamples record groups (d1a.metrics.cluster_resamples), so sibling questions of one primary move
     together, as in every other bootstrap in the repo."""
     ok = lambda r: int(np.argmax(r["p"]) == r["label"])
     clean = scored_rows(rows)

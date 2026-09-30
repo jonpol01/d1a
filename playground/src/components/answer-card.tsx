@@ -1,4 +1,6 @@
-import type { Answer, Question } from "@/lib/kev";
+// Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
+// Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables).
+import type { Answer, Question } from "@/lib/d1a";
 
 // One shared lane layout for every bar on the page: label | track | value.
 // Only the fill length varies between rows, so lengths are comparable across cards.

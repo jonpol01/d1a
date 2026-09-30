@@ -1,3 +1,5 @@
+# Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables).
 """hard-v1 generators (scripts/build_hard_v1.py): labels come from the rule engines, option order is randomised, partitions
 use disjoint templates, the build is deterministic, and every fact a solver decides on is stated in the frozen records'
 states. No weights, no network, no tokenizer (a tiny build without the context check).
@@ -12,9 +14,9 @@ from pathlib import Path
 
 import pytest
 
-from kev.api import render
-from kev.data import materialize
-from kev.suite import read_jsonl
+from d1a.api import render
+from d1a.data import materialize
+from d1a.suite import read_jsonl
 from scripts.build_hard_v1 import TEMPLATE_SPLITS, build, family_counts, normalised
 from scripts.hard_v1_common import business_days_after, day, money, words
 from scripts.hard_v1_families import FAMILIES, UNITS, amb_decide, labels
@@ -125,7 +127,7 @@ def test_rule_engines_on_hand_built_cases():
 # ---------------------------------------------------------------- deciding facts are stated
 # The labels are computed from `_meta.facts`, so a fact the solver reads but the state never states would make a label
 # unanswerable from the text. For each family, DECIDING lists the values its solver reads and the surface forms the
-# generators may write them in; every value must appear, as a whole token in one of its forms, in kev.api.render(state).
+# generators may write them in; every value must appear, as a whole token in one of its forms, in d1a.api.render(state).
 # Runs over the frozen development and test partitions (in git).
 
 SUITE = Path(__file__).resolve().parents[1] / "evals" / "hard-v1"

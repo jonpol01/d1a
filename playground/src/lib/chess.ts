@@ -1,7 +1,9 @@
+// Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
+// Changes for D1A Copyright 2026 John Soliva: rebranded the UI to D1A (title and header text, the /d1a API proxy, the d1a-latest model name).
 // Chess via the decision model: legal moves become the options of one Choice question,
 // the position (board, FEN, history) is the state. A Score question rates the position in the same pass.
 import { Chess, type Move } from "chess.js";
-import { api, type SystemOneRequest, type SystemOneResponse } from "@/lib/kev";
+import { api, type SystemOneRequest, type SystemOneResponse } from "@/lib/d1a";
 
 export const PIECE_NAMES: Record<string, string> = { p: "pawn", n: "knight", b: "bishop", r: "rook", q: "queen", k: "king" };
 export const EVAL_LEVELS = ["Black is clearly winning", "Black is better", "Roughly equal", "White is better", "White is clearly winning"];
@@ -39,7 +41,7 @@ export function buildRequest(chess: Chess): { req: SystemOneRequest; legal: Move
     legal,
     req: {
       state: positionState(chess),
-      model: "kev-latest",
+      model: "d1a-latest",
       questions: {
         move: {
           type: "choice",
@@ -96,7 +98,7 @@ export type SavedGame = {
   result?: string;
 };
 
-const KEY = "kev.chess.v1";
+const KEY = "d1a.chess.v1";
 
 // Replays a game's moves, stopping at the first one that is not legal in its position (chess.js throws on illegal SAN).
 export function replay(moves: SavedGame["moves"]): { chess: Chess; moves: SavedGame["moves"] } {

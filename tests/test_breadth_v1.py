@@ -1,3 +1,5 @@
+# Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables).
 """The breadth-v1 builder's mappings (scripts/build_breadth_v1.py) and the Decision-Index-style scorer (scripts/breadth_report.py)
 on small synthetic inputs, plus the frozen suite's structure. No weights, no network.
 Run: uv run python -m pytest tests/test_breadth_v1.py -q
@@ -8,9 +10,9 @@ from pathlib import Path
 
 import pytest
 
-from kev.benchmark import labels
-from kev.data import materialize
-from kev.suite import PRIVATE_DATASET, load_split, read_json
+from d1a.benchmark import labels
+from d1a.data import materialize
+from d1a.suite import PRIVATE_DATASET, load_split, read_json
 from scripts import breadth_report as br
 from scripts.build_breadth_v1 import (AREAS, BM25, DATASETS, MAX_OPTIONS, OOS, SGD_NONE, apibank_parse, ascii_board, bag_records, bfcl_candidate, cfcolor_record,
                                       chance, check_invariants, chess_options, clinc_options, contractnli_questions, decode_action_value, describe_move,
@@ -271,7 +273,7 @@ def test_frozen_manifest_names_the_private_mirror():
 
 
 def private_partitions():
-    """Both partitions through kev.suite.load_split (fetched from the private mirror and hash-checked on first use), or a
+    """Both partitions through d1a.suite.load_split (fetched from the private mirror and hash-checked on first use), or a
     skip for an account without access to it."""
     try:
         return {"development": load_split(SUITE, "development"), "test": load_split(SUITE, "test", allow_test=True)}   # structure only, no scoring

@@ -1,3 +1,5 @@
+# Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables).
 """longdoc-v1: a frozen, eval-only, report-only probe of how Kev degrades on long documents, past the state length it was
 trained on (7,552 tokens).
 
@@ -8,8 +10,8 @@ trained on (7,552 tokens).
 Five length buckets by state tokens under the Qwen3.8-27B tokenizer (Kev-27B's base, TOKENIZER): 4k (inside the trained
 range, the control), 8k, 16k, 32k and 64k. A bucket's states hold 84-93 % of its nominal size and every question row (state +
 one question) fits the nominal size, so a server with that context admits the whole bucket. The manifest records the
-serving context (kev.suite.SERVING_CONTEXT); kev.benchmark scores the 4k-16k buckets on its exact path and the 32k / 64k
-buckets (rows past kev.model.ROW_PASS_TOKENS) with the state once and SDPA's fused kernels. Two parts, the same number of
+serving context (d1a.suite.SERVING_CONTEXT); d1a.benchmark scores the 4k-16k buckets on its exact path and the 32k / 64k
+buckets (rows past d1a.model.ROW_PASS_TOKENS) with the state once and SDPA's fused kernels. Two parts, the same number of
 records in every bucket:
 
   cuad       real contracts with expert labels (CUAD v1, CC BY 4.0; CUAD below). Each record is one target contract padded
@@ -28,7 +30,7 @@ records in every bucket:
 Partitions: development and test (locked: read once per candidate with --allow-test, never for this probe). CUAD contracts
 are dealt to the two partitions by company (the filing name's first field) in a seeded hash order, so no company spans
 both. Every state is deduplicated by normalised text across both partitions. The partitions are ~100 MB each: a private
-mirror (manifest only in git, `mirror` names kev.suite.PRIVATE_DATASET). Deterministic: the same inputs give the same bytes.
+mirror (manifest only in git, `mirror` names d1a.suite.PRIVATE_DATASET). Deterministic: the same inputs give the same bytes.
 """
 import argparse, csv, hashlib, json, random, re, sys
 from collections import Counter, defaultdict
@@ -36,9 +38,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from kev.data import materialize  # noqa: E402
-from kev.model import encode, load_tokenizer, rows_of, user_tokens  # noqa: E402
-from kev.suite import PRIVATE_DATASET, SERVING_CONTEXT, digest, read_jsonl, text_digest, write_json, write_jsonl  # noqa: E402
+from d1a.data import materialize  # noqa: E402
+from d1a.model import encode, load_tokenizer, rows_of, user_tokens  # noqa: E402
+from d1a.suite import PRIVATE_DATASET, SERVING_CONTEXT, digest, read_jsonl, text_digest, write_json, write_jsonl  # noqa: E402
 from scripts import longdoc_v1_synthetic as SYN  # noqa: E402
 
 VERSION = SEED = "longdoc-v1"
@@ -59,11 +61,11 @@ CUAD_TARGET_MAX = 6500                    # target contracts for 8k-64k (tokens)
 CUAD_TARGET_MAX_4K = 3100                 # ... and for the 4k bucket (room for at least one other contract)
 NOT_YES_NO = {"Document Name", "Parties", "Agreement Date", "Effective Date", "Expiration Date", "Renewal Term",
               "Notice Period To Terminate Renewal", "Governing Law", "Competitive Restriction Exception", "Warranty Duration"}
-CODE = ("scripts/build_longdoc_v1.py", "scripts/longdoc_v1_synthetic.py", "kev/api.py", "kev/data.py", "kev/model.py")
+CODE = ("scripts/build_longdoc_v1.py", "scripts/longdoc_v1_synthetic.py", "d1a/api.py", "d1a/data.py", "d1a/model.py")
 
 
 class Tokens:
-    """State token counts as kev.model.encode counts them (user text + the state delimiter) under TOKENIZER."""
+    """State token counts as d1a.model.encode counts them (user text + the state delimiter) under TOKENIZER."""
 
     def __init__(self):
         self.tok = load_tokenizer(*TOKENIZER)
@@ -294,7 +296,7 @@ def build_synthetic(split, count, report, n=RECORDS):
 
 # ------------------------------------------------------------------------------------------------------------- checks
 def admit(record, tok):
-    """Encodes strictly in the serving context (kev.suite.SERVING_CONTEXT: 64k-token states), the state inside its bucket's
+    """Encodes strictly in the serving context (d1a.suite.SERVING_CONTEXT: 64k-token states), the state inside its bucket's
     window and every row (state + one question) inside the bucket's nominal size. -> the longest row in tokens."""
     T = record["_meta"]["bucket"]
     ctx = SERVING_CONTEXT
@@ -382,9 +384,9 @@ def main():
         "version": VERSION, "seed": SEED, "eval_only": True, "report_only": True, "partitions": list(PARTITIONS), "locked": ["test"],
         "files": manifest_files, "trainable_sources": [], "eval_only_sources": ["longdoc_cuad", "longdoc_synthetic"], "holdout_sources": [],
         "mirror": {"dataset": PRIVATE_DATASET, "revision": None},
-        "mirror_note": "partitions are ~100 MB each: kept out of git (GIT_LIMIT) in the private eval mirror, fetched and hash-checked by kev.suite.load_split",
+        "mirror_note": "partitions are ~100 MB each: kept out of git (GIT_LIMIT) in the private eval mirror, fetched and hash-checked by d1a.suite.load_split",
         "buckets": {f"{T // 1024}k": {"nominal_tokens": T, "state_tokens": list(window(T)), "row_limit": T} for T in BUCKETS},
-        "bucket_rule": f"state tokens (kev.model.encode under the tokenizer below, state delimiter included) in [{WINDOW[0]}, {WINDOW[1]}] x nominal; every row (state + one question) <= nominal",
+        "bucket_rule": f"state tokens (d1a.model.encode under the tokenizer below, state delimiter included) in [{WINDOW[0]}, {WINDOW[1]}] x nominal; every row (state + one question) <= nominal",
         "records_per_bucket_part": a.records, "depths": list(DEPTHS),
         "parts": {"cuad": {"source": CUAD, "questions": "presence_found / presence_not_found (Noul, CUAD is_impossible), category (choice: one found, three not found), "
                                                         "governing_law (choice, master_clauses Governing Law-Answer, only when it is one of the jurisdictions answered >= 3 times)",
@@ -396,8 +398,8 @@ def main():
                                 "templates": "written for this suite; no text, pool or template shared with hard-v1", "report": report["synthetic"]}},
         "tokenizer": {"model": TOKENIZER[0], "revision": TOKENIZER[1]}, "base_revisions": {TOKENIZER[0]: TOKENIZER[1]},
         "context": {**SERVING_CONTEXT,
-                    "note": "the serving context (64k-token states); kev.benchmark scores a row of up to kev.model.ROW_PASS_TOKENS on the exact path and a longer one (the 32k and 64k buckets) with the state once and SDPA's fused kernels, labelled `kernels: efficient` in its rows (kev.predictors.LocalPredictor)"},
-        "selection": "normalised-text state dedupe across both partitions (test first); CUAD companies dealt to partitions by seeded hash; every record admitted by kev.model.encode (strict) in the context above and its bucket rule",
+                    "note": "the serving context (64k-token states); d1a.benchmark scores a row of up to d1a.model.ROW_PASS_TOKENS on the exact path and a longer one (the 32k and 64k buckets) with the state once and SDPA's fused kernels, labelled `kernels: efficient` in its rows (d1a.predictors.LocalPredictor)"},
+        "selection": "normalised-text state dedupe across both partitions (test first); CUAD companies dealt to partitions by seeded hash; every record admitted by d1a.model.encode (strict) in the context above and its bucket rule",
         "label_protocol": "no LLM labels: CUAD's expert annotations (cuad part) or code (synthetic part)",
         "overlap_screen": "overlap.json (scripts/screen_longdoc_v1.py): JevBench public items, every Kev development/test partition, LEDGAR (in the SFT corpus) and ContractNLI (breadth-v1); counts only",
         "code_sha256": {name: digest(ROOT / name) for name in CODE},

@@ -1,4 +1,6 @@
-"""MLX backend (kev.mlx_model): LoRA merge arithmetic on a toy module, backend resolution, and weight-backed parity of the
+# Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables).
+"""MLX backend (d1a.mlx_model): LoRA merge arithmetic on a toy module, backend resolution, and weight-backed parity of the
 Metal path against the fp32 torch path on a pinned jaredpalmer/kev-0.8b (downloads the base once; Apple Silicon only,
 ~30 s once cached).
 Run: uv run --extra mlx python -m pytest tests/test_mlx.py -q
@@ -14,9 +16,9 @@ mx = pytest.importorskip("mlx.core")
 pytest.importorskip("mlx_lm")
 pytestmark = pytest.mark.skipif(platform.system() != "Darwin" or platform.machine() != "arm64", reason="MLX runs on Apple Silicon only")
 
-from kev.checkpoint import Checkpoint, LoadOptions, mlx_available  # noqa: E402
-from kev.mlx_model import MLXDecisionModel, merge_lora  # noqa: E402
-from kev.model import SCORING_INTERFACE, DecisionModel  # noqa: E402
+from d1a.checkpoint import Checkpoint, LoadOptions, mlx_available  # noqa: E402
+from d1a.mlx_model import MLXDecisionModel, merge_lora  # noqa: E402
+from d1a.model import SCORING_INTERFACE, DecisionModel  # noqa: E402
 
 RUN = "jaredpalmer/kev-0.8b@9a45d25eb2ab761841196625383fa1dff0e56c1e"   # pinned (round 15, 2026-09-24): bf16 noise is per checkpoint, so a republish must not move these bars
 
@@ -53,7 +55,7 @@ def test_backend_resolution():
     assert ck.hybrid_base() and mlx_available()
     assert ck.backend("mps", LoadOptions(backend="auto")) == "mlx"
     assert ck.backend("cuda", LoadOptions(backend="auto")) == "torch"      # auto only pays where MPS has no kernels
-    assert ck.backend("mps", LoadOptions(backend="auto", dtype=torch.float32)) == "torch"   # KEV_DTYPE=fp32 asks for the exact path
+    assert ck.backend("mps", LoadOptions(backend="auto", dtype=torch.float32)) == "torch"   # D1A_DTYPE=fp32 asks for the exact path
     assert ck.backend("mps", LoadOptions(backend="auto", dtype=torch.bfloat16)) == "mlx"
     assert ck.backend("mps", LoadOptions()) == "torch"                     # library default: the reported-numbers path
     assert ck.backend("mps", LoadOptions(backend="torch")) == "torch"
@@ -67,8 +69,8 @@ def test_backend_resolution():
 
 @pytest.fixture(scope="module")
 def models():
-    from kev.data import materialize
-    from kev.suite import load_split
+    from d1a.data import materialize
+    from d1a.suite import load_split
     ck = Checkpoint(RUN)
     tok, mlx_model = ck.load("mps", LoadOptions(backend="mlx"))
     _, ref = ck.load("mps", LoadOptions(backend="torch"))
@@ -77,7 +79,7 @@ def models():
 
 
 def test_scoring_interface_is_shared(models):
-    """Everything kev.serve, kev.predictors and the Space call on a loaded model exists on both implementations."""
+    """Everything d1a.serve, d1a.predictors and the Space call on a loaded model exists on both implementations."""
     _, m, ref, _ = models
     assert isinstance(m, MLXDecisionModel) and isinstance(ref, DecisionModel)
     for model in (m, ref):
@@ -110,7 +112,7 @@ def test_prefix_reuse_and_question_isolation(models):
     recurrent state zeroed) give 0.67 / 0.39 / 0.47, yet as little as 0.003 on one record, so every record is checked.
     Paths that run the same kernels on the same shapes must agree bit for bit."""
     import torch.nn.functional as F
-    from kev.data import materialize
+    from d1a.data import materialize
     tok, m, _, recs = models
     close = lambda got, ref: near(got, ref, bar=0.04, tie=0.04)
     same = lambda a, b: all(torch.equal(x, y) for x, y in zip(a, b))
@@ -129,7 +131,7 @@ def test_prefix_reuse_and_question_isolation(models):
         assert same(got, via_miss)
     alone = [m.probs(m.encode(tok, {"state": rec["state"], "questions": [q]}))[0] for q in rec["questions"]]
     close(alone, full)
-    import kev.mlx_model as MM
+    import d1a.mlx_model as MM
     saved, MM.rows_per_pass = MM.rows_per_pass, lambda rows, prefix_len=0, budget=0: 1   # one row (and one cache copy) per pass: same answers
     try: chunked = m.probs_with_prefix(enc, prefix)
     finally: MM.rows_per_pass = saved

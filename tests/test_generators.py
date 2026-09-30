@@ -1,10 +1,12 @@
-"""The programmatic data generators: contrastive policy pairs (kev.contrastive), compositional rule records (kev.composition)
-and the v3 suite builder's grouping (kev.study_v3). No weights, no network.
+# Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables).
+"""The programmatic data generators: contrastive policy pairs (d1a.contrastive), compositional rule records (d1a.composition)
+and the v3 suite builder's grouping (d1a.study_v3). No weights, no network.
 Run: uv run python -m pytest tests/test_generators.py -q
 """
 import pytest
 
-from kev.contrastive import generate, paired_flip
+from d1a.contrastive import generate, paired_flip
 
 
 def test_rendered_pairs_change_one_sentence_not_order():
@@ -29,7 +31,7 @@ def test_pair_metric_refuses_missing_sibling():
 
 def test_compositional_truth_tables_and_unknowns():
     from itertools import product
-    from kev.composition import evaluate_rule
+    from d1a.composition import evaluate_rule
     atoms = [{"kind": "flag", "fields": [k], "threshold": 0} for k in ("a", "b", "c")]
     for a, b, c in product((True, False), repeat=3):
         facts = dict(a=a, b=b, c=c)
@@ -45,12 +47,12 @@ def test_compositional_truth_tables_and_unknowns():
     ("ge", 10, 10, True), ("eq", 10, 11, False), ("range", 10, 20, True), ("range", 10, 21, False),
 ])
 def test_rule_boundary_labels(kind, threshold, value, expected):
-    from kev.composition import atom_value
+    from d1a.composition import atom_value
     assert atom_value({"kind": kind, "threshold": threshold, "fields": ["x"]}, {"x": value}) == expected
 
 def test_compositional_pairs_validate_and_keep_invariance():
-    from kev.composition import SHAPES, TRAIN_SHAPES, DEV_SHAPES, TEST_SHAPES, check_group, generate as compose
-    from kev.benchmark import labels, prediction_rows
+    from d1a.composition import SHAPES, TRAIN_SHAPES, DEV_SHAPES, TEST_SHAPES, check_group, generate as compose
+    from d1a.benchmark import labels, prediction_rows
     assert not set(TRAIN_SHAPES) & (set(DEV_SHAPES) | set(TEST_SHAPES))
     records = compose(4, "test", tuple(SHAPES))
     rows = []
@@ -70,14 +72,14 @@ def test_compositional_pairs_validate_and_keep_invariance():
         check_group(records[:4])
 
 def test_calibration_covers_every_family_without_splitting_groups():
-    from kev.study_v3 import grouped_split, legacy
+    from d1a.study_v3 import grouped_split, legacy
     train, calibration = grouped_split(legacy(10, "split-test"), 2)
     assert {r["_meta"]["family"] for r in train} == {r["_meta"]["family"] for r in calibration}
     assert not {r["_meta"]["group_id"] for r in train} & {r["_meta"]["group_id"] for r in calibration}
     assert len(calibration) == 16
 
 def test_date_and_entity_atoms():
-    from kev.composition import atom_value
+    from d1a.composition import atom_value
     a = {"kind": "elapsed", "fields": ["start", "end"], "threshold": 2}
     assert atom_value(a, {"start": "2028-02-28", "end": "2028-03-01"}) is True
     assert atom_value(a, {"start": "2028-02-28", "end": "2028-03-02"}) is False
@@ -87,7 +89,7 @@ def test_date_and_entity_atoms():
     assert atom_value(a, {"signer": "Mira"}) is None
 
 def test_random_rule_structures_exclude_heldout_and_cover_negation():
-    from kev.composition import SHAPES, DEV_SHAPES, TEST_SHAPES, canonical, push_negation, sample_trees, generate as compose, check_group
+    from d1a.composition import SHAPES, DEV_SHAPES, TEST_SHAPES, canonical, push_negation, sample_trees, generate as compose, check_group
     assert canonical(("or", ("not", 0), ("and", 1, 2))) == canonical(SHAPES["held_or_not"])       # order/numbering-independent
     assert canonical(("not", ("and", 0, 1))) != canonical(("or", ("not", 0), ("not", 1)))
     assert canonical(push_negation(("not", ("and", 0, 1)))) == canonical(("or", ("not", 0), ("not", 1)))   # De Morgan
@@ -101,8 +103,8 @@ def test_random_rule_structures_exclude_heldout_and_cover_negation():
 
 def test_ordinal_threshold_families_are_balanced_minimal_pairs():
     import collections
-    from kev.contrastive import ORDINAL_FAMILIES, generate
-    from kev.data import materialize
+    from d1a.contrastive import ORDINAL_FAMILIES, generate
+    from d1a.data import materialize
     recs, rep = generate(30, "t", families=list(ORDINAL_FAMILIES))
     assert all(v["pairs"] == 30 for v in rep.values())
     for a, b in zip(recs[::2], recs[1::2]):

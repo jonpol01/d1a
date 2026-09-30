@@ -1,3 +1,5 @@
+# Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables).
 """Rows that must not be public (they carry a private corpus's record ids and option keys, e.g. a trial's `sft-v1`
 development rows) live in a private Hub dataset; git holds a pointer manifest with each file's sha256 and private path.
 
@@ -6,7 +8,7 @@ development rows) live in a private Hub dataset; git holds a pointer manifest wi
 
 `upload` pushes the files in one commit to DATASET under `runs/r<N>/<local path below runs/>` and writes the manifest,
 pinned to that commit. `restore` downloads every file that is not in place yet (accounts with access: `hf auth login` or
-HF_TOKEN) and raises PermissionError naming the dataset for everyone else, as kev.suite.load_split does for a private
+HF_TOKEN) and raises PermissionError naming the dataset for everyone else, as d1a.suite.load_split does for a private
 suite partition.
 """
 import argparse
@@ -15,7 +17,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from kev.suite import digest, read_json, write_json  # noqa: E402
+from d1a.suite import digest, read_json, write_json  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 DATASET = "jaredpalmer/kev-private-train"   # the SFT corpus's private dataset (PLAN.md, "Data policy for the SFT work")
