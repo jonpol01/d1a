@@ -62,10 +62,31 @@ def git_commit():
     except Exception: return None
 
 
+def cpu_quota():
+    """CPUs this process may use: a container's cgroup quota (an HF job reports the host's 64 CPUs while 8 are its
+    share, and 64 torch threads on 8 CPUs ran ~10x slower), else the affinity mask."""
+    try:
+        quota, period = Path("/sys/fs/cgroup/cpu.max").read_text().split()
+        if quota != "max": return max(1, int(quota) // int(period))
+    except (OSError, ValueError):
+        pass
+    return len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else os.cpu_count() or 1
+
+
+def upload(a, path, backend, dtype, partial=False):
+    from huggingface_hub import HfApi
+    api = HfApi()
+    api.create_repo(a.upload, repo_type="dataset", private=True, exist_ok=True)
+    name = a.run.replace("/", "--").replace("@", "--")
+    api.upload_file(path_or_fileobj=path, path_in_repo=f"{name}/{backend}-{dtype}-{a.device}{'.partial' if partial else ''}.json", repo_id=a.upload,
+                    repo_type="dataset", commit_message=f"Golden vectors{' (partial)' if partial else ''}: {a.run}, {backend} {dtype} on {a.device}")
+
+
 def score(a):
     import torch
     from d1a.checkpoint import Checkpoint, LoadOptions
-    torch.set_num_threads(os.cpu_count() or 1)
+    torch.set_num_threads(a.threads or cpu_quota())
+    print(f"torch threads: {torch.get_num_threads()}", flush=True)
     ck = Checkpoint(a.run)
     tok, m = ck.load(a.device, LoadOptions(backend="torch"))   # fp32, adapter merged: the path every reported number uses
     t0, recs = time.time(), []
@@ -75,6 +96,9 @@ def score(a):
         recs.append({"id": rid, "kind": kind, "input": {"state": rec["state"], "questions": [{"instr": q["instr"], "options": q["options"]} for q in rec["questions"]]},
                      "ids": enc["ids"], "questions": [{**qm, "label": q["label"], "probs": [float(x) for x in p.tolist()]} for qm, q, p in zip(meta, rec["questions"], ps)]})
         if i % 10 == 0: print(f"{i} records, {len(enc['ids'])} tokens, {time.time() - t0:.0f} s", flush=True)
+        if a.upload and i % 50 == 49:   # a job that runs out of time still leaves the records it scored
+            Path(a.out).write_text(json.dumps({"partial": True, "run": a.run, "records": recs}) + "\n", encoding="utf-8")
+            upload(a, a.out, m.backend, m.dtype, partial=True)
     out = {"format": GOLDEN_FORMAT, "version": GOLDEN_VERSION, "run": a.run, "resolved": ck.path, "base": ck.meta.base,
            "base_revision": ck.meta.base_revision, "temperature": m.head.temperature, "backend": m.backend, "dtype": m.dtype,
            "device": a.device, "d1a_commit": git_commit(), "torch": torch.__version__, "platform": platform.platform(),
@@ -83,12 +107,7 @@ def score(a):
     Path(a.out).write_text(json.dumps(out) + "\n", encoding="utf-8")
     print(f"wrote {a.out}: {len(recs)} records, {sum(len(r['questions']) for r in recs)} questions in {out['seconds']} s")
     if a.upload:
-        from huggingface_hub import HfApi
-        api = HfApi()
-        api.create_repo(a.upload, repo_type="dataset", private=True, exist_ok=True)
-        name = a.run.replace("/", "--").replace("@", "--")
-        api.upload_file(path_or_fileobj=a.out, path_in_repo=f"{name}/{m.backend}-{m.dtype}-{a.device}.json", repo_id=a.upload, repo_type="dataset",
-                        commit_message=f"Golden vectors: {a.run}, {m.backend} {m.dtype} on {a.device}")
+        upload(a, a.out, m.backend, m.dtype)
         print(f"uploaded to {a.upload}")
 
 
@@ -134,6 +153,7 @@ def main():
     sub = ap.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("score"); s.add_argument("--run", required=True); s.add_argument("--device", default="cpu")
     s.add_argument("--out", required=True); s.add_argument("--upload", default="", help="private HF dataset repo to upload the file to")
+    s.add_argument("--threads", type=int, default=0, help="torch threads; 0 = the CPUs this process may use (cpu_quota)")
     c = sub.add_parser("compare"); c.add_argument("--golden", required=True); c.add_argument("--run", required=True)
     c.add_argument("--device", default="mps"); c.add_argument("--backend", default="mlx"); c.add_argument("--out", default="")
     a = ap.parse_args()
