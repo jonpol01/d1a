@@ -1,3 +1,5 @@
+# Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
+# Changes for D1A Copyright 2026 John Soliva: Gemma 4 parity tests (from jonpol01/kev); package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables).
 """Numerical parity of the model's serving paths, on real weights: merged vs unmerged LoRA, prefix cache vs full pass,
 shape-bucket padding, row form vs packed mask, hybrid isolation, and the --init_from warm start end to end.
 Needs the smoke checkpoint (runs/smoke-hl/00-trial-0/checkpoint) and downloads Qwen/Qwen2.5-0.5B (the hybrid test also
@@ -20,9 +22,9 @@ def smoke_run():
 
 def test_merged_load_matches_unmerged_exactly_in_fp32(smoke_run):
     import torch
-    from kev.checkpoint import LoadOptions, load
-    from kev.data import materialize
-    from kev.suite import load_split
+    from d1a.checkpoint import LoadOptions, load
+    from d1a.data import materialize
+    from d1a.suite import load_split
     recs = [materialize(r) for r in load_split("evals/smoke-v1", "development")[:3]]
     tok, a = load(smoke_run, "cpu", LoadOptions(merge=False)); _, b = load(smoke_run, "cpu", LoadOptions(merge=True))
     with torch.no_grad():
@@ -35,9 +37,9 @@ def test_adapter_exported_as_full_weights_scores_like_the_adapter(smoke_run, tmp
     marked weights="full", weights_dtype fp32) loads in fp32, as its head.pt and config.json say, and gives the adapter's
     probabilities; labelled bf16 it is refused rather than rounded."""
     import torch
-    from kev.checkpoint import Checkpoint, read_meta, write_meta
-    from kev.data import materialize
-    from kev.suite import load_split
+    from d1a.checkpoint import Checkpoint, read_meta, write_meta
+    from d1a.data import materialize
+    from d1a.suite import load_split
     recs = [materialize(r) for r in load_split("evals/smoke-v1", "development")[:3]]
     tok, adapter = Checkpoint(smoke_run).load("cpu")
     adapter.lm.save_pretrained(tmp_path)
@@ -58,8 +60,8 @@ def test_bf16_merge_equals_fp32_merge_then_cast(smoke_run):
     same bits as the old path: load in fp32, merge, cast. That path held an fp32 copy of the backbone (36 GB for Kev-9B)."""
     import torch
     from peft import PeftModel
-    from kev.checkpoint import Checkpoint, LoadOptions
-    from kev.model import DecisionModel
+    from d1a.checkpoint import Checkpoint, LoadOptions
+    from d1a.model import DecisionModel
     ck = Checkpoint(smoke_run)
     tok, new = ck.load("cpu", LoadOptions(dtype=torch.bfloat16))
     old = DecisionModel(ck.meta.base, tok, "cpu", revision=ck.meta.base_revision, head_dim=ck.meta.head_dim)
@@ -69,9 +71,9 @@ def test_bf16_merge_equals_fp32_merge_then_cast(smoke_run):
 
 def test_prefix_cache_matches_full_pass(smoke_run):
     import torch
-    from kev.checkpoint import load
-    from kev.data import materialize
-    from kev.suite import load_split
+    from d1a.checkpoint import load
+    from d1a.data import materialize
+    from d1a.suite import load_split
     tok, m = load(smoke_run, "cpu")
     recs = [materialize(r) for r in load_split("evals/smoke-v1", "development")[:3]]
     for r in recs:
@@ -88,12 +90,12 @@ def test_prefix_cache_matches_full_pass(smoke_run):
 
 def test_shape_bucket_padding_is_exact_in_fp32(smoke_run):
     import torch
-    from kev.checkpoint import load
-    from kev.data import materialize
-    from kev.suite import load_split
+    from d1a.checkpoint import load
+    from d1a.data import materialize
+    from d1a.suite import load_split
     tok, m = load(smoke_run, "cpu")
     recs = [materialize(r) for r in load_split("evals/smoke-v1", "development")[:3]]
-    from kev.model import branch_mask_batch
+    from d1a.model import branch_mask_batch
     for r in recs:
         enc = m.encode(tok, r); L = len(enc["ids"]); padded = -(-L // 64) * 64
         with torch.no_grad():
@@ -105,8 +107,8 @@ def test_shape_bucket_padding_is_exact_in_fp32(smoke_run):
 def test_train_path_drops_records_that_exceed_the_context():
     """Issue #5: training without --suite built records straight from the datasets and the strict encoder aborted on the
     first long passage. The on-the-fly path now applies the same context filter that suite freezing applies."""
-    from kev.data import materialize
-    from kev.model import fits, load_tokenizer
+    from d1a.data import materialize
+    from d1a.model import fits, load_tokenizer
     tok = load_tokenizer("Qwen/Qwen2.5-0.5B")
     short = {"state": "s " * 10, "questions": {"q": {"type": "noul", "instructions": "i", "label": True, "src": "t"}}, "_meta": {"id": "a", "source": "t"}}
     long = {**short, "state": "word " * 600}
@@ -116,7 +118,7 @@ def test_rows_match_packed():
     """The row form (state + one branch per causal row) must reproduce the packed block-causal form on an attention-only
     backbone: each row holds exactly the tokens its question may attend to, at the same positions."""
     import torch
-    from kev.model import DecisionModel, load_tokenizer, rows_of
+    from d1a.model import DecisionModel, load_tokenizer, rows_of
     tok = load_tokenizer("Qwen/Qwen2.5-0.5B"); m = DecisionModel("Qwen/Qwen2.5-0.5B", tok, "cpu").eval()
     rec = {"state": "Order 4411 arrived two weeks late and the box was crushed. Two charges appear on the card.",
            "questions": [{"instr": "Is there a billing problem?", "options": ["yes", "no"], "label": 0},
@@ -137,10 +139,10 @@ def test_row_batching_and_packed_fallback_do_not_change_answers(smoke_run, monke
     one row per pass against the default, and the forced row form (full pass, prefix miss and prefix hit) against the packed
     pass, on many questions."""
     import torch
-    from kev import model as M
-    from kev.checkpoint import load
-    from kev.data import materialize
-    from kev.suite import load_split
+    from d1a import model as M
+    from d1a.checkpoint import load
+    from d1a.data import materialize
+    from d1a.suite import load_split
     tok, m = load(smoke_run, "cpu")
     base = materialize(load_split("evals/smoke-v1", "development")[0])
     rec = {**base, "questions": base["questions"] * 5}                  # 5x the questions: several ROW_BATCH chunks
@@ -167,7 +169,7 @@ def test_hybrid_rows_isolation_and_prefix(monkeypatch):
     reference kernels on CPU."""
     import importlib.util
     import torch
-    from kev.model import DecisionModel, load_tokenizer
+    from d1a.model import DecisionModel, load_tokenizer
     if importlib.util.find_spec("causal_conv1d"): pytest.skip("transformers sends CPU tensors to causal-conv1d's CUDA kernel when it is installed")
     tok = load_tokenizer("Qwen/Qwen3.5-0.8B-Base"); m = DecisionModel("Qwen/Qwen3.5-0.8B-Base", tok, "cpu").eval()
     assert m.hybrid
@@ -176,7 +178,7 @@ def test_hybrid_rows_isolation_and_prefix(monkeypatch):
                          {"instr": "Which team should handle this?", "options": ["returns", "shipping", "billing", "other"], "label": 2}]}
     enc = m.encode(tok, rec)
     with torch.no_grad():
-        rows = [torch.softmax(z, -1) for z in m.forward(enc)]   # the row form (kev.benchmark): the state once per question
+        rows = [torch.softmax(z, -1) for z in m.forward(enc)]   # the row form (d1a.benchmark): the state once per question
         calls = []
         with monkeypatch.context() as mp:
             for name in ("forward_rows_batch", "prefix"):
@@ -187,7 +189,7 @@ def test_hybrid_rows_isolation_and_prefix(monkeypatch):
         cached, prefix = m.probs_and_prefix(enc)
         assert prefix[2] is None   # rows never read the state's hidden states: no fp32 [Ls, d] copy in the prefix cache
         again = m.probs_with_prefix(enc, prefix); again2 = m.probs_with_prefix(enc, prefix)
-        import kev.model as M
+        import d1a.model as M
         saved, M.rows_per_pass = M.rows_per_pass, lambda rows, prefix_len=0, budget=0: 1   # one row per pass: same answers, bounded memory
         try: chunked = m.probs_with_prefix(enc, prefix)
         finally: M.rows_per_pass = saved
@@ -213,9 +215,9 @@ def _prefix_setup(device, dtype, head=None):
     """Qwen3.5-0.8B-Base in training mode with gradient checkpointing, a pointer head from seed 0 (or `head`'s weights),
     and records with 1-4 questions whose states differ in length (so the shared-prefix path left-pads them)."""
     import torch
-    from kev.data import materialize
-    from kev.model import DecisionModel, PointerHead, load_tokenizer
-    from kev.suite import load_split
+    from d1a.data import materialize
+    from d1a.model import DecisionModel, PointerHead, load_tokenizer
+    from d1a.suite import load_split
     tok = load_tokenizer("Qwen/Qwen3.5-0.8B-Base")
     m = DecisionModel("Qwen/Qwen3.5-0.8B-Base", tok, device, dtype=getattr(torch, dtype)).train()
     m.lm.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
@@ -287,7 +289,7 @@ def _prefix_checks(exact, kernels=None):
 
 @pytest.mark.parametrize("device,dtype", [("cpu", "float32"), ("cuda", "float32"), ("cuda", "bfloat16")])
 def test_shared_prefix_matches_rows(device, dtype, monkeypatch):
-    """kev.shared_prefix on Qwen3.5-0.8B-Base, gradient checkpointing on, over records with 1-4 questions and states of
+    """d1a.shared_prefix on Qwen3.5-0.8B-Base, gradient checkpointing on, over records with 1-4 questions and states of
     unequal length (so states are left-padded). First, in fp32 with exact kernels (transformers' PyTorch code, the only
     kind on the CPU), the logits and every parameter's gradient equal the row form's to fp32 rounding. Then, on CUDA (run
     it on Modal, modal_app.py::gpu_tests), with the kernels training uses in fp32 or bf16: fla's Triton kernels round
@@ -319,16 +321,16 @@ def test_shared_prefix_matches_rows(device, dtype, monkeypatch):
 
 
 def test_cuda_graphs_match_eager():
-    """kev.cuda_graphs + kev.fused_qwen35 (CUDA only): the served path (probs_batch) gives the eager bf16 answers up to
+    """d1a.cuda_graphs + d1a.fused_qwen35 (CUDA only): the served path (probs_batch) gives the eager bf16 answers up to
     bf16 noise, first with its new buckets run eagerly and then replayed, for new states (two sharing one) and cached
     ones (made either way), with more rows than one pass holds, a state past GRAPH_STATE (its own eager state pass, then
     batched rows) and a row past GRAPH_ROW (the plain eager path). scripts/serving_bench.py measures the same on 200
     records against fp32."""
     import torch
     if not torch.cuda.is_available(): pytest.skip("needs CUDA")
-    from kev.checkpoint import Checkpoint, LoadOptions
-    from kev import cuda_graphs
-    from kev.model import SERVE_MAX_BRANCH, SERVE_MAX_STATE
+    from d1a.checkpoint import Checkpoint, LoadOptions
+    from d1a import cuda_graphs
+    from d1a.model import SERVE_MAX_BRANCH, SERVE_MAX_STATE
     tok, m = Checkpoint(KEV_08B).load("cuda", LoadOptions(dtype=torch.bfloat16, cuda_graphs=True, fused=True))
     q = {"instr": "Which team should handle this?", "options": ["returns", "shipping", "billing", "other"], "label": 0}
     recs = [{"state": "Order 4411 arrived late and the box was crushed. Two charges appear on the card." * k, "questions": [q] * n}
@@ -352,7 +354,7 @@ def test_cuda_graphs_match_eager():
 
 
 def test_server_recovers_when_a_pass_runs_out_of_memory():
-    """kev.serve.Server._run on CUDA, served as kev.serve serves it (bf16, CUDA graphs, fused kernels): a new state whose
+    """d1a.serve.Server._run on CUDA, served as d1a.serve serves it (bf16, CUDA graphs, fused kernels): a new state whose
     pass cannot fit beside a full prefix cache raises a genuine torch.OutOfMemoryError inside the model, the server drops
     the cache and the retry answers as the unpressured server did (#132, #75). Afterwards a cache hit and a new state still
     match (the graphs and fused kernels survived the failed pass). Under a cap an empty cache cannot meet either, the error
@@ -362,11 +364,11 @@ def test_server_recovers_when_a_pass_runs_out_of_memory():
     import torch
     if not torch.cuda.is_available(): pytest.skip("needs CUDA")
     from types import MethodType
-    from kev.checkpoint import Checkpoint, LoadOptions
-    from kev import cuda_graphs
-    from kev.device import empty_cache, sync
-    from kev.model import SERVE_MAX_BRANCH, SERVE_MAX_STATE
-    from kev.serve import Server
+    from d1a.checkpoint import Checkpoint, LoadOptions
+    from d1a import cuda_graphs
+    from d1a.device import empty_cache, sync
+    from d1a.model import SERVE_MAX_BRANCH, SERVE_MAX_STATE
+    from d1a.serve import Server
     ck = Checkpoint(KEV_08B)
     tok, m = ck.load("cuda", LoadOptions(dtype=torch.bfloat16, cuda_graphs=True, fused=True))
     qs = [{"instr": "Which team should handle this?", "options": ["returns", "shipping", "billing", "other"], "label": 0},
@@ -445,12 +447,12 @@ def test_init_from_warm_start_and_compatibility_checks(tmp_path):
     Two tiny runs on Qwen2.5-0.5B: the second warm-starts from the first and must start with identical head weights."""
     import subprocess, sys, json, torch
     env = {**os.environ, "OMP_NUM_THREADS": "2"}
-    base = [sys.executable, "-m", "kev.train", "--n_per_source", "3", "--epochs", "1", "--accum", "1", "--batch", "1", "--device", "cpu", "--lr", "1e-12", "--base", "Qwen/Qwen2.5-0.5B"]
+    base = [sys.executable, "-m", "d1a.train", "--n_per_source", "3", "--epochs", "1", "--accum", "1", "--batch", "1", "--device", "cpu", "--lr", "1e-12", "--base", "Qwen/Qwen2.5-0.5B"]
     subprocess.run(base + ["--out", str(tmp_path / "a")], check=True, capture_output=True, env=env)
     r = subprocess.run(base + ["--out", str(tmp_path / "b"), "--init_from", str(tmp_path / "a")], check=True, capture_output=True, text=True, env=env)
     assert "delta: warm start" in r.stdout
-    from kev.checkpoint import read_meta
-    from kev.suite import read_json
+    from d1a.checkpoint import read_meta
+    from d1a.suite import read_json
     ha, hb = read_meta(tmp_path / "a"), read_meta(tmp_path / "b")
     assert all((ha.head[k] - hb.head[k]).abs().max() < 1e-6 for k in ha.head), "a warm start at a negligible lr must keep the source head"
     assert hb.extra["init_source"]["weights_sha256"] and read_json(tmp_path / "b/training_config.json")["init_source"]["resolved"] == str(tmp_path / "a")
@@ -467,7 +469,7 @@ def test_gemma4_packed_sliding_mask_matches_rows_and_prefix(monkeypatch):
     longer than the 512-token window; so must the serving prefix paths, packed and forced into rows. Dropping the sliding
     mask must visibly change the answers, or this test would not be testing it. E2B on CPU in fp32, ~20 GB of RAM."""
     import torch
-    from kev import model as M
+    from d1a import model as M
     tok = M.load_tokenizer(*GEMMA); torch.manual_seed(0)
     m = M.DecisionModel(GEMMA[0], tok, "cpu", revision=GEMMA[1]).eval()
     assert type(m.lm).__name__ == "Gemma4TextModel" and m.sliding_window == 512 and not m.hybrid

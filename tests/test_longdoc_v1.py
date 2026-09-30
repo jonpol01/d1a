@@ -1,3 +1,5 @@
+# Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables).
 """evals/longdoc-v1: the synthetic generator's labels come from its solver over the stored facts, bundles land in their
 length window and depth, CUAD questions carry CUAD's own labels, and the committed manifest is an eval-only private-mirror
 suite in the serving context. No weights, no network, no tokenizer (token counts are faked at 4.1 characters each)."""
@@ -7,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from kev.suite import SERVING_CONTEXT
+from d1a.suite import SERVING_CONTEXT
 from scripts import build_longdoc_v1 as B
 from scripts import longdoc_v1_synthetic as S
 

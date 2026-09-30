@@ -1,10 +1,12 @@
+// Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
+// Changes for D1A Copyright 2026 John Soliva: rebranded the UI to D1A (title and header text, the /d1a API proxy, the d1a-latest model name).
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Chess, type Square } from "chess.js";
 import Link from "next/link";
 import { askModel, EVAL_LEVELS, legalMove, loadGames, replay, saveGames, resultText, type Mode, type ModelMove, type SavedGame } from "@/lib/chess";
-import { api } from "@/lib/kev";
+import { api } from "@/lib/d1a";
 import { ChessBoard } from "@/components/chess-board";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -191,7 +193,7 @@ export function ChessGame() {
     <div className="mx-auto flex w-full max-w-6xl flex-col px-6 pt-8 pb-16 md:px-10">
       <header className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
         <nav className="flex items-baseline gap-4 text-[15px]">
-          <Link href="/" className="text-muted-foreground hover:text-foreground">kev</Link>
+          <Link href="/" className="text-muted-foreground hover:text-foreground">D1A</Link>
           <span className="font-medium tracking-tight">chess</span>
         </nav>
         <p className="text-[13px] text-muted-foreground">{model ? <span className="font-mono">{model}</span> : "connecting"}</p>

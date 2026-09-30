@@ -1,3 +1,5 @@
+# Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables).
 import argparse
 import json
 import sys
@@ -6,8 +8,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from kev.metrics import grouped_metrics, metrics, paired_bootstrap
-from kev.suite import digest, read_json, write_json
+from d1a.metrics import grouped_metrics, metrics, paired_bootstrap
+from d1a.suite import digest, read_json, write_json
 from scripts.calibration_audit import describe, read_rows, tempered
 
 LOSS_KEYS = ("label_smoothing", "brier_w", "focal_gamma")

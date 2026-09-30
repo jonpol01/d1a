@@ -1,3 +1,5 @@
+# Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
+# Changes for D1A Copyright 2026 John Soliva: reduced to local outputs and Hub-mirrored suite partitions after Kev's research runs were pruned.
 # python
 .venv/
 __pycache__/

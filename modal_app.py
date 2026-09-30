@@ -1,21 +1,23 @@
-"""Run kev studies on Modal: one GPU container per trial, results pulled back into runs/.
+# Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); d1a-* Modal app and volume names; snapshots mirror to JohnP1/d1a-snapshots.
+"""Run D1A studies on Modal: one GPU container per trial, results pulled back into runs/.
 
-    KEV_GPU=T4 uv run modal run modal_app.py::smoke                        # ~2 min end to end on a T4 (free tier)
+    D1A_GPU=T4 uv run modal run modal_app.py::smoke                        # ~2 min end to end on a T4 (free tier)
     uv run modal run modal_app.py::study --suite evals/decision-v1 \\
         --plan experiments/mbp-comparison.json --name mbp-comparison-v1     # N trials in parallel on H100s
     uv run modal run modal_app.py::evaluate --run jaredpalmer/kev-0.5b \\
         --suite evals/transfer-v1 --name transfer-kev-v01-h100             # score a Hub checkpoint as a research trial
     uv run modal run modal_app.py::base_probe --bases Qwen/Qwen3.5-9B-Base  # untrained-base rows (zero-shot letter logits)
-    uv run modal run modal_app.py::benchmarks --jobs run@suite-or-jsonl@name # kev.benchmark on suites or external .jsonl files
+    uv run modal run modal_app.py::benchmarks --jobs run@suite-or-jsonl@name # d1a.benchmark on suites or external .jsonl files
     uv run modal run modal_app.py::smoke_base --base Qwen/X --revision sha   # does a new base fit? LoRA footprint, peak GB, step time
 
-The same `kev.experiment.execute_trial` runs here and on the MBP; only the device differs. Every trial records
-the local git commit (KEV_GIT_COMMIT), the suite hash, and the hashes of the kev/*.py files that were shipped, and
-`kev.experiment --aggregate` ranks the study locally afterwards so the ledger is produced by one code path.
+The same `d1a.experiment.execute_trial` runs here and on the MBP; only the device differs. Every trial records
+the local git commit (D1A_GIT_COMMIT), the suite hash, and the hashes of the d1a/*.py files that were shipped, and
+`d1a.experiment --aggregate` ranks the study locally afterwards so the ledger is produced by one code path.
 
-Volumes: kev-hf-cache (base weights, downloaded once), kev-runs (trial outputs). Secrets: set KEV_HF_SECRET=<modal secret
+Volumes: d1a-hf-cache (base weights, downloaded once), d1a-runs (trial outputs). Secrets: set D1A_HF_SECRET=<modal secret
 name> to attach a Secret carrying HF_TOKEN for gated bases; run_mirror (the private Hub copy of snapshots and final
-checkpoints, kev.mirror) always mounts that Secret, `huggingface-secret` unless KEV_HF_SECRET names another.
+checkpoints, d1a.mirror) always mounts that Secret, `huggingface-secret` unless D1A_HF_SECRET names another.
 """
 import json
 import os
@@ -32,21 +34,21 @@ from typing import NamedTuple
 
 import modal
 
-from kev.budget import (FULL_FT_RETRIES, INTERPOLATE_CPU, INTERPOLATE_MEMORY, INTERPOLATE_TIMEOUT, MAX_BUDGET, MAX_TIMEOUT, TRIAL_CPU, TRIAL_MEMORY,   # run_trial's resources and
+from d1a.budget import (FULL_FT_RETRIES, INTERPOLATE_CPU, INTERPOLATE_MEMORY, INTERPOLATE_TIMEOUT, MAX_BUDGET, MAX_TIMEOUT, TRIAL_CPU, TRIAL_MEMORY,   # run_trial's resources and
                         compute_bound, hourly_rate, interpolation_bound, trial_disk, trial_resources)                                                    # the admission bounds
 
-APP_NAME = os.environ.get("KEV_APP_NAME", "kev-research")
+APP_NAME = os.environ.get("D1A_APP_NAME", "d1a-research")
 
 ROOT = Path(__file__).resolve().parent
 RUNS_MOUNT, HF_MOUNT = "/runs", "/hf"
-GPU = os.environ.get("KEV_GPU", "H100")   # H100 needs a payment method on the workspace; KEV_GPU=T4 for the free tier
+GPU = os.environ.get("D1A_GPU", "H100")   # H100 needs a payment method on the workspace; D1A_GPU=T4 for the free tier
 
 def worker_environment(app_name, gpu, secret_name=None):
     env = {"HF_HOME": HF_MOUNT, "HF_HUB_DISABLE_PROGRESS_BARS": "1", "TOKENIZERS_PARALLELISM": "false", "PYTHONUNBUFFERED": "1",
            "TRITON_CACHE_DIR": f"{HF_MOUNT}/triton-cache",   # compiled DeltaNet kernels and their autotuning results survive the container
-           "KEV_APP_NAME": app_name, "KEV_GPU": gpu}
+           "D1A_APP_NAME": app_name, "D1A_GPU": gpu}
     if secret_name:
-        env["KEV_HF_SECRET"] = secret_name
+        env["D1A_HF_SECRET"] = secret_name
     return env
 
 
@@ -55,17 +57,17 @@ CAUSAL_CONV1D = "https://github.com/Dao-AILab/causal-conv1d/releases/download/v1
 image = (
     modal.Image.debian_slim(python_version="3.13")
     .apt_install("git")
-    .uv_sync(uv_project_dir=str(ROOT), groups=[], extras=["serve"])   # exact locked deps (serve: kev.serve for serving_bench); Linux torch wheels are the CUDA build
+    .uv_sync(uv_project_dir=str(ROOT), groups=[], extras=["serve"])   # exact locked deps (serve: d1a.serve for serving_bench); Linux torch wheels are the CUDA build
     # Gated DeltaNet kernels for the Qwen3.5 hybrid backbones (transformers falls back to slow reference code without them)
     # fla refuses its gated chunk backward on Hopper with Triton 3.4-3.7.0 (incorrect results, fla#640); torch 2.8 pins 3.4
-    .uv_pip_install("flash-linear-attention==0.5.2", "triton>=3.7.1")   # pinned: kev.fused_qwen35 patches fla kernel launches
+    .uv_pip_install("flash-linear-attention==0.5.2", "triton>=3.7.1")   # pinned: d1a.fused_qwen35 patches fla kernel launches
     # the DeltaNet short convolution: transformers uses causal-conv1d's CUDA kernel (forward and backward) when it is
     # importable and a PyTorch conv otherwise; the prebuilt wheel matches the image's torch 2.8 / CUDA 12 / Python 3.13.
     # --no-deps: resolving its torch requirement would put back torch's pinned triton 3.4, which fla refuses on Hopper
     .uv_pip_install(CAUSAL_CONV1D, extra_options="--no-deps")
     .uv_pip_install("pytest")   # gpu_tests
-    .env(worker_environment(APP_NAME, GPU, os.environ.get("KEV_HF_SECRET")))
-    .add_local_python_source("kev")
+    .env(worker_environment(APP_NAME, GPU, os.environ.get("D1A_HF_SECRET")))
+    .add_local_python_source("d1a")
     .add_local_file(ROOT / "uv.lock", "/root/uv.lock")
     .add_local_file(ROOT / "pyproject.toml", "/root/pyproject.toml")
     .add_local_dir(ROOT / "evals", "/root/evals")
@@ -73,14 +75,14 @@ image = (
     .add_local_dir(ROOT / "tests", "/root/tests")
     .add_local_file(ROOT / "experiments/sft-v1-lengths.json", "/root/experiments/sft-v1-lengths.json")   # scripts/sft_probe.py
 )
-hf_cache = modal.Volume.from_name("kev-hf-cache", create_if_missing=True)
-runs_volume = modal.Volume.from_name("kev-runs", create_if_missing=True)
+hf_cache = modal.Volume.from_name("d1a-hf-cache", create_if_missing=True)
+runs_volume = modal.Volume.from_name("d1a-runs", create_if_missing=True)
 # full-weight attempt leases (TrialLease), apart from the runs volume: a heartbeat commits every minute, and a commit of the
 # runs volume would carry the half-written shards of a resume point in progress with it
-leases_volume = modal.Volume.from_name("kev-leases", create_if_missing=True)
+leases_volume = modal.Volume.from_name("d1a-leases", create_if_missing=True)
 LEASES_MOUNT = "/leases"
-secrets = [modal.Secret.from_name(os.environ["KEV_HF_SECRET"])] if os.environ.get("KEV_HF_SECRET") else []
-MIRROR_SECRET = os.environ.get("KEV_HF_SECRET") or "huggingface-secret"   # run_mirror's HF_TOKEN (the same name in the container: KEV_HF_SECRET is in the image env)
+secrets = [modal.Secret.from_name(os.environ["D1A_HF_SECRET"])] if os.environ.get("D1A_HF_SECRET") else []
+MIRROR_SECRET = os.environ.get("D1A_HF_SECRET") or "huggingface-secret"   # run_mirror's HF_TOKEN (the same name in the container: D1A_HF_SECRET is in the image env)
 
 
 def local_git_commit():
@@ -89,14 +91,14 @@ def local_git_commit():
 
 def local_source_hashes():
     sys.path.insert(0, str(ROOT))
-    from kev.experiment import source_hashes
+    from d1a.experiment import source_hashes
     return source_hashes()
 
 
 @app.function(image=image, cpu=1, memory=1024, timeout=120)
 def remote_source_hashes():
-    """Hashes of kev/*.py inside the deployed image: the launcher compares them with the checkout before spawning."""
-    from kev.experiment import source_hashes
+    """Hashes of d1a/*.py inside the deployed image: the launcher compares them with the checkout before spawning."""
+    from d1a.experiment import source_hashes
     return source_hashes()
 
 
@@ -110,7 +112,7 @@ def run_trial(study, index, label, config, suite, expected_sources, git_commit, 
 @app.function(image=image, gpu=GPU, cpu=TRIAL_CPU, memory=TRIAL_MEMORY, max_containers=24, retries=0, timeout=86400, ephemeral_disk=trial_disk(True),
               volumes={RUNS_MOUNT: runs_volume, HF_MOUNT: hf_cache, LEASES_MOUNT: leases_volume}, secrets=secrets)
 def run_full_trial(study, index, label, config, suite, expected_sources, git_commit, existing=None, transfer=None, attempt=None):
-    """A full-weight trial: run_trial with the disk its resume points need (kev.budget.trial_disk; with_options cannot set it)
+    """A full-weight trial: run_trial with the disk its resume points need (d1a.budget.trial_disk; with_options cannot set it)
     and the attempt lease (TrialLease; `attempt` = {"nonce", "number"} from the ledger entry that spawned it)."""
     return trial(study, index, label, config, suite, expected_sources, git_commit, existing, transfer, attempt)
 
@@ -118,14 +120,14 @@ def run_full_trial(study, index, label, config, suite, expected_sources, git_com
 def trial(study, index, label, config, suite, expected_sources, git_commit, existing=None, transfer=None, attempt=None):
     """One trial in one container. `existing` is a checkpoint path on the runs volume or a Hub id (legacy scoring). A
     full-weight trial whose directory exists already is its next attempt (continue_full_trial spawned it after a timeout,
-    for `kev.rounds watch` or `resume`): it continues from its last resume point, unless an earlier attempt failed with an
+    for `d1a.rounds watch` or `resume`): it continues from its last resume point, unless an earlier attempt failed with an
     error (failed.json). A full-weight attempt first takes the trial's lease (TrialLease) and returns {"refused": ...}
     without touching the trial when another attempt's container may still be running."""
-    from kev.experiment import source_hashes
+    from d1a.experiment import source_hashes
 
-    os.environ["KEV_GIT_COMMIT"] = git_commit
+    os.environ["D1A_GIT_COMMIT"] = git_commit
     if source_hashes() != expected_sources:
-        raise RuntimeError("container received different kev/*.py than the launcher hashed")
+        raise RuntimeError("container received different d1a/*.py than the launcher hashed")
     lease, beating = None, threading.Event()
     if config.get("full_ft"):
         lease = TrialLease(Path(LEASES_MOUNT) / study / f"{index:02d}-{label}" / "attempt.json", leases_volume, attempt, modal.current_function_call_id())
@@ -144,8 +146,8 @@ def trial(study, index, label, config, suite, expected_sources, git_commit, exis
 def run_attempt(study, index, label, config, suite, expected_sources, existing, transfer):
     """trial()'s work once the attempt may run: train or continue, score, commit the volumes."""
     import torch
-    from kev.experiment import continue_trial, execute_trial
-    from kev.suite import write_json
+    from d1a.experiment import continue_trial, execute_trial
+    from d1a.suite import write_json
     out = Path(RUNS_MOUNT) / study / f"{index:02d}-{label}"
     runs_volume.reload()
     again = out.exists()
@@ -180,11 +182,11 @@ def run_attempt(study, index, label, config, suite, expected_sources, existing, 
               volumes={RUNS_MOUNT: runs_volume, HF_MOUNT: hf_cache}, secrets=secrets)
 def run_locked_test(trial_path, name, suites, git_commit, redo_interrupted=False):
     """Read the locked test partitions ONCE for a promoted trial. Writes /runs/locked/<name>/... ; refuses to rerun."""
-    from kev.benchmark import evaluate_records
-    from kev.checkpoint import LoadOptions
-    from kev.predictors import LocalPredictor
-    from kev.suite import digest, load_split, read_json, write_json
-    os.environ["KEV_GIT_COMMIT"] = git_commit
+    from d1a.benchmark import evaluate_records
+    from d1a.checkpoint import LoadOptions
+    from d1a.predictors import LocalPredictor
+    from d1a.suite import digest, load_split, read_json, write_json
+    os.environ["D1A_GIT_COMMIT"] = git_commit
     trial = Path(RUNS_MOUNT) / trial_path
     out = Path(RUNS_MOUNT) / "locked" / name
     runs_volume.reload()
@@ -205,7 +207,7 @@ def run_locked_test(trial_path, name, suites, git_commit, redo_interrupted=False
                 shutil.rmtree(out / label); interrupted.append(label)
         summary = {**prior, "resumed_for": sorted(suites), "interrupted_reads_redone": interrupted}
     # a checkpoint made without a trial (round 20's interpolations: /runs/<study>/<name>/checkpoint) ran no in-trial gates
-    # and fitted no temperature: its read is '-ungated' and saved raw (kev.rounds serves every read at its registered T)
+    # and fitted no temperature: its read is '-ungated' and saved raw (d1a.rounds serves every read at its registered T)
     result = read_json(trial / "result.json") if (trial / "result.json").exists() else None
     if not (result or {}).get("gates", {}).get("passed") and not name.endswith("-ungated"):
         raise RuntimeError(f"{'trial did not pass its gates' if result else 'no trial result.json (a checkpoint without in-trial gates)'}; "
@@ -237,7 +239,7 @@ def run_tool(cmd, out, block="clean"):
         sp.run([str(c) for c in cmd], check=True, cwd="/root", env={**os.environ, "PYTHONPATH": "/root"})
     finally:
         runs_volume.commit(); hf_cache.commit()
-    from kev.suite import read_json
+    from d1a.suite import read_json
     report = read_json(out / "report.json")
     return report if block is None else report[block]
 
@@ -259,11 +261,11 @@ def run_base_probe(base, suite, name, tasks="all", prompt="plain", split="develo
 @app.function(image=image, gpu=GPU, cpu=2, memory=(32768, 131072), retries=0, timeout=3600,
               volumes={RUNS_MOUNT: runs_volume, HF_MOUNT: hf_cache}, secrets=secrets)
 def run_bench(run, suite, name, flags=""):
-    """kev.benchmark for a checkpoint (Hub id or /runs path) on a suite's development partition or a --data .jsonl
+    """d1a.benchmark for a checkpoint (Hub id or /runs path) on a suite's development partition or a --data .jsonl
     (external evals), written to /runs/bench/<name>. flags: extra benchmark switches, e.g. "--date_facts"."""
     out = Path(RUNS_MOUNT) / "bench" / name
     source = ["--data", f"/root/{suite}"] if suite.endswith(".jsonl") else ["--suite", f"/root/{suite}"]
-    return run_tool([sys.executable, "-m", "kev.benchmark", "--run", run, *source, "--out", out, "--device", "cuda", *flags.split()], out)
+    return run_tool([sys.executable, "-m", "d1a.benchmark", "--run", run, *source, "--out", out, "--device", "cuda", *flags.split()], out)
 
 
 MIRROR_TIMEOUT = 4 * 3600   # a 27B checkpoint is ~51 GB; several per call when mirror_snapshots uploads a whole study
@@ -273,10 +275,10 @@ MIRROR_TIMEOUT = 4 * 3600   # a 27B checkpoint is ~51 GB; several per call when 
               volumes={RUNS_MOUNT: runs_volume}, secrets=[modal.Secret.from_name(MIRROR_SECRET)])
 def run_mirror(paths, repo, force=False):
     """Upload complete checkpoint directories on the volume (/runs/..., snapshots or final checkpoints) to a PRIVATE Hub
-    model repo (kev.mirror: refuses a public repo, creates a missing one private, retries once, never raises for an upload)
+    model repo (d1a.mirror: refuses a public repo, creates a missing one private, retries once, never raises for an upload)
     and commit the records it writes next to them. CPU only; spawned by a full-weight trial whose plan sets
     snapshot_hub_repo, or by mirror_snapshots. -> {path: record or None}."""
-    from kev.mirror import mirror
+    from d1a.mirror import mirror
     runs_volume.reload()
     try:
         return {str(p): mirror(p, repo, force=force) for p in paths}
@@ -322,10 +324,10 @@ def run_smoke_base(base, revision):
     hit, run one training step on real records with gradient checkpointing, and report peak memory and steady step time."""
     import time
     import torch
-    from kev.data import materialize
-    from kev.device import allocated_bytes, sync
-    from kev.model import DecisionModel, load_tokenizer
-    from kev.suite import load_split
+    from d1a.data import materialize
+    from d1a.device import allocated_bytes, sync
+    from d1a.model import DecisionModel, load_tokenizer
+    from d1a.suite import load_split
     t0 = time.time(); tok = load_tokenizer(base, revision=revision)
     m = DecisionModel(base, tok, "cuda", dtype=torch.bfloat16, lora=16, revision=revision)
     m.lm.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False}); m.lm.config.use_cache = False; m.train()
@@ -376,7 +378,7 @@ def run_sft_probe(name, base, revision, gpu, train, records, check_load, flags="
         stop.set()
         shutil.rmtree(out / "resume", ignore_errors=True)
         copy_out(); hf_cache.commit()
-    from kev.suite import read_json
+    from d1a.suite import read_json
     return read_json(out / "report.json")
 
 
@@ -404,7 +406,7 @@ KEV_27B_BASE = ("Qwen/Qwen3.8-27B", "1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0") 
 def sft_probe(name: str, gpu: str = "H200", base: str = KEV_27B_BASE[0], revision: str = KEV_27B_BASE[1], train: str = "", records: int = 2000,
               check_load: int = 0, timeout: int = 3600, flags: str = ""):
     """Full-weight training probe on one container: `--gpu H200` (masters in host memory) or `--gpu H200:8` (FSDP2). `--train`
-    passes kev.train arguments (batch, accum, max_steps, lr, row_budget, shared_prefix, save_every_steps); `--flags` more
+    passes d1a.train arguments (batch, accum, max_steps, lr, row_budget, shared_prefix, save_every_steps); `--flags` more
     sft_probe.py switches (--mix synthetic, --no_conv_kernel). Pulled to runs/sft-probe/<name>."""
     cpu, memory = trial_resources(gpu, full_ft=True)
     print(f"admission bound ${hourly_rate(gpu, full_ft=True) * timeout / 3600:.2f} ({gpu}, {cpu} CPU, {memory[0] // 1024}-{memory[1] // 1024} GiB, {timeout} s)", flush=True)
@@ -440,7 +442,7 @@ def interpolate(sft: str, prefix: str, alphas: str = "0.85,0.70,0.50", base: str
     /runs/<study>/<prefix>-w<alpha x 100>/checkpoint for each alpha (weight on the SFT backbone). Refuses unless the SFT
     run's base is --base @ --revision (Kev-27B's by default). Reports land in runs/<study>/<name>/interpolation.json."""
     sys.path.insert(0, str(ROOT))
-    from kev.checkpoint import is_hub_id
+    from d1a.checkpoint import is_hub_id
     from scripts.interpolate_checkpoint import weight_label
     if not sft.startswith(f"{RUNS_MOUNT}/"): raise SystemExit(f"--sft is a checkpoint on the runs volume ({RUNS_MOUNT}/...), not {sft}")
     if toward and not (toward.startswith(f"{RUNS_MOUNT}/") or (is_hub_id(toward) and "@" in toward)):
@@ -487,7 +489,7 @@ def merge_adapter(lora: str, out: str, like: str = ""):
     --lora jaredpalmer/kev-27b@<sha> --out /runs/r25-init/kev-27b-merged [--like /runs/<full-weight trial>/checkpoint].
     The report lands in runs/<out without /runs>/merge.json."""
     sys.path.insert(0, str(ROOT))
-    from kev.checkpoint import is_hub_id
+    from d1a.checkpoint import is_hub_id
     if not out.startswith(f"{RUNS_MOUNT}/"): raise SystemExit(f"--out is a directory on the runs volume ({RUNS_MOUNT}/...), not {out}")
     if not (lora.startswith(f"{RUNS_MOUNT}/") or (is_hub_id(lora) and "@" in lora)):
         raise SystemExit(f"--lora is a checkpoint on the runs volume ({RUNS_MOUNT}/...) or a pinned Hub id (repo@revision), not {lora}")
@@ -507,8 +509,8 @@ def merge_adapter(lora: str, out: str, like: str = ""):
 @app.function(image=image, gpu=GPU, cpu=2, memory=(32768, 65536), retries=0, timeout=3600,
               volumes={RUNS_MOUNT: runs_volume, HF_MOUNT: hf_cache}, secrets=secrets)
 def run_anchors(base, suite, name, revision=None):
-    """Frozen-base zero-shot targets for a suite's training partition -> /runs/anchors/<name>.json (kev.anchors)."""
-    from kev.anchors import build
+    """Frozen-base zero-shot targets for a suite's training partition -> /runs/anchors/<name>.json (d1a.anchors)."""
+    from d1a.anchors import build
     out = Path(RUNS_MOUNT) / "anchors" / f"{name}.json"
     if out.exists():
         raise FileExistsError(f"anchors {name} exist")
@@ -542,7 +544,7 @@ def pull_volume(remote, local_parent, weights=True):
     """Copy `remote` (a runs-volume path) to local_parent/<its last component>. weights=False leaves the files `pulled`
     skips on the volume (and says how much); weights=True is `modal volume get` of everything."""
     if weights:
-        subprocess.run([sys.executable, "-m", "modal", "volume", "get", "kev-runs", remote, str(local_parent)], check=True)
+        subprocess.run([sys.executable, "-m", "modal", "volume", "get", "d1a-runs", remote, str(local_parent)], check=True)
         return
     from concurrent.futures import ThreadPoolExecutor
     from modal.volume import FileEntryType
@@ -565,7 +567,7 @@ def pull_volume(remote, local_parent, weights=True):
 @app.local_entrypoint()
 def base_probe(bases: str, suite: str = "evals/v4/transfer-v4", tasks: str = "all", prompt: str = "plain", split: str = "development", revision: str = "", adapter: str = "", tag: str = "", gpu: str = GPU, all_questions: bool = False):
     """Untrained-base rows (the same items as every README row). Names are derived (<base>-base[-semif][-<tag>]-<suite>[-<split>]);
-    results are pulled to runs/probes/<name>. e.g. KEV_GPU=H200 ... --bases Qwen/Qwen3.5-35B-A3B-Base --revision <sha>"""
+    results are pulled to runs/probes/<name>. e.g. D1A_GPU=H200 ... --bases Qwen/Qwen3.5-35B-A3B-Base --revision <sha>"""
     jobs = []
     for base in bases.split(","):
         name = base.split("/")[-1].lower().replace(".", "") + ("-semif" if prompt == "semif" else "-base") + (f"-{tag}" if tag else "") + "-" + suite.split("/")[-1] + ("" if split == "development" else f"-{split}")
@@ -591,7 +593,7 @@ class BenchJob(NamedTuple):
     run: str      # Hub id[@revision] or a /runs path
     suite: str    # suite directory or .jsonl under the checkout
     name: str     # output: /runs/bench/<name>, pulled to runs/<name>
-    flags: str    # extra kev.benchmark switches, each starting with --
+    flags: str    # extra d1a.benchmark switches, each starting with --
 
 
 def parse_jobs(jobs):
@@ -631,7 +633,7 @@ def benchmarks(jobs: str, gpu: str = GPU, timeout: int = 0):
 def mirror_targets(study):
     """The complete checkpoint directories of a study on the volume: each trial's final checkpoint (checkpoint/head.pt)
     and its complete snapshots (snapshots/step-*/checkpoint/snapshot.json), as /runs paths."""
-    from kev.full_ft import SNAPSHOT_INFO
+    from d1a.full_ft import SNAPSHOT_INFO
     targets = []
     for trial in sorted(volume_names(f"/{study}")[0]):
         dirs, _ = volume_names(f"/{study}/{trial}")
@@ -643,12 +645,12 @@ def mirror_targets(study):
 
 
 @app.local_entrypoint()
-def mirror_snapshots(study: str = "", paths: str = "", repo: str = "jaredpalmer/kev-snapshots", force: bool = False, dry_run: bool = False):
-    """(Re)upload complete snapshots and final checkpoints from the runs volume to a PRIVATE Hub repo (kev.mirror; the
+def mirror_snapshots(study: str = "", paths: str = "", repo: str = "JohnP1/d1a-snapshots", force: bool = False, dry_run: bool = False):
+    """(Re)upload complete snapshots and final checkpoints from the runs volume to a PRIVATE Hub repo (d1a.mirror; the
     volume copy stays primary): every one of a study's (--study X) and/or explicit checkpoint directories (--paths
     /runs/a/checkpoint,...). Prints what it would upload with sizes; --dry-run stops there. A directory already
     recorded for this repo is skipped unless --force. A 27B checkpoint is ~51 GB: run with --detach."""
-    from kev.mirror import destination
+    from d1a.mirror import destination
     targets = (mirror_targets(study) if study else []) + [p for p in paths.split(",") if p]
     if not targets: raise SystemExit("nothing to mirror: give --study and/or --paths (complete checkpoint directories under /runs)")
     for t in targets:
@@ -683,7 +685,7 @@ class Job(NamedTuple):
 def failed_trial(label, out):
     """The result of a full-weight trial that failed with an error (failed.json). Returned rather than raised, so that it
     cannot pass for an interruption: only a timeout is continued (continue_full_trial, from a resume point), and a retried
-    call would find failed.json and report it again; kev.rounds.poll_modal and launch() read "failed" as the trial's failure."""
+    call would find failed.json and report it again; d1a.rounds.poll_modal and launch() read "failed" as the trial's failure."""
     return {"label": label, "failed": json.loads((out / "failed.json").read_text(encoding="utf-8"))["error"]}
 
 
@@ -694,7 +696,7 @@ class VolumeWatcher:
     """What a full-weight trial has committed to the runs volume, and one look for more (poll). A timeout kills the
     container without running trial()'s `finally`, and the next attempt can only continue from a committed point and keep
     committed snapshots, so the runs volume is committed each time the trainer completes a resume point (its latest.json
-    changes), a snapshot (kev.full_ft.completed_snapshots under `snapshot_dir` gains a step) or the final checkpoint
+    changes), a snapshot (d1a.full_ft.completed_snapshots under `snapshot_dir` gains a step) or the final checkpoint
     (`final_dir`/training_metrics.json, written last, appears). What is on disk when the watcher is built (what a new
     container finds on the volume) counts as committed already, so build it before training starts. `mirror(path)`, when
     given, is called once for each newly committed snapshot and final checkpoint, after the commit that includes it
@@ -708,7 +710,7 @@ class VolumeWatcher:
         return self.latest.read_text(encoding="utf-8") if self.latest.exists() else None
 
     def _snaps(self):
-        from kev.full_ft import completed_snapshot_dirs
+        from d1a.full_ft import completed_snapshot_dirs
         return completed_snapshot_dirs(self.snapshot_dir) if self.snapshot_dir else {}
 
     def _final(self):
@@ -751,9 +753,9 @@ LEASE_SETTLE = 10   # seconds between writing a lease and reading it back (two a
 
 
 class TrialLease:
-    """A full-weight attempt's claim on its trial: <leases>/<study>/<trial>/attempt.json on the kev-leases volume, written
-    by the attempt itself: {"nonce", "attempt", "call_id", "started", "heartbeat", "ended"}. kev.budget.lease_state reads
-    it: a lease that is not ended and has a heartbeat younger than kev.budget.LEASE_STALE means that attempt's container may
+    """A full-weight attempt's claim on its trial: <leases>/<study>/<trial>/attempt.json on the d1a-leases volume, written
+    by the attempt itself: {"nonce", "attempt", "call_id", "started", "heartbeat", "ended"}. d1a.budget.lease_state reads
+    it: a lease that is not ended and has a heartbeat younger than d1a.budget.LEASE_STALE means that attempt's container may
     still be writing the trial (training, or committing the runs volume in the 30 s after its timeout). acquire() refuses
     then; continue_full_trial waits for such a lease to end or go stale before it spawns. `volume` needs reload/commit
     (leases_volume, or a fake); `clock`/`sleep` are injectable for tests."""
@@ -768,14 +770,14 @@ class TrialLease:
         return json.loads(self.path.read_text(encoding="utf-8")) if self.path.exists() else None
 
     def _write(self):
-        from kev.suite import write_json
+        from d1a.suite import write_json
         self.path.parent.mkdir(parents=True, exist_ok=True)
         write_json(self.path, self.record, atomic=True)
         self.volume.commit()
 
     def acquire(self):
         """None when this attempt holds the lease (written and committed, and still ours after LEASE_SETTLE), or why not."""
-        from kev.budget import LEASE_STALE, lease_state
+        from d1a.budget import LEASE_STALE, lease_state
         self.volume.reload()
         other = self.read()
         if lease_state(other, self.clock()) == "fresh" and other.get("nonce") != self.nonce:
@@ -813,13 +815,13 @@ class TrialLease:
                 if current and current.get("nonce") != self.nonce: return
                 self.record["ended"] = self.clock(); self._write()
         except Exception as error:   # noqa: BLE001 - the lease then goes stale on its own
-            print(f"!!! [lease] could not mark {self.path} ended ({type(error).__name__}: {str(error)[:200]}); it goes stale in kev.budget.LEASE_STALE", flush=True)
+            print(f"!!! [lease] could not mark {self.path} ended ({type(error).__name__}: {str(error)[:200]}); it goes stale in d1a.budget.LEASE_STALE", flush=True)
 
 
 def heartbeat(lease, stop):
-    """TrialLease.beat every kev.budget.LEASE_HEARTBEAT seconds until `stop` (a thread of trial(), apart from the runs
+    """TrialLease.beat every d1a.budget.LEASE_HEARTBEAT seconds until `stop` (a thread of trial(), apart from the runs
     volume's commits); a failed beat is reported and tried again at the next one."""
-    from kev.budget import LEASE_HEARTBEAT
+    from d1a.budget import LEASE_HEARTBEAT
     while not stop.wait(LEASE_HEARTBEAT):
         try:
             lease.beat()
@@ -846,37 +848,37 @@ def spawn_mirror(paths, repo):
 def admit_study(suite, plan_path, name, gpu, existing, transfer, budget, timeout):
     """Validate a study locally before anything is spawned (name, budget bound against the timeout, plan, uncommitted
     changes) and build the run_trial jobs. Returns (jobs, bound_usd, options: GPU, timeout, retries and the resources a
-    full-weight study needs, kev.budget.trial_resources, plus "function": run_full_trial for a full-weight study, whose
+    full-weight study needs, d1a.budget.trial_resources, plus "function": run_full_trial for a full-weight study, whose
     containers need the disk with_options cannot give)."""
-    from kev.experiment import load_plan
+    from d1a.experiment import load_plan
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,79}", name):
         raise ValueError("study name must be a simple unique identifier")
     if (ROOT / "runs" / name).exists():
         raise FileExistsError("choose a new study name; existing results are immutable")
     trials = load_plan(ROOT / suite, ROOT / plan_path) if plan_path else []
     full_ft = any(t.get("full_ft") for t in trials)
-    if not 60 <= timeout <= MAX_TIMEOUT[full_ft] or not 0 < budget <= MAX_BUDGET[full_ft]:   # kev.budget: 8 h / $250, full-weight 24 h / $1,000
+    if not 60 <= timeout <= MAX_TIMEOUT[full_ft] or not 0 < budget <= MAX_BUDGET[full_ft]:   # d1a.budget: 8 h / $250, full-weight 24 h / $1,000
         raise ValueError(f"timeout must be 60..{MAX_TIMEOUT[full_ft]} seconds and study budget <= ${MAX_BUDGET[full_ft]}")
     upper = compute_bound(gpu, timeout, len(trials) + len(existing), full_ft)
     if upper > budget:
         raise ValueError(f"timeout-based compute bound ${upper:.2f} exceeds budget ${budget:.2f}")
     print(f"Compute admission bound ${upper:.2f}; excludes image build, startup, and storage; "
           + (f"counts {1 + FULL_FT_RETRIES} attempts per trial (a timed-out full-weight trial is continued from its resume point by "
-             "`kev.rounds watch` or `modal_app.py::resume --trial`, each continuation a new call)." if full_ft else "no automatic retries."), flush=True)
+             "`d1a.rounds watch` or `modal_app.py::resume --trial`, each continuation a new call)." if full_ft else "no automatic retries."), flush=True)
     commit, sources = local_git_commit(), local_source_hashes()
-    if subprocess.run(["git", "status", "--porcelain", "kev", "evals"], cwd=ROOT, capture_output=True, text=True).stdout.strip():
-        print("warning: kev/ or evals/ has uncommitted changes; provenance records the last commit, not the working tree", flush=True)
+    if subprocess.run(["git", "status", "--porcelain", "d1a", "evals"], cwd=ROOT, capture_output=True, text=True).stdout.strip():
+        print("warning: d1a/ or evals/ has uncommitted changes; provenance records the last commit, not the working tree", flush=True)
     entries = [(None, p) for p in existing] + [(t, None) for t in trials]
     cpu, memory = trial_resources(gpu, full_ft)
     # Modal's retries stay off even for a full-weight trial: one call is one attempt, and continuations are counted calls
-    # (kev.budget.FULL_FT_RETRIES says why Modal's retries gave round 22 two attempts instead of three)
+    # (d1a.budget.FULL_FT_RETRIES says why Modal's retries gave round 22 two attempts instead of three)
     options = {"gpu": gpu, "timeout": timeout, "retries": 0, "cpu": cpu, "memory": memory, "function": "run_full_trial" if full_ft else "run_trial", "full_ft": full_ft}
     return [Job(name, i, Path(ex).name if ex else f"trial-{i}", cfg or {}, suite, sources, commit, ex, transfer) for i, (cfg, ex) in enumerate(entries)], upper, options
 
 
 def deployed_run_trial(sources, function="run_trial"):
     """run_trial (or run_full_trial) on the *deployed* app (modal deploy modal_app.py), after checking it ships this
-    checkout's kev/*.py. Spawns on the ephemeral app die with the local client; the deployed app has no parent to lose."""
+    checkout's d1a/*.py. Spawns on the ephemeral app die with the local client; the deployed app has no parent to lose."""
     try:
         target = modal.Function.from_name(APP_NAME, function); target.hydrate()
         deployed_sources = modal.Function.from_name(APP_NAME, "remote_source_hashes").remote()
@@ -884,20 +886,20 @@ def deployed_run_trial(sources, function="run_trial"):
         raise SystemExit(f"deployed app not usable ({type(error).__name__}: {str(error)[:120]}); run `uv run modal deploy modal_app.py` first")
     if deployed_sources != sources:
         changed = sorted(k for k in set(deployed_sources) | set(sources) if deployed_sources.get(k) != sources.get(k))
-        raise SystemExit(f"deployed app has different kev/*.py than this checkout ({', '.join(changed)}); run `uv run modal deploy modal_app.py` first")
+        raise SystemExit(f"deployed app has different d1a/*.py than this checkout ({', '.join(changed)}); run `uv run modal deploy modal_app.py` first")
     return target
 
 
 def launch_detached(suite, plan_path, name, gpu, existing=(), transfer=None, budget=20.0, timeout=1800):
     """Validate locally, spawn every trial as its own call on the deployed app, record the call ids and return. Results
     land on the volume; `pull --name` collects and ranks them."""
-    from kev.suite import write_json
+    from d1a.suite import write_json
     jobs, upper, options = admit_study(suite, plan_path, name, gpu, existing, transfer, budget, timeout)
     full_ft = options.pop("full_ft")
     fn = deployed_run_trial(local_source_hashes(), options.pop("function")).with_options(**options)
     (ROOT / "runs").mkdir(exist_ok=True)
-    # the attempt ledger: `calls` is each trial's current call (the one kev.rounds watch polls), `attempts` every attempt it
-    # started, continuations included (kev.budget.trial_attempts counts them against the bound; gpu and timeout are what
+    # the attempt ledger: `calls` is each trial's current call (the one d1a.rounds watch polls), `attempts` every attempt it
+    # started, continuations included (d1a.budget.trial_attempts counts them against the bound; gpu and timeout are what
     # the bound was admitted for, so a continuation uses them). Each attempt is written pending (a nonce, no call) before its
     # spawn and gets its call id after: a crash in between leaves a pending entry, never an unrecorded attempt.
     record = {"name": name, "calls": {j.label: None for j in jobs}, "attempts": {j.label: [pending_attempt()] for j in jobs}, "bound_usd": round(upper, 2),
@@ -932,7 +934,7 @@ def launch(suite, plan_path, name, gpu, existing=(), transfer=None, budget=20.0,
 def pull_lock(study):
     """One pull of a study at a time: two concurrent pulls (a watcher launching reads for two trials that finished together)
     deleted and re-fetched each other's trial directories. A second pull waits for the first, then refreshes."""
-    from kev.suite import file_lock
+    from d1a.suite import file_lock
     return file_lock(ROOT / "runs" / f".pull-{study}.lock")
 
 
@@ -957,7 +959,7 @@ def _pull_study(study, weights=False):
         (target / "results.jsonl").unlink(missing_ok=True)   # derived from the trials' result.json; aggregate rebuilds it
         running = sorted(p.name for p in target.glob("*-trial-*") if p.is_dir() and not (p / "result.json").exists())
         print(f"{study}: fetched {len(missing)} trial dir(s) {missing or ''}" + (f"; still running (or failed, no result.json): {running}" if running else ""))
-    subprocess.run([sys.executable, "-m", "kev.experiment", "--aggregate", "--out", str(target)], check=True, cwd=ROOT)
+    subprocess.run([sys.executable, "-m", "d1a.experiment", "--aggregate", "--out", str(target)], check=True, cwd=ROOT)
     return target
 
 
@@ -980,8 +982,8 @@ def study(suite: str, plan: str, name: str, gpu: str = GPU, existing: str = "", 
               volumes={RUNS_MOUNT: runs_volume, HF_MOUNT: hf_cache}, secrets=secrets)
 def run_resume(study, trial, suite, transfer, expected_sources, git_commit):
     """Finish calibration/development/transfer scoring for an interrupted trial whose checkpoint is complete."""
-    from kev.experiment import resume_trial
-    os.environ["KEV_GIT_COMMIT"] = git_commit
+    from d1a.experiment import resume_trial
+    os.environ["D1A_GIT_COMMIT"] = git_commit
     out = Path(RUNS_MOUNT) / study / trial
     runs_volume.reload()
     try:
@@ -1001,7 +1003,7 @@ def pending_attempt(now=time.time):
 
 
 def trial_lease(study, trial):
-    """The trial's lease (TrialLease) as the kev-leases volume has it now, or None."""
+    """The trial's lease (TrialLease) as the d1a-leases volume has it now, or None."""
     try:
         return json.loads(b"".join(leases_volume.read_file(f"/{study}/{trial}/attempt.json")))
     except (FileNotFoundError, modal.exception.NotFoundError):
@@ -1014,12 +1016,12 @@ LEASE_POLL = 30   # seconds between looks at a fresh lease while a continuation 
 def continue_full_trial(study, trial, config, suite, transfer, sources, commit, beyond_bound=None, now=time.time, sleep=time.sleep, wait=None):
     """Spawn the next attempt of a full-weight trial (<NN>-<label> under /runs/<study>): run_full_trial again, which
     continues from the trial's last resume point, or only scores it when its checkpoint is complete
-    (kev.experiment.continue_trial). Under a per-study lock, against the study's attempt ledger (runs/<study>.spawn.json):
+    (d1a.experiment.continue_trial). Under a per-study lock, against the study's attempt ledger (runs/<study>.spawn.json):
     1. a pending ledger entry (written before a spawn whose call id was never recorded) is resolved first: adopted when the
        trial's lease carries its nonce (its container started; the lease names the call), refused while younger than
-       kev.budget.LEASE_STALE (it may still start), then marked abandoned (still counted: should it start late, its lease
+       d1a.budget.LEASE_STALE (it may still start), then marked abandoned (still counted: should it start late, its lease
        claim finds the next attempt's fresh lease and it refuses);
-    2. refused once kev.budget.trial_attempts has no attempt left, and unless the current call ended by a timeout (or was
+    2. refused once d1a.budget.trial_attempts has no attempt left, and unless the current call ended by a timeout (or was
        refused by a lease), since a running call means a second attempt would share the directory;
     3. waits up to `wait` (default LEASE_STALE + a minute) for the trial's lease to be ended or stale, so the old
        container is demonstrably gone (its 30 s cancellation grace, its last commits), else refuses;
@@ -1027,12 +1029,12 @@ def continue_full_trial(study, trial, config, suite, transfer, sources, commit, 
        records the call id as the trial's current call.
     `beyond_bound` = (gpu, timeout) spawns for a study without a ledger (an attached launch, or a record written before
     the ledger), outside any admission bound, and says so (the lease wait still applies). Returns the call id."""
-    from kev.budget import LEASE_STALE, lease_state, trial_attempts
-    from kev.rounds import poll_modal
-    from kev.suite import file_lock, read_json, write_json
+    from d1a.budget import LEASE_STALE, lease_state, trial_attempts
+    from d1a.rounds import poll_modal
+    from d1a.suite import file_lock, read_json, write_json
     index, label = trial.split("-", 1)
     wait = LEASE_STALE + 60 if wait is None else wait
-    # kev.suite.file_lock serialises ledger changes on this machine only (its docstring predates this third use; kev/suite.py
+    # d1a.suite.file_lock serialises ledger changes on this machine only (its docstring predates this third use; d1a/suite.py
     # is an evaluator file, so it is not edited here); across machines and containers the trial's lease keeps attempts apart
     with file_lock(ROOT / "runs" / f".continue-{study}.lock"):
         record = read_json(spawn_record(study)) if spawn_record(study).exists() else None
@@ -1088,9 +1090,9 @@ def continue_full_trial(study, trial, config, suite, transfer, sources, commit, 
 
 
 def poll_status(call_id, poll):
-    """kev.rounds.poll_modal's status of a call; a raised error is "failed (...)", or "unreachable (...)" when it is this
-    machine's network (kev.rounds.transient)."""
-    from kev.rounds import transient
+    """d1a.rounds.poll_modal's status of a call; a raised error is "failed (...)", or "unreachable (...)" when it is this
+    machine's network (d1a.rounds.transient)."""
+    from d1a.rounds import transient
     try:
         return poll(call_id)
     except Exception as error:   # noqa: BLE001 - the trial's own error, or the network: either way not a timeout
@@ -1102,7 +1104,7 @@ def resume(study: str, suite: str, transfer: str = "evals/v4/transfer-v4", gpu: 
     """Spawn evaluation for every trial in a study that has checkpoint/head.pt but no result.json, and continue every
     unfinished full-weight trial (no result.json, no failed.json) with the next attempt (continue_full_trial: counted in
     the study's attempt ledger, with the ledger's GPU and timeout). `trial` (<NN>-<label> or <label>) limits it to one
-    trial: `kev.rounds watch` continues a timed-out trial this way. --gpu/--timeout serve run_resume and, with
+    trial: `d1a.rounds watch` continues a timed-out trial this way. --gpu/--timeout serve run_resume and, with
     --beyond-bound, a continuation of a trial that has no ledger."""
     fn = modal.Function.from_name(APP_NAME, "run_resume").with_options(gpu=gpu)
     sources, commit = local_source_hashes(), local_git_commit()
@@ -1141,7 +1143,7 @@ def locked_test(trial: str, name: str, decision: str = "evals/v4/decision-v4", t
                 timeout: int = 3600, memory_mb: int = 49152):
     """One locked-test read for a promoted trial (path under the runs volume, e.g. v4-4b-baseline/01-trial-1). A 27B needs
     --gpu H200 --timeout 14400 --memory-mb 131072 (its bf16 weights are staged through host memory while loading)."""
-    from kev.suite import read_json
+    from d1a.suite import read_json
     target = ROOT / "runs/locked" / name
     if (target / "summary.json").exists() and all(k in read_json(target / "summary.json")["suites"] for k in ("decision", "transfer")):
         raise FileExistsError(f"{target} is complete; the locked test is read once per candidate")

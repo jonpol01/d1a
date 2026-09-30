@@ -1,3 +1,5 @@
+# Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables).
 import argparse
 import json
 import sys
@@ -8,7 +10,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import chartstyle as cs
-from kev.suite import read_json
+from d1a.suite import read_json
 
 
 def main():

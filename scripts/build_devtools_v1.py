@@ -1,3 +1,5 @@
+# Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables).
 """devtools-v1: developer-tooling decisions from licence-clean public data with human or heuristic labels (no LLM labels).
 
     uv run python scripts/build_devtools_v1.py --out /tmp/x/devtools-v1 --reproduce-v1   # rebuild the frozen devtools-v1 byte for byte
@@ -31,8 +33,8 @@ Splits: development and test ~150 records per source, train the rest capped at T
 only). Groups (repository / project / BFCL item / normalised prompt) never span splits: they are dealt in a seeded hash
 order to the split furthest below its share. Every state is deduplicated by normalised text across all sources and
 splits (test first, then development, then train). Noul labels are balanced exactly (pairs, within project where the
-source has projects); choices are drawn round-robin over labels. Every record is checked with kev.model.fits against the
-Qwen3.5 tokenizer at the lifted training context (kev.model.training_context(MAX_TRAIN_STATE)). Deterministic: the same
+source has projects); choices are drawn round-robin over labels. Every record is checked with d1a.model.fits against the
+Qwen3.5 tokenizer at the lifted training context (d1a.model.training_context(MAX_TRAIN_STATE)). Deterministic: the same
 inputs give byte-identical partitions and manifest.
 
 What a new build does differently from devtools-v1. `--reproduce-v1` keeps all three v1 behaviours, and exists only to
@@ -60,9 +62,9 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from kev.data import materialize  # noqa: E402
-from kev.model import MAX_STATE, MAX_TRAIN_STATE_8K as MAX_TRAIN_STATE, fits, load_tokenizer, training_context, user_tokens  # noqa: E402
-from kev.suite import (ADMISSION_TOKENIZER as TOKENIZER, CONTEXT, GIT_LIMIT, digest, normalise_text, read_json, read_jsonl, text_digest,  # noqa: E402
+from d1a.data import materialize  # noqa: E402
+from d1a.model import MAX_STATE, MAX_TRAIN_STATE_8K as MAX_TRAIN_STATE, fits, load_tokenizer, training_context, user_tokens  # noqa: E402
+from d1a.suite import (ADMISSION_TOKENIZER as TOKENIZER, CONTEXT, GIT_LIMIT, digest, normalise_text, read_json, read_jsonl, text_digest,  # noqa: E402
                        write_json, write_jsonl)
 
 VERSION = "devtools-v1"     # the frozen suite; --reproduce-v1 rebuilds it
@@ -74,7 +76,7 @@ CONTEXT_LINES, CONTEXT_CHARS = 10, 1200
 MAX_PATCH_CHARS, MAX_DIFF_CHARS, MAX_DIFF_LINES, MAX_LINE_CHARS = 6000, 8000, 240, 400
 SPLITS = ("test", "development", "train")
 # characters json.dumps(ensure_ascii=False) leaves raw but str.splitlines() breaks lines on; records containing them are
-# skipped (line_safe). kev.suite.read_jsonl splits on "\n" only since #101, but other JSONL readers do not
+# skipped (line_safe). d1a.suite.read_jsonl splits on "\n" only since #101, but other JSONL readers do not
 SPLITLINES = re.compile("[\u0085\u2028\u2029]")
 
 ZENODO_CR = {"record": 6900648, "doi": "10.5281/zenodo.6900648", "file": "Diff_Quality_Estimation.zip", "md5": "aad78e57d7d591172922da96e38e47dd",
@@ -667,7 +669,7 @@ def summarise(parts, tok):
             balance[split][s] = {k: dict(sorted(c.items())) for k, c in sorted(qs.items())}
         lengths[split] = {}
         for s, v in sorted(by.items()):
-            n = sorted(len(user_tokens(tok, materialize(r)["state"])) + 1 for r in v)   # as kev.model.encode counts it (state token included)
+            n = sorted(len(user_tokens(tok, materialize(r)["state"])) + 1 for r in v)   # as d1a.model.encode counts it (state token included)
             lengths[split][s] = {"min": n[0], "median": n[len(n) // 2], "p95": n[int(0.95 * (len(n) - 1))], "max": n[-1], f"over_{MAX_STATE}": sum(x > MAX_STATE for x in n)}
     return counts, balance, lengths, groups
 
@@ -751,7 +753,7 @@ def main():
     for split in ("train", "development", "test"):
         path = out / f"{split}.jsonl"
         write_jsonl(path, parts[split])
-        if read_jsonl(path) != parts[split]: raise AssertionError(f"{path} does not round-trip through kev.suite.read_jsonl")
+        if read_jsonl(path) != parts[split]: raise AssertionError(f"{path} does not round-trip through d1a.suite.read_jsonl")
         files[path.name] = {"sha256": digest(path), "records": len(parts[split]), "questions": sum(len(r["questions"]) for r in parts[split]),
                             "bytes": path.stat().st_size, "in_git": path.stat().st_size <= GIT_LIMIT, "by_source": counts[split]}
     trainable = [s for s in SOURCES if SOURCES[s]["trainable"]]
@@ -762,13 +764,13 @@ def main():
         "counts": counts, "groups": groups, "label_balance": balance, "state_tokens": lengths,
         "tokenizer": {"model": TOKENIZER[0], "revision": TOKENIZER[1]}, "base_revisions": {TOKENIZER[0]: TOKENIZER[1]},
         "context": {**training_context(MAX_TRAIN_STATE), "truncate": False, "default_training_context": CONTEXT,
-                    "note": "every record fits kev.model.training_context(MAX_TRAIN_STATE) under the tokenizer above; records whose state exceeds the default 384 tokens (state_tokens.*.over_<MAX_STATE>) need kev.train --max_state"},
+                    "note": "every record fits d1a.model.training_context(MAX_TRAIN_STATE) under the tokenizer above; records whose state exceeds the default 384 tokens (state_tokens.*.over_<MAX_STATE>) need d1a.train --max_state"},
         "selection": f"development/test {EVAL_SIZE} records per source, train up to {TRAIN_CAP} per trainable source; groups (repository, project, BFCL item, prompt) dealt to splits in a seeded hash order and never span splits; "
                      "normalised-text state dedupe across all sources and splits (test, then development, then train); noul labels exactly balanced in pairs (within project for codereviewer / flakeflagger); "
                      "choices drawn round-robin over labels; aegis keeps its native train/validation/test split; balance is a sampling choice, not the natural rate (flaky tests are 3.6% of FlakeFlagger)",
         "label_protocol": "no LLM labels: human (codereviewer, aegis), heuristic (commitpackft verb class, flakeflagger reruns), by construction (commitpackft message match, when2call), source label (prompt_injection)",
         "build_report": report, "licences_file": {"path": str(LICENCES.relative_to(Path(__file__).resolve().parents[1])), "sha256": digest(LICENCES)},
-        "large_partitions": "partitions with in_git false are gitignored; upload them to the Hub mirror (kev.suite.SUITES_DATASET) and bump SUITES_REVISION before load_split can fetch them elsewhere",
+        "large_partitions": "partitions with in_git false are gitignored; upload them to the Hub mirror (d1a.suite.SUITES_DATASET) and bump SUITES_REVISION before load_split can fetch them elsewhere",
         "code_sha256": digest(Path(__file__)),
     })
     print(json.dumps({"counts": counts, "files": {k: {kk: v[kk] for kk in ("records", "bytes", "in_git")} for k, v in files.items()}}, indent=1))

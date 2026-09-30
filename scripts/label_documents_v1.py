@@ -1,3 +1,5 @@
+# Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); the config directory is ~/.config/d1a.
 """Label documents-v1 candidates with LLMs through the Vercel AI Gateway (PLAN_27b B2, revised protocol, at git tag
 research-archive-2026-09-24), blind to the native labels. One call per (model, document) answers all of that document's questions; answers are cached per model and
 split, so a rerun resumes; a call that failed (an `error` result: a non-retryable HTTP status or retries exhausted) is
@@ -7,7 +9,7 @@ overwrite each other's total); within a run, the calls already in flight when it
 finish and are recorded, so the ledger can end slightly above the cap. A response without `usage.cost` is not free, it is
 unknown: those are counted in the ledger ("uncosted") and the run stops once more than --max-uncosted have been seen.
 
-    export AI_GATEWAY_API_KEY=$(cat ~/.config/kev/ai_gateway_key)
+    export AI_GATEWAY_API_KEY=$(cat ~/.config/d1a/ai_gateway_key)
     uv run python scripts/label_documents_v1.py --split train --models deepseek/deepseek-v3.2,alibaba/qwen3-235b-a22b-thinking
     uv run python scripts/label_documents_v1.py --split test --models anthropic/claude-opus-4.5,openai/gpt-5,google/gemini-3-flash
 
@@ -20,7 +22,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from kev.suite import read_json, read_jsonl  # noqa: E402
+from d1a.suite import read_json, read_jsonl  # noqa: E402
 
 WORK = Path("runs/documents-v1-work")
 URL = "https://ai-gateway.vercel.sh/v1/chat/completions"

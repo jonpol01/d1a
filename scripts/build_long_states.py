@@ -1,11 +1,13 @@
+# Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables).
 """Long-state records (PLAN.md round 4, item 4.12; PLAN_27b A3; both at git tag research-archive-2026-09-24): a
 decision-v7 record's state buried among unrelated states from the same partition until the state reaches about 1k, 2k or 4k tokens. The question and label are unchanged
-and a note names the primary record, as in kev.transfer_v9.buried (which stops at three neighbours and ~400 tokens).
+and a note names the primary record, as in d1a.transfer_v9.buried (which stops at three neighbours and ~400 tokens).
 
     uv run python scripts/build_long_states.py --out evals/round4/longstate-v1
 
 Writes
-    train.jsonl        long-state records from decision-v7/train: delta training data (kev.train --data ... --max_state 4608)
+    train.jsonl        long-state records from decision-v7/train: delta training data (d1a.train --data ... --max_state 4608)
     train_control.jsonl  the same primaries unburied, one per long record: the matched short-state continuation control
     development.jsonl  long-state records from decision-v7/development, plus each primary unburied (source
                        longstate_control), so a paired read gives the cost of burial per length; eval-only, scored under
@@ -13,18 +15,18 @@ Writes
     manifest.json      sha256 per file, seed, lengths, tokenizer, and the context the development partition is scored in
 
 Sources: every trainable decision-v7 source; neighbours never share the primary's id. Lengths are targeted in tokens of
-the JSON serialisation (longstate-v1 was built that way and is kept byte-identical); the model sees kev.api.render's
+the JSON serialisation (longstate-v1 was built that way and is kept byte-identical); the model sees d1a.api.render's
 text, so the manifest also reports rendered-state token counts per length (`rendered_state_tokens`), and every record is
-checked against the serving context with kev.model.fits.
+checked against the serving context with d1a.model.fits.
 """
 import argparse, copy, hashlib, json, random, sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from kev.api import render  # noqa: E402
-from kev.data import materialize  # noqa: E402
-from kev.model import MAX_TRAIN_STATE_8K as MAX_TRAIN_STATE, fits, load_tokenizer  # noqa: E402
-from kev.suite import ADMISSION_TOKENIZER as TOKENIZER, SERVING_CONTEXT_8K as SERVING_CONTEXT, digest, load_split, read_manifest, record_digest, write_json, write_jsonl  # noqa: E402
+from d1a.api import render  # noqa: E402
+from d1a.data import materialize  # noqa: E402
+from d1a.model import MAX_TRAIN_STATE_8K as MAX_TRAIN_STATE, fits, load_tokenizer  # noqa: E402
+from d1a.suite import ADMISSION_TOKENIZER as TOKENIZER, SERVING_CONTEXT_8K as SERVING_CONTEXT, digest, load_split, read_manifest, record_digest, write_json, write_jsonl  # noqa: E402
 
 SUITE = "evals/v7/decision-v7"
 LENGTHS = (1024, 2048, 4096)
@@ -55,7 +57,7 @@ def bury(record, pool, length, rng, count):
             continue
         position = rng.randrange(len(records) + 1)
         records.insert(position, other["state"]); slot += position <= slot
-    if n > min(1.25 * length, MAX_TRAIN_STATE - 64):   # every record stays trainable (kev.model.training_context) and servable
+    if n > min(1.25 * length, MAX_TRAIN_STATE - 64):   # every record stays trainable (d1a.model.training_context) and servable
         return None
     rec = copy.deepcopy(record); rec["state"] = state
     for q in rec["questions"].values(): q["src"] = f"longstate_{length}_{q['src']}"

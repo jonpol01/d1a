@@ -1,3 +1,5 @@
+# Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables).
 """Overlap screen for evals/longdoc-v1 (counts only, never reference text): writes <suite>/overlap.json.
 
     uv run python scripts/screen_longdoc_v1.py --suite evals/longdoc-v1 --jevbench /tmp/jevbench/datasets/public
@@ -23,8 +25,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from kev.api import render  # noqa: E402
-from kev.suite import digest, load_split, read_jsonl, read_manifest, write_json  # noqa: E402
+from d1a.api import render  # noqa: E402
+from d1a.suite import digest, load_split, read_jsonl, read_manifest, write_json  # noqa: E402
 
 N, MIN_GRAMS, COMMON, CONTAINMENT = 8, 10, 50, 0.5
 LEDGAR = ("coastalcph/lex_glue", "c23fdff1a6bf74e0e1a71cb86f1e781d37da888c", [f"ledgar/{s}-00000-of-00001.parquet" for s in ("train", "validation", "test")])

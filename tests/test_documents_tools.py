@@ -1,3 +1,5 @@
+# Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables).
 """The documents-v1 / documents-v2 suite tooling (scripts/{build,label,freeze}_documents_v*.py): answer parsing, the
 two-adjudicator agreement rule, the freeze gates and documents-v2's exclusion of every documents-v1 candidate. No network,
 no API, no frozen data: every input is synthetic."""
@@ -8,7 +10,7 @@ import urllib.error
 
 import pytest
 
-from kev.suite import read_jsonl, write_json, write_jsonl
+from d1a.suite import read_jsonl, write_json, write_jsonl
 from scripts import build_documents_v1 as v1
 from scripts import build_documents_v2 as v2
 from scripts import freeze_documents_v1 as fz

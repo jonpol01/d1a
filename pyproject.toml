@@ -1,17 +1,20 @@
+# Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a, D1A metadata and URLs, the thin client split out.
 [build-system]
 requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "kev"
+name = "d1a"
 version = "0.1.0"
-description = "Laptop-scale reconstruction of a Jev-style decision model with a TypeSafe-compatible /v1/systemone API"
+description = "D1A: a small decision model on Gemma 4 with a TypeSafe-compatible /v1/systemone API, built on Kev"
 readme = "README.md"
 license = "Apache-2.0"
-license-files = ["LICENSE"]
-authors = [{ name = "Jared Palmer" }]
+license-files = ["LICENSE", "NOTICE"]
+authors = [{ name = "Jared Palmer" }, { name = "John Soliva" }]
+maintainers = [{ name = "John Soliva" }]
 requires-python = ">=3.12,<3.14"
-keywords = ["decision-model", "calibration", "lora", "typesafe", "transformers"]
+keywords = ["decision-model", "calibration", "lora", "typesafe", "transformers", "gemma"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
@@ -30,16 +33,16 @@ dependencies = [
 ]
 
 [project.urls]
-Repository = "https://github.com/jaredpalmer/kev"
-Issues = "https://github.com/jaredpalmer/kev/issues"
-"Model cards" = "https://github.com/jaredpalmer/kev/tree/main/docs/model-cards"
+Repository = "https://github.com/jonpol01/d1a"
+Issues = "https://github.com/jonpol01/d1a/issues"
+Upstream = "https://github.com/jaredpalmer/kev"
 
 [project.optional-dependencies]
 serve = [
     "fastapi>=0.115",
     "typesafe-sdk>=0.6.0",
     "uvicorn>=0.30",
-    "mlx-lm>=0.31.3,<0.32; sys_platform == 'darwin' and platform_machine == 'arm64'",   # the Apple Silicon backend (kev.mlx_model); a no-op elsewhere
+    "mlx-lm>=0.31.3,<0.32; sys_platform == 'darwin' and platform_machine == 'arm64'",   # the Apple Silicon backend (d1a.mlx_model); a no-op elsewhere
 ]
 mlx = [
     "mlx-lm>=0.31.3,<0.32; sys_platform == 'darwin' and platform_machine == 'arm64'",
@@ -55,7 +58,7 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = ["server: needs a running kev.serve instance (KEV_BASE_URL)"]
+markers = ["server: needs a running d1a.serve instance (D1A_BASE_URL)"]
 
 [tool.setuptools]
-packages = ["kev"]
+packages = ["d1a"]

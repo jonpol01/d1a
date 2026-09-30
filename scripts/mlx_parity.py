@@ -1,3 +1,5 @@
+# Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables).
 """MLX backend parity and latency against the fp32 torch path, on this Mac.
 
     uv run --extra mlx python scripts/mlx_parity.py --run jaredpalmer/kev-0.8b --n 60
@@ -12,11 +14,11 @@ import argparse, gc, json, statistics, time
 import torch
 from pathlib import Path
 
-from kev.checkpoint import Checkpoint, LoadOptions
-from kev.data import materialize
-from kev.device import empty_cache
-from kev.model import load_tokenizer
-from kev.suite import load_split, write_json
+from d1a.checkpoint import Checkpoint, LoadOptions
+from d1a.data import materialize
+from d1a.device import empty_cache
+from d1a.model import load_tokenizer
+from d1a.suite import load_split, write_json
 
 
 def timed(fn, reps):

@@ -1,3 +1,5 @@
+# Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables).
 """Reliability head (PLAN.md round 4, item 4.10): re-rank confidences with a logistic model of P(correct) on features
 of the served distribution, fitted on the decision-v7 calibration partition (never used for training or selection),
 evaluated on out-of-distribution rows it never saw. A temperature cannot reorder confidences within a question type;
@@ -9,7 +11,7 @@ Features: p_max, margin (top-1 minus top-2), normalised entropy, log K, question
 without logits, so they are tempered to the checkpoint's shipped temperature from floored probabilities (approximate,
 like scripts/calibration_audit.py); external rows are used as served. Accuracy is unchanged by construction; the
 comparison is AURC and coverage at <= 5% error of the head's confidence against p_max, paired over the same questions
-with the record-clustered bootstrap unit of kev.metrics.
+with the record-clustered bootstrap unit of d1a.metrics.
 """
 import argparse, math, sys
 from pathlib import Path
@@ -17,9 +19,9 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from kev.checkpoint import read_meta  # noqa: E402
-from kev.metrics import area_under_risk_coverage, cluster_resamples, coverage_at_error, scored_rows, served_at  # noqa: E402
-from kev.suite import read_json, write_json  # noqa: E402
+from d1a.checkpoint import read_meta  # noqa: E402
+from d1a.metrics import area_under_risk_coverage, cluster_resamples, coverage_at_error, scored_rows, served_at  # noqa: E402
+from d1a.suite import read_json, write_json  # noqa: E402
 
 TYPES = ("choice", "noul", "score")
 

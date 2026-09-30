@@ -1,3 +1,5 @@
+# Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables).
 """documents-v1 candidates (PLAN_27b B2, at git tag research-archive-2026-09-24): real consumer-complaint narratives
 with the complainant's own product and issue labels, stratified by product and length, split by text. Writes unlabelled-by-AI candidates; scripts/label_documents_v1.py
 checks the labels and scripts/freeze_documents_v1.py writes the frozen suite.
@@ -15,7 +17,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from kev.suite import digest, text_digest, write_json, write_jsonl  # noqa: E402
+from d1a.suite import digest, text_digest, write_json, write_jsonl  # noqa: E402
 
 REPO, REVISION = "davidheineman/consumer-finance-complaints-large", "44cfa170a402e254407470275ce05d7dcaccde30"
 PRODUCTS = {   # canonical key: (description shown as the option, raw CFPB product names over the years)

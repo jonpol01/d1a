@@ -1,3 +1,5 @@
+// Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
+// Changes for D1A Copyright 2026 John Soliva: rebranded to D1A.
 import { useEffect, useMemo, useRef, useState } from "react";
 
 type Judge = { model: string; label: string; rationale: string };
@@ -99,16 +101,16 @@ export default function App() {
   const items = file?.items ?? [];
 
   function load(text: string, name: string) {
-    const key = "kev-review:" + hash(text);
+    const key = "d1a-review:" + hash(text);
     const { items, bad } = parse(text);
     const saved = localStorage.getItem(key);
     setFile({ name, items, bad, key });
     setS(saved ? { ...EMPTY, ...JSON.parse(saved) } : EMPTY);
     setError("");
     try {
-      localStorage.setItem("kev-review:last", JSON.stringify({ name, text }));
+      localStorage.setItem("d1a-review:last", JSON.stringify({ name, text }));
     } catch {
-      localStorage.removeItem("kev-review:last"); // too big to keep; ?file= or re-drop still resumes
+      localStorage.removeItem("d1a-review:last"); // too big to keep; ?file= or re-drop still resumes
     }
   }
   const loadFile = (f: File) => f.text().then((t) => load(t, f.name));
@@ -120,7 +122,7 @@ export default function App() {
         .then((t) => load(t, name), (e) => setError(`Could not fetch ${name}: ${e}`));
       return;
     }
-    const last = localStorage.getItem("kev-review:last");
+    const last = localStorage.getItem("d1a-review:last");
     if (last) {
       const { name, text } = JSON.parse(last);
       load(text, name);
@@ -233,7 +235,7 @@ export default function App() {
       }}
     >
       <header className="flex flex-wrap items-center gap-2 border-b border-gray-200 bg-white px-4 py-2 text-xs">
-        <span className="font-semibold">Kev review</span>
+        <span className="font-semibold">D1A review</span>
         <label className={btn() + " cursor-pointer"}>
           {file ? file.name : "Open .jsonl"}
           <input type="file" accept=".jsonl,.json,.txt" className="hidden" onChange={(e) => e.target.files?.[0] && loadFile(e.target.files[0])} />

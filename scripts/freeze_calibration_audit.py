@@ -1,3 +1,5 @@
+# Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables).
 import argparse
 import copy
 import hashlib
@@ -10,12 +12,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from kev.composition import DEV_SHAPES, check_group, generate as compose
-from kev.contrastive import generate as contrastive
-from kev.data import ALL_REPOS, ALL_SOURCES, build, materialize
-from kev.model import fits, load_tokenizer
-from kev.suite import digest, load_split, read_jsonl, read_manifest, record_digest, semantic_hash, SPLITS, text_digest, validate_training, write_json, write_jsonl
-from kev.transfer_v9 import QWEN35, unknowable
+from d1a.composition import DEV_SHAPES, check_group, generate as compose
+from d1a.contrastive import generate as contrastive
+from d1a.data import ALL_REPOS, ALL_SOURCES, build, materialize
+from d1a.model import fits, load_tokenizer
+from d1a.suite import digest, load_split, read_jsonl, read_manifest, record_digest, semantic_hash, SPLITS, text_digest, validate_training, write_json, write_jsonl
+from d1a.transfer_v9 import QWEN35, unknowable
 
 PUBLIC = ("mmlu", "emotion", "tweet_offensive", "qnli", "paws", "sciq")
 

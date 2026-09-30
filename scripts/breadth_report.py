@@ -1,4 +1,6 @@
-"""Score kev.benchmark result directories on evals/breadth-v1 the way the community Decision Index scores its panel.
+# Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables).
+"""Score d1a.benchmark result directories on evals/breadth-v1 the way the community Decision Index scores its panel.
 
     uv run python scripts/breadth_report.py --suite evals/breadth-v1 \
         --result Kev-27B=runs/breadth-v1-kev-27b --result Jev=runs/breadth-v1-jev --out runs/breadth-v1-report
@@ -7,7 +9,7 @@ Per dataset: the raw score (question accuracy, or case-exact accuracy where the 
 (a question or record with no row, e.g. refused as too long, counts as wrong against the full partition), the chance
 level of uniform random answers on the same questions, and the chance-corrected skill clip((score - chance) / (1 -
 chance)). An area is the plain mean of its datasets; the index is 100 x the mean of the five areas (the Decision Index
-0.2 formula, data/methodology.json in multimodalart/jev-decision-index). Calibration (ECE, Brier, NLL; kev.metrics) is
+0.2 formula, data/methodology.json in multimodalart/jev-decision-index). Calibration (ECE, Brier, NLL; d1a.metrics) is
 computed on the returned probabilities of answered questions, per dataset, per area (pooled rows) and overall (pooled,
 plus the mean of the dataset ECEs). Writes report.json and report.md into --out and prints the markdown.
 """
@@ -18,9 +20,9 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from kev.benchmark import labels  # noqa: E402
-from kev.metrics import metrics  # noqa: E402
-from kev.suite import digest, load_split, read_json, read_manifest, write_json  # noqa: E402
+from d1a.benchmark import labels  # noqa: E402
+from d1a.metrics import metrics  # noqa: E402
+from d1a.suite import digest, load_split, read_json, read_manifest, write_json  # noqa: E402
 
 CALIBRATION = ("ece", "brier", "nll", "mean_conf")
 
@@ -160,7 +162,7 @@ def markdown(systems, manifest):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--suite", required=True)
-    ap.add_argument("--result", action="append", required=True, help="NAME=DIR of a kev.benchmark result (rows.json [+ report.json])")
+    ap.add_argument("--result", action="append", required=True, help="NAME=DIR of a d1a.benchmark result (rows.json [+ report.json])")
     ap.add_argument("--split", choices=["development", "test"], default="development")
     ap.add_argument("--allow-test", action="store_true")
     ap.add_argument("--out", help="directory for report.json and report.md")

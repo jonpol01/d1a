@@ -1,3 +1,5 @@
+# Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables).
 """Contamination screen for a generated suite against an external benchmark we must not tune toward (JevBench).
 
     uv run python scripts/screen_overlap.py --suite evals/hard-v1 --external /tmp/jevbench/datasets/public --out evals/hard-v1/overlap.json
@@ -16,14 +18,14 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from kev.api import render  # noqa: E402
-from kev.suite import digest, read_jsonl, write_json  # noqa: E402
+from d1a.api import render  # noqa: E402
+from d1a.suite import digest, read_jsonl, write_json  # noqa: E402
 
 N = 8
 PARTITIONS = ("train", "development", "test")
 
 
-# Words only (\w+), not kev.suite.normalise_text: punctuation and layout differ between our templates and the external
+# Words only (\w+), not d1a.suite.normalise_text: punctuation and layout differ between our templates and the external
 # items, and an n-gram overlap screen should see through them; exact deduplication inside a suite deliberately does not.
 def words(value):
     return re.findall(r"\w+", (value if isinstance(value, str) else render(value)).casefold())

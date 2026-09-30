@@ -1,3 +1,5 @@
+# Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables).
 """Trial 2a of the night-2 plan: does one temperature per (question type, option count) transfer out of domain better than
 a single temperature? Fitted on the in-distribution development rows (never on transfer), applied to the out-of-domain
 development rows. Reports raw / single-T / grouped-T for accuracy (unchanged by construction), Brier, ECE, confident-error
@@ -13,8 +15,8 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from kev.metrics import metrics  # noqa: E402
-from kev.suite import read_json
+from d1a.metrics import metrics  # noqa: E402
+from d1a.suite import read_json
 
 RUNS = {"Kev-9B": "q35-9b/01-trial-1", "Kev-4B": "q35-4b-s23/00-trial-0", "Kev-0.8B": "q35-08b/02-trial-2"}
 GRID = np.exp(np.linspace(np.log(0.25), np.log(4), 81))

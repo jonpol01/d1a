@@ -1,4 +1,6 @@
-"""Full-weight training probe: peak memory, seconds per optimizer step and throughput of `kev.train --full_ft 1` on
+# Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables).
+"""Full-weight training probe: peak memory, seconds per optimizer step and throughput of `d1a.train --full_ft 1` on
 records shaped like the SFT corpus, the wall time and cost that implies for one and two epochs of it, the time a resume
 point takes to write, and a loader check of the checkpoint it writes (bf16 and fp32 eval memory, their parity).
 
@@ -10,7 +12,7 @@ Data: `experiments/sft-v1-lengths.json` holds token shapes (state tokens, branch
 the three parts of the private SFT corpus, counts only. A probe record draws a shape (from one part with `--mix <part>`,
 or from all three in the corpus's proportions with `--mix all`), fills its state with decision-v7 training text to that
 length and takes, for each question, the decision-v7 question whose branch is nearest in length. Record tokens are the
-packed encoding, the state once, which is also what a shared prefix runs (kev.shared_prefix); row tokens are what the
+packed encoding, the state once, which is also what a shared prefix runs (d1a.shared_prefix); row tokens are what the
 row form runs (the state once per question). Throughput is the mean step after `--warmup` steps.
 `--no_conv_kernel` hides causal-conv1d from the trainer (transformers then runs its PyTorch convolution), for an A/B.
 Writes report.json.
@@ -20,17 +22,17 @@ from pathlib import Path
 
 import torch
 
-from kev.api import render
-from kev.budget import GPU_HOURLY, gpu_count, hourly_rate
-from kev.checkpoint import Checkpoint, LoadOptions
-from kev.data import materialize
-from kev.device import allocated_bytes, empty_cache
-from kev.model import MAX_TRAIN_STATE, MAX_TRAIN_STATE_8K, encode, load_tokenizer, rows_of, training_context, user_tokens
-from kev.suite import ADMISSION_BRANCH_HEADROOM, load_split, read_json, write_json, write_jsonl
+from d1a.api import render
+from d1a.budget import GPU_HOURLY, gpu_count, hourly_rate
+from d1a.checkpoint import Checkpoint, LoadOptions
+from d1a.data import materialize
+from d1a.device import allocated_bytes, empty_cache
+from d1a.model import MAX_TRAIN_STATE, MAX_TRAIN_STATE_8K, encode, load_tokenizer, rows_of, training_context, user_tokens
+from d1a.suite import ADMISSION_BRANCH_HEADROOM, load_split, read_json, write_json, write_jsonl
 
 ROOT = Path(__file__).resolve().parents[1]
 # the corpus-mix probe keeps the state limit PR #125's numbers were measured under (the SFT corpus's states reach ~7k
-# tokens); only --state_tokens lifts it, up to kev.model.MAX_TRAIN_STATE
+# tokens); only --state_tokens lifts it, up to d1a.model.MAX_TRAIN_STATE
 CORPUS_MAX_STATE = MAX_TRAIN_STATE_8K
 SUITE, PROFILE = ROOT / "evals/v7/decision-v7", ROOT / "experiments/sft-v1-lengths.json"
 
@@ -155,7 +157,7 @@ class GpuMemory(threading.Thread):
 
 
 def load_check(run, recs, n):
-    """Eval memory and parity of the saved checkpoint through kev.checkpoint: bf16 (how full weights load) against fp32."""
+    """Eval memory and parity of the saved checkpoint through d1a.checkpoint: bf16 (how full weights load) against fp32."""
     tok, probs, report = None, {}, {}
     for name, dtype in (("bf16", None), ("fp32", torch.float32)):
         torch.cuda.reset_peak_memory_stats(); started = time.time()
@@ -171,16 +173,16 @@ def load_check(run, recs, n):
 
 
 def train_command(a, out, data, max_state, extra):
-    """The kev.train command line of one probe run (torchrun over every GPU of a multi-GPU spec)."""
+    """The d1a.train command line of one probe run (torchrun over every GPU of a multi-GPU spec)."""
     gpus = gpu_count(a.gpu)
     launcher = [sys.executable, "-m", "torch.distributed.run", "--standalone", f"--nproc_per_node={gpus}"] if gpus > 1 else [sys.executable]
-    return [*launcher, "-m", "kev.train", "--base", a.base, "--base_revision", a.revision, "--data", str(data),
+    return [*launcher, "-m", "d1a.train", "--base", a.base, "--base_revision", a.revision, "--data", str(data),
             "--full_ft", "1", "--weights_dtype", "bf16", "--dtype", "bf16", "--checkpointing", "1", "--device", "cuda",
             "--max_state", str(max_state), "--out", str(out), *shlex.split(extra)]
 
 
 def run_training(cmd, log_path, env):
-    """Run kev.train, the whole log to log_path and progress to the container log. -> (return code, GpuMemory, seconds)."""
+    """Run d1a.train, the whole log to log_path and progress to the container log. -> (return code, GpuMemory, seconds)."""
     memory = GpuMemory(); memory.start(); started = time.time()
     with log_path.open("w", encoding="utf-8") as log, subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env) as proc:
         for line in proc.stdout:
@@ -196,14 +198,14 @@ def main():
     ap.add_argument("--out", required=True); ap.add_argument("--gpu", required=True, help="the Modal GPU spec this runs on (H200, H200:8): prices the projections")
     ap.add_argument("--mix", default="all", help="a part of experiments/sft-v1-lengths.json, or all (the corpus's proportions)")
     ap.add_argument("--records", type=int, default=2000, help="probe records (with --state_tokens: per length)"); ap.add_argument("--seed", type=int, default=0)
-    ap.add_argument("--train", default="", help="extra kev.train arguments (batch, accum, max_steps, lr, row_budget, shared_prefix, save_every_steps, ...)")
+    ap.add_argument("--train", default="", help="extra d1a.train arguments (batch, accum, max_steps, lr, row_budget, shared_prefix, save_every_steps, ...)")
     ap.add_argument("--warmup", type=int, default=3); ap.add_argument("--check_load", type=int, default=0, help="questions for the bf16/fp32 loader check (0 = skip)")
     ap.add_argument("--resume_dir", default="", help="write the resume points here (e.g. on the runs volume, to time them) instead of the scratch checkpoint")
     ap.add_argument("--no_conv_kernel", action="store_true")
     ap.add_argument("--state_tokens", default="", help="comma-separated state lengths in tokens: instead of the corpus mix, one run per length on records "
                                                        "of exactly that state (--questions each), --max_state set to it; a run that fails is reported, not fatal")
     ap.add_argument("--questions", type=int, default=3, help="questions per record with --state_tokens")
-    ap.add_argument("--fallbacks", default="", help="with --state_tokens: ';'-separated extra kev.train arguments tried in order at a length whose run failed")
+    ap.add_argument("--fallbacks", default="", help="with --state_tokens: ';'-separated extra d1a.train arguments tried in order at a length whose run failed")
     ap.add_argument("--passes", default="", help="pass shapes to replay, each on every rank (replay_passes): a JSON file, or the JSON itself (from "
                                                  "modal_app.py::sft_probe --flags); --steps optimizer steps each, --max_state the training state limit")
     ap.add_argument("--steps", type=int, default=3)
@@ -227,7 +229,7 @@ def main():
         (out / "checkpoint").mkdir(); (out / "checkpoint/resume").symlink_to(a.resume_dir, target_is_directory=True)
     cmd = train_command(a, out / "checkpoint", out / "probe.jsonl", CORPUS_MAX_STATE, ("--resume 1 " if a.resume_dir else "") + a.train)
     code, memory, seconds = run_training(cmd, out / "train.log", env)
-    if code: raise SystemExit(f"kev.train failed ({code}); see {out / 'train.log'}")
+    if code: raise SystemExit(f"d1a.train failed ({code}); see {out / 'train.log'}")
     metrics = read_json(out / "checkpoint/training_metrics.json")
     report = {"gpu": a.gpu, "base": a.base, "revision": a.revision, "train_args": a.train, "conv_kernel": not a.no_conv_kernel, "data": data, "warmup": a.warmup,
               "fixed_overhead_seconds": round(seconds - sum(metrics["step_seconds"]) - sum(metrics["resume_seconds"])),   # load, optimizer setup, save
@@ -241,10 +243,10 @@ def main():
 def replay_passes(a, out, tok, env):
     """--passes FILE ([{"name", "variants": [[state tokens, [branch tokens]], ...]}, ...]): per pass, a short run in which
     every rank's every micro-batch is exactly that pass (the plain dealing, --batch = its variants, --accum 1; the data is
-    laid out so that kev.train's epoch shuffle, random.Random(seed), puts it there), `--steps` optimizer steps. Reports
-    per pass what long_states does, plus the pass's padded tokens (kev.train.pass_tokens) as built. A failed run (out of
+    laid out so that d1a.train's epoch shuffle, random.Random(seed), puts it there), `--steps` optimizer steps. Reports
+    per pass what long_states does, plus the pass's padded tokens (d1a.train.pass_tokens) as built. A failed run (out of
     memory, say) is reported and the next pass runs."""
-    from kev.train import pass_tokens
+    from d1a.train import pass_tokens
     spec = json.loads(a.passes) if a.passes.lstrip().startswith("[") else read_json(a.passes)
     world = gpu_count(a.gpu)
     report = {"gpu": a.gpu, "base": a.base, "revision": a.revision, "train_args": a.train, "steps": a.steps, "warmup": a.warmup,
@@ -254,7 +256,7 @@ def replay_passes(a, out, tok, env):
         shapes = [(len(S), [len(x["ids"]) for x in rows]) for S, _, rows in
                   (rows_of(encode(tok, materialize(r), max_state=context["max_state"], max_branch=context["max_branch"])) for r in recs)]
         k, n = len(recs), len(recs) * world * a.steps
-        order = list(range(n)); random.Random(a.seed).shuffle(order)   # kev.train: reqs[i] after the shuffle is data[order[i]]
+        order = list(range(n)); random.Random(a.seed).shuffle(order)   # d1a.train: reqs[i] after the shuffle is data[order[i]]
         data = [None] * n
         for i, at in enumerate(order): data[at] = recs[(i // world) % k]   # rank r's micro-batch m holds shuffled[(m*k + t)*world + r] = variant t
         write_jsonl(out / f"pass-{p['name']}.jsonl", data)
@@ -288,7 +290,7 @@ def long_states(a, out, tok, env):
     report = {"gpu": a.gpu, "base": a.base, "revision": a.revision, "train_args": a.train, "fallbacks": a.fallbacks, "questions": a.questions,
               "warmup": a.warmup, "usd_per_hour": round(hourly_rate(a.gpu, full_ft=True), 2), "lengths": []}
     lengths = [int(x) for x in a.state_tokens.split(",")]
-    if max(lengths) > MAX_TRAIN_STATE: raise SystemExit(f"--state_tokens go up to kev.model.MAX_TRAIN_STATE ({MAX_TRAIN_STATE})")
+    if max(lengths) > MAX_TRAIN_STATE: raise SystemExit(f"--state_tokens go up to d1a.model.MAX_TRAIN_STATE ({MAX_TRAIN_STATE})")
     for length in lengths:
         recs, stats = build_long(tok, a.records, length, a.questions, a.seed)
         write_jsonl(out / f"probe-{length}.jsonl", recs)

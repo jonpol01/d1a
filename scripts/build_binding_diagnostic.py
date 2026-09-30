@@ -1,3 +1,5 @@
+# Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables).
 """Diagnostic for two training-data hypotheses raised by the calibration failure audit (PLAN.md, round 3):
 
   H2 (role binding): the model decides "X is the same person as Y" by whether a name recurs anywhere in the case, not by
@@ -6,7 +8,7 @@
   H1 (elapsed): the model does not compute date differences; a stated day count is what it can use. Strata: elapsed atoms
       rendered plainly vs with an explicit day-count sentence appended to the case.
 
-Eval only. Generated from kev.composition with a fresh seed; states are checked against every frozen suite and the round-3
+Eval only. Generated from d1a.composition with a fresh seed; states are checked against every frozen suite and the round-3
 training corpus. Labels come from evaluate_rule (code), never from a model.
 
     uv run python scripts/build_binding_diagnostic.py --out evals/diagnostics/binding-v1.jsonl
@@ -18,10 +20,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from kev.composition import POLICY_WRAPPERS, evaluate_rule, render_rule
-from kev.data import materialize
-from kev.model import fits, load_tokenizer
-from kev.suite import ADMISSION_TOKENIZER, digest, load_split, write_json, write_jsonl
+from d1a.composition import POLICY_WRAPPERS, evaluate_rule, render_rule
+from d1a.data import materialize
+from d1a.model import fits, load_tokenizer
+from d1a.suite import ADMISSION_TOKENIZER, digest, load_split, write_json, write_jsonl
 
 NAMES = ["Mira", "Noah", "Aiko", "Ravi", "Sana", "Elin", "Tomas", "Kofi"]
 NOUNS = ["request", "account", "package", "review", "member", "shipment", "entry", "case"]
@@ -118,7 +120,7 @@ def main():
     write_jsonl(out, kept)
     strata = Counter(r["_meta"]["stratum"] for r in kept); labels = Counter((r["_meta"]["stratum"], r["questions"]["decision"]["label"]) for r in kept)
     manifest = {"records": len(kept), "dropped": len(recs) - len(kept), "seed": a.seed, "sha256": digest(out), "strata": dict(strata),
-                "labels_by_stratum": {f"{s}/{l}": n for (s, l), n in sorted(labels.items())}, "source": "binding_diagnostic (eval only; kev.composition generator, code labels)",
+                "labels_by_stratum": {f"{s}/{l}": n for (s, l), n in sorted(labels.items())}, "source": "binding_diagnostic (eval only; d1a.composition generator, code labels)",
                 "code_sha256": digest(Path(__file__))}
     write_json(out.with_suffix(".manifest.json"), manifest)
     print(json.dumps(manifest, indent=1))

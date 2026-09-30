@@ -1,3 +1,5 @@
+# Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
+# Changes for D1A Copyright 2026 John Soliva: Gemma 4 tests (from jonpol01/kev); package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables).
 """Fast tests with no model weights and no server: API mapping, confidence formulas, mask rule, token sanitizing.
 Run: uv run --extra serve python -m pytest tests/test_unit.py -q
 """
@@ -9,8 +11,8 @@ from types import SimpleNamespace
 import pytest
 import torch
 from transformers.cache_utils import Cache, DynamicLayer, LinearAttentionLayer
-from kev.api import SystemOneRequest, choice_confidence, render, score_confidence, to_answers, to_record
-from kev.model import DecisionModel, SPECIAL, branch_mask, encode, user_tokens
+from d1a.api import SystemOneRequest, choice_confidence, render, score_confidence, to_answers, to_record
+from d1a.model import DecisionModel, SPECIAL, branch_mask, encode, user_tokens
 
 
 def test_render_flattens_structured_content():
@@ -102,7 +104,7 @@ def test_branch_mask_rule():
 
 @pytest.fixture(scope="module")
 def tok():
-    from kev.model import load_tokenizer
+    from d1a.model import load_tokenizer
     return load_tokenizer("Qwen/Qwen2.5-0.5B")
 
 
@@ -118,7 +120,7 @@ def test_user_text_cannot_forge_delimiters(tok):
 
 @pytest.fixture(scope="module")
 def gemma_tok():
-    from kev.model import load_tokenizer
+    from d1a.model import load_tokenizer
     return load_tokenizer("google/gemma-4-E2B", revision="d29ff6b45f081a49ee2733a859c9c9c2d95d1a6f")
 
 
@@ -126,7 +128,7 @@ def test_gemma_layout_and_forgery(tok, gemma_tok):
     """Gemma 4 has none of the Qwen delimiters (they would all encode as <unk>): it gets its reserved <unused0-4> rows and
     its <bos> in front. Its control tokens (<bos>, <pad>, <|turn> ...) are not of the <|name|> form, so they are escaped
     per tokenizer; Qwen tokenizers have no such tokens and encode exactly as before."""
-    from kev.model import GEMMA_SPECIAL, layout
+    from d1a.model import GEMMA_SPECIAL, layout
     leading, delims, escape = layout(gemma_tok)
     assert leading == [gemma_tok.bos_token_id] and delims == gemma_tok.convert_tokens_to_ids(GEMMA_SPECIAL) and gemma_tok.unk_token_id not in delims
     assert layout(tok) == ([], [tok.convert_tokens_to_ids(t) for t in SPECIAL], None)
@@ -145,7 +147,7 @@ def test_sliding_window_mask_uses_branch_positions():
     """branch_masks for a sliding-window backbone: the sliding mask drops keys `window` or more positions back, counted in
     position ids (which restart per branch), so a branch token sees the state tail its own causal row would."""
     import torch
-    from kev.model import branch_mask_batch, branch_masks
+    from d1a.model import branch_mask_batch, branch_masks
     seg = [0, 0, 0, 0, 1, 1, 2, 2]
     pos = [0, 1, 2, 3, 4, 5, 4, 5]
     enc = {"seg": seg, "pos": pos, "opt": [-1] * 8}
@@ -170,8 +172,8 @@ def test_encode_positions_restart_per_branch(tok):
 
 def test_load_records_jsonl(tmp_path):
     """The fine-tuning input format from the README: API-shaped requests with a label per question, one per line."""
-    from kev.data import load_records, materialize
-    from kev.suite import write_jsonl
+    from d1a.data import load_records, materialize
+    from d1a.suite import write_jsonl
     rows = [{"state": {"subject": "Charged twice", "body": "Two charges for order 4411."},
              "questions": {"team": {"type": "choice", "instructions": "Which team?", "criteria": {"billing": "Payments", "shipping": None}, "label": "billing"},
                            "angry": {"type": "noul", "instructions": "Is the customer angry?", "label": False},
@@ -190,9 +192,9 @@ def test_soft_targets_and_date_facts():
     """Night-2 additions: a question with a soft target materializes to a normalized vector aligned with its keys, survives
     option permutation, and trains with cross-entropy against the target; date_facts writes one sentence per date pair."""
     import random, torch
-    from kev.api import date_facts, with_date_facts
-    from kev.data import augment, materialize
-    from kev.train import question_loss
+    from d1a.api import date_facts, with_date_facts
+    from d1a.data import augment, materialize
+    from d1a.train import question_loss
     req = {"state": "policy text", "questions": {"q": {"type": "choice", "instructions": "Which?", "criteria": {"a": None, "b": None, "c": None}, "label": "a",
                                                         "target": {"a": 1, "b": 1, "c": 1}, "src": "t"}}}
     rec = materialize(req)
@@ -206,10 +208,10 @@ def test_soft_targets_and_date_facts():
 
 
 def test_checkpoint_meta_round_trip_and_defaults(tmp_path):
-    """head.pt has one schema (kev.checkpoint.Meta): old files get the same defaults everywhere, unknown keys survive a
-    read-modify-write, and LoadOptions.from_env is the only place the KEV_* variables are read."""
+    """head.pt has one schema (d1a.checkpoint.Meta): old files get the same defaults everywhere, unknown keys survive a
+    read-modify-write, and LoadOptions.from_env is the only place the D1A_* variables are read."""
     import torch
-    from kev.checkpoint import LoadOptions, Meta, read_meta, write_meta
+    from d1a.checkpoint import LoadOptions, Meta, read_meta, write_meta
     old = {"head": {"w": torch.zeros(1)}, "base": "Qwen/Qwen2.5-0.5B", "lora": 16, "args": {"lr": 1}, "suite_sha256": "abc"}
     m = Meta.from_dict(old)
     assert (m.head_dim, m.option_isolation, m.temperature, m.holdout, m.weights_dtype) == (256, False, 1.0, [], "fp32")
@@ -218,26 +220,26 @@ def test_checkpoint_meta_round_trip_and_defaults(tmp_path):
     write_meta(tmp_path, m); back = read_meta(tmp_path)
     assert back.temperature == 2.3 and back.extra["args"] == {"lr": 1} and back.extra["temperature_fit"] == {"n": 10} and back.lora == 16
     assert LoadOptions.from_env({}) == LoadOptions()
-    opts = LoadOptions.from_env({"KEV_DTYPE": "bf16", "KEV_MERGE": "0", "KEV_ATTN": "sdpa", "KEV_TEMPERATURE": "1.0", "KEV_LORA_SCALE": "0.5"})
+    opts = LoadOptions.from_env({"D1A_DTYPE": "bf16", "D1A_MERGE": "0", "D1A_ATTN": "sdpa", "D1A_TEMPERATURE": "1.0", "D1A_LORA_SCALE": "0.5"})
     assert opts == LoadOptions(dtype=torch.bfloat16, merge=False, attn="sdpa", lora_scale=0.5, temperature=1.0)
-    assert LoadOptions.from_env({"KEV_DTYPE": "fp32"}).dtype is torch.float32   # explicit fp32 survives, so kev.serve's bf16 default can be declined
-    assert LoadOptions.from_env({}).backend is None and LoadOptions.from_env({"KEV_BACKEND": "mlx"}).backend == "mlx"
-    assert [LoadOptions.from_env(e).cuda_graphs for e in ({}, {"KEV_CUDA_GRAPHS": "0"}, {"KEV_CUDA_GRAPHS": "1"})] == [None, False, True]   # an explicit 0 declines kev.serve's default
-    assert [LoadOptions.from_env(e).fused for e in ({}, {"KEV_FUSED": "0"}, {"KEV_FUSED": "1"})] == [None, False, True]
-    with pytest.raises(ValueError, match="KEV_BACKEND"):
-        LoadOptions.from_env({"KEV_BACKEND": "metal"})
+    assert LoadOptions.from_env({"D1A_DTYPE": "fp32"}).dtype is torch.float32   # explicit fp32 survives, so d1a.serve's bf16 default can be declined
+    assert LoadOptions.from_env({}).backend is None and LoadOptions.from_env({"D1A_BACKEND": "mlx"}).backend == "mlx"
+    assert [LoadOptions.from_env(e).cuda_graphs for e in ({}, {"D1A_CUDA_GRAPHS": "0"}, {"D1A_CUDA_GRAPHS": "1"})] == [None, False, True]   # an explicit 0 declines d1a.serve's default
+    assert [LoadOptions.from_env(e).fused for e in ({}, {"D1A_FUSED": "0"}, {"D1A_FUSED": "1"})] == [None, False, True]
+    with pytest.raises(ValueError, match="D1A_BACKEND"):
+        LoadOptions.from_env({"D1A_BACKEND": "metal"})
 
 
 def test_fused_default_needs_pinned_fla(monkeypatch):
-    """kev.serve's CUDA fused default (checkpoint.fused_available): on only with flash-linear-attention importable at
+    """d1a.serve's CUDA fused default (checkpoint.fused_available): on only with flash-linear-attention importable at
     fused_qwen35.FLA_VERSION; it is not in the serve extra, so a plain install serves unfused instead of failing to import fla."""
     import importlib.machinery, sys, types
-    from kev.checkpoint import fused_available
+    from d1a.checkpoint import fused_available
     monkeypatch.setitem(sys.modules, "fla", None)   # not installed
     assert not fused_available()
     fla = types.ModuleType("fla"); fla.__spec__ = importlib.machinery.ModuleSpec("fla", None); fla.__version__ = "9.9.9"
     monkeypatch.setitem(sys.modules, "fla", fla)
-    monkeypatch.setitem(sys.modules, "kev.fused_qwen35", types.SimpleNamespace(FLA_VERSION="9.9.9"))
+    monkeypatch.setitem(sys.modules, "d1a.fused_qwen35", types.SimpleNamespace(FLA_VERSION="9.9.9"))
     assert fused_available()
     fla.__version__ = "9.9.8"   # another version: fuse() would refuse it
     assert not fused_available()
@@ -246,7 +248,7 @@ def test_fused_default_needs_pinned_fla(monkeypatch):
 def test_head_temperature_scales_logits_at_eval_only():
     """The pointer head divides logits by its temperature in eval mode only; argmax is unchanged; training sees T=1."""
     import torch
-    from kev.model import PointerHead
+    from d1a.model import PointerHead
     torch.manual_seed(0); head = PointerHead(16, dp=8); hd, ho = torch.randn(16), torch.randn(3, 16)
     head.train(); raw_train = head(hd, ho)
     head.eval(); raw = head(hd, ho); head.temperature = 2.0; cal = head(hd, ho)
@@ -259,7 +261,7 @@ def test_permute_bounds_n_perm(n_perm, code, monkeypatch):
     """Each option order is a forward pass: 0 divided by nothing and unbounded counts ran forever (#30, @53Abdeali)."""
     from types import SimpleNamespace
     from fastapi.testclient import TestClient
-    from kev import serve
+    from d1a import serve
     answer = lambda req: {"answers": {"q": {"probabilities": {"a": 0.75, "b": 0.25}, "choice": "a"}}, "latency_ms": 1.0}
     monkeypatch.setattr(serve, "server", lambda: SimpleNamespace(answer=answer))
     body = {"request": {"state": "s", "questions": {"q": {"type": "choice", "instructions": "Pick", "criteria": {"a": None, "b": None}}}}, "question": "q", "n_perm": n_perm}
@@ -270,16 +272,16 @@ def test_permute_bounds_n_perm(n_perm, code, monkeypatch):
 
 
 def test_rows_per_pass_is_a_token_budget():
-    from kev.model import rows_per_pass
+    from d1a.model import rows_per_pass
     assert rows_per_pass([[0] * 30] * 5, prefix_len=270) == 16384 // 300     # a short state: every question of a normal request batches
     assert rows_per_pass([[0] * 20] * 64, prefix_len=4802) == 3            # a long state: a few cache copies per pass
     assert rows_per_pass([[0] * 8192], prefix_len=8192) == 1               # a maximal row still runs
 
 
 def test_prefix_cache_keeps_what_survives_the_batch():
-    """kev.serve.PrefixCache: a batch keeps only its last `size` distinct cacheable states (the rest it would evict
+    """d1a.serve.PrefixCache: a batch keeps only its last `size` distinct cacheable states (the rest it would evict
     itself), hits are reinserted as most recent, short states and size 0 are never cached."""
-    from kev.serve import PrefixCache
+    from d1a.serve import PrefixCache
     enc = lambda state, n=3: {"ids": list(state) + [0] * 5, "seg": [0] * n + [1] * (len(state) + 5 - n)}
     c = PrefixCache(size=2, min_tokens=3)
     batch = [enc("abc"), enc("abd"), enc("abe"), enc("abd"), enc("ab", n=2)]
@@ -295,10 +297,10 @@ def test_prefix_cache_keeps_what_survives_the_batch():
 
 
 def test_prefix_cache_bounds_the_state_tokens_it_holds():
-    """kev.serve.PrefixCache.max_tokens (KEV_PREFIX_MAX_TOKENS, default 65,536): the cached states hold at most that many
+    """d1a.serve.PrefixCache.max_tokens (D1A_PREFIX_MAX_TOKENS, default 65,536): the cached states hold at most that many
     tokens in all, least recently used evicted first, and a longer state is never cached, so a few 64k-token states
     cannot pin their keys and values; within the bound the count limit still applies."""
-    from kev.serve import PREFIX_MAX_TOKENS, PrefixCache
+    from d1a.serve import PREFIX_MAX_TOKENS, PrefixCache
     assert PREFIX_MAX_TOKENS == 65536
     enc = lambda state: {"ids": list(state) + [0] * 5, "seg": [0] * len(state) + [1] * 5}
     c = PrefixCache(size=4, min_tokens=0, max_tokens=10)
@@ -315,15 +317,15 @@ def test_prefix_cache_bounds_the_state_tokens_it_holds():
 
 
 def test_out_of_memory_drops_the_prefix_cache_and_retries_once():
-    """kev.serve.Server._run: a pass out of device memory with states cached clears the cache and runs once more (#75: a
+    """d1a.serve.Server._run: a pass out of device memory with states cached clears the cache and runs once more (#75: a
     full cache kept failing every later batch); a second failure fails the batch with the cache left empty, and an
     out-of-memory pass with nothing cached, or any other error, is not retried. A failed batch's pass is freed with it:
     the model thread keeps the exception until its next batch, and the exception's frames held the pass's tensors (142 MiB
     on an H100, tests/test_model.py::test_server_recovers_when_a_pass_runs_out_of_memory)."""
     import torch, weakref
     from types import SimpleNamespace
-    from kev.device import out_of_memory
-    from kev.serve import Server
+    from d1a.device import out_of_memory
+    from d1a.serve import Server
 
     class Tensors: pass   # stands for what a pass allocates
 
@@ -362,11 +364,11 @@ def test_out_of_memory_drops_the_prefix_cache_and_retries_once():
 
 
 def test_graph_buckets_and_length_groups():
-    """kev.cuda_graphs pads batched passes: counts to count_bucket (under half extra), token lengths to bucket (under a
+    """d1a.cuda_graphs pads batched passes: counts to count_bucket (under half extra), token lengths to bucket (under a
     quarter), and length_groups computes the fewest tokens: a pass under PASS_TOKENS stays whole, one long item does not
     pad the rest, and the grouping beats every other split of the sorted lengths."""
     import itertools
-    from kev.cuda_graphs import PASS_TOKENS, bucket, count_bucket, length_groups
+    from d1a.cuda_graphs import PASS_TOKENS, bucket, count_bucket, length_groups
     assert [count_bucket(n) for n in (1, 3, 5, 7, 9, 13, 17, 25)] == [1, 3, 6, 8, 12, 16, 24, 32]
     assert all(n <= count_bucket(n) < 1.5 * n for n in range(2, 200)) and all(n <= bucket(n) < max(1.25 * n, n + 16) for n in range(1, 5000))
     assert length_groups([40, 20, 35, 30, 25, 45], 32) == [[1, 4, 3, 2, 0, 5]]            # a small pass stays whole
@@ -380,7 +382,7 @@ def test_graph_buckets_and_length_groups():
 
 
 def test_rows_hidden_replicates_cache_without_changing_prefix(monkeypatch):
-    import kev.model as M
+    import d1a.model as M
 
     kv, linear = DynamicLayer(), LinearAttentionLayer()
     kv.update(torch.ones(1, 1, 2, 2), torch.full((1, 1, 2, 2), 2.0))
@@ -416,9 +418,9 @@ def test_rows_hidden_replicates_cache_without_changing_prefix(monkeypatch):
 
 
 def test_bearer_auth_and_request_id(monkeypatch):
-    """KEV_API_KEY (kev.serve.API_KEY) gates /v1/*; every response carries the request id the TypeSafe clients read."""
+    """D1A_API_KEY (d1a.serve.API_KEY) gates /v1/*; every response carries the request id the TypeSafe clients read."""
     from fastapi.testclient import TestClient
-    from kev import serve
+    from d1a import serve
     with TestClient(serve.app) as client:
         assert client.get("/openapi.json").headers["x-typesafe-request-id"]
         monkeypatch.setattr(serve, "API_KEY", "secret")
@@ -428,7 +430,7 @@ def test_bearer_auth_and_request_id(monkeypatch):
 
 
 def test_option_isolation_mask_rule():
-    from kev.model import branch_mask_batch, OPT_NONE, OPT_DECIDE
+    from d1a.model import branch_mask_batch, OPT_NONE, OPT_DECIDE
     seg = [0, 0, 1, 1, 1, 1, 1, 1, 1]           # state x2, then q: instr x2, option0 x2, option1 x2, decide
     opt = [OPT_NONE, OPT_NONE, OPT_NONE, OPT_NONE, 0, 0, 1, 1, OPT_DECIDE]
     m = branch_mask_batch([seg], "cpu", opts=[opt])[0, 0] == 0
@@ -439,7 +441,7 @@ def test_option_isolation_mask_rule():
     assert m[3, 4] == False                           # instruction never sees options (causal)
 
 
-# --- full-weight training (kev.train --full_ft 1, kev.full_ft): a 2-layer Qwen3.5 with random weights, no downloads ----
+# --- full-weight training (d1a.train --full_ft 1, d1a.full_ft): a 2-layer Qwen3.5 with random weights, no downloads ----
 
 @pytest.fixture(scope="module")
 def tiny_base(tmp_path_factory):
@@ -467,8 +469,8 @@ def tiny_base(tmp_path_factory):
 
 def train_tiny(tiny_base, out, *args, monkeypatch=None):
     import sys
-    from kev import train
-    argv = ["kev.train", "--base", str(tiny_base / "base"), "--data", str(tiny_base / "data.jsonl"), "--device", "cpu", "--batch", "2", "--lr", "1e-3", "--out", str(out), *args]
+    from d1a import train
+    argv = ["d1a.train", "--base", str(tiny_base / "base"), "--data", str(tiny_base / "data.jsonl"), "--device", "cpu", "--batch", "2", "--lr", "1e-3", "--out", str(out), *args]
     monkeypatch.setattr(sys, "argv", argv)
     train.main()
 
@@ -478,11 +480,11 @@ FULL = ("--full_ft", "1", "--weights_dtype", "bf16")
 
 def test_full_weight_checkpoint_round_trip(tiny_base, tmp_path, monkeypatch):
     """A full-weight run saves the bf16 backbone with save_pretrained (config.json + safetensors, no adapter) and head.pt in
-    today's format marked weights="full"; kev.checkpoint loads the backbone from the checkpoint directory itself (bf16 by
+    today's format marked weights="full"; d1a.checkpoint loads the backbone from the checkpoint directory itself (bf16 by
     default, fp32 when asked) with exactly the saved values, and the trained weights moved away from the base."""
     from safetensors.torch import load_file
-    from kev.checkpoint import Checkpoint, LoadOptions, read_meta
-    from kev.data import load_records, materialize
+    from d1a.checkpoint import Checkpoint, LoadOptions, read_meta
+    from d1a.data import load_records, materialize
     train_tiny(tiny_base, tmp_path / "full", *FULL, "--max_steps", "3", monkeypatch=monkeypatch)
     files = {p.name for p in (tmp_path / "full").iterdir()}
     assert {"config.json", "model.safetensors", "head.pt", "tokenizer.json", "tokenizer_config.json"} <= files and "adapter_config.json" not in files
@@ -509,14 +511,14 @@ def test_full_weight_dtype_must_match_config(tiny_base, tmp_path, monkeypatch):
     """A full checkpoint loads in the dtype head.pt's weights_dtype names, which must be the dtype save_pretrained wrote to
     config.json: a mislabelled export (fp32 weights marked bf16, or the reverse) fails instead of being silently cast."""
     import json
-    from kev.checkpoint import Checkpoint, read_meta, write_meta
+    from d1a.checkpoint import Checkpoint, read_meta, write_meta
     train_tiny(tiny_base, tmp_path / "full", *FULL, "--max_steps", "1", monkeypatch=monkeypatch)
     config = tmp_path / "full/config.json"
     assert json.loads(config.read_text(encoding="utf-8"))["dtype"] == "bfloat16"
     meta = read_meta(tmp_path / "full"); meta.weights_dtype = "fp32"; write_meta(tmp_path / "full", meta)
     with pytest.raises(ValueError, match="config.json records the weights as bfloat16 but head.pt says weights_dtype='fp32'"):
         Checkpoint(tmp_path / "full").load("cpu")
-    meta.weights_dtype = "fp16"; write_meta(tmp_path / "full", meta)          # a name kev.train never writes
+    meta.weights_dtype = "fp16"; write_meta(tmp_path / "full", meta)          # a name d1a.train never writes
     with pytest.raises(ValueError, match="weights_dtype='fp16'"):
         Checkpoint(tmp_path / "full").load("cpu")
     meta.weights_dtype = "bf16"; write_meta(tmp_path / "full", meta)
@@ -527,7 +529,7 @@ def test_full_weight_dtype_must_match_config(tiny_base, tmp_path, monkeypatch):
 def test_loader_rule_needs_head_pt_and_files_to_agree(tmp_path):
     """adapter_config.json -> LoRA; config.json + model*.safetensors and no adapter -> full weights; head.pt's `weights` must
     name the same layout, so a half-copied directory fails loudly instead of loading the wrong thing."""
-    from kev.checkpoint import Checkpoint, Meta, write_meta
+    from d1a.checkpoint import Checkpoint, Meta, write_meta
     for weights, present in (("full", ["adapter_config.json", "adapter_model.safetensors"]), ("lora", ["config.json", "model.safetensors"]), ("full", ["config.json"])):
         d = tmp_path / f"{weights}-{len(present)}-{present[0]}"; d.mkdir()
         write_meta(d, Meta(base="b", weights=weights))
@@ -539,8 +541,8 @@ def test_loader_rule_needs_head_pt_and_files_to_agree(tmp_path):
 def test_full_weight_warm_start(tiny_base, tmp_path, monkeypatch):
     """--init_from a full checkpoint copies every backbone tensor over the base (coverage checked) and records the shard
     hash; a LoRA run cannot start from full weights."""
-    from kev.checkpoint import Checkpoint
-    from kev.suite import read_json
+    from d1a.checkpoint import Checkpoint
+    from d1a.suite import read_json
     train_tiny(tiny_base, tmp_path / "a", *FULL, "--max_steps", "2", monkeypatch=monkeypatch)
     train_tiny(tiny_base, tmp_path / "b", *FULL, "--max_steps", "1", "--init_from", str(tmp_path / "a"), monkeypatch=monkeypatch)
     source = read_json(tmp_path / "b/training_config.json")["init_source"]
@@ -552,9 +554,9 @@ def test_full_weight_warm_start(tiny_base, tmp_path, monkeypatch):
 def test_interpolated_checkpoint_is_the_weighted_mean_of_sft_and_base(tiny_base, tmp_path, monkeypatch):
     """scripts/interpolate_checkpoint.py (round 20's WiSE-FT arms): alpha 1 writes the SFT backbone, alpha 0 the base as
     training builds it, 0.5 the fp32 midpoint rounded once to bf16; same shard files, names and dtypes; the pointer head is
-    the SFT's; head.pt records the interpolation; kev.checkpoint loads the result as a full-weight checkpoint."""
+    the SFT's; head.pt records the interpolation; d1a.checkpoint loads the result as a full-weight checkpoint."""
     from safetensors.torch import load_file
-    from kev.checkpoint import Checkpoint, read_meta
+    from d1a.checkpoint import Checkpoint, read_meta
     from scripts.interpolate_checkpoint import interpolate, weight_label
     train_tiny(tiny_base, tmp_path / "sft", *FULL, "--max_steps", "3", monkeypatch=monkeypatch)
     alphas = [1.0, 0.0, 0.5]
@@ -607,10 +609,10 @@ def test_interpolation_toward_a_lora_checkpoint_merged_in_fp32(tiny_base, tmp_pa
     the same and the head the SFT's; head.pt records both endpoints and both heads."""
     from peft import PeftModel
     from safetensors.torch import load_file
-    from kev.checkpoint import Checkpoint, LoadOptions, read_meta
-    from kev.data import load_records, materialize
-    from kev.model import DecisionModel, load_tokenizer
-    from kev.suite import digest
+    from d1a.checkpoint import Checkpoint, LoadOptions, read_meta
+    from d1a.data import load_records, materialize
+    from d1a.model import DecisionModel, load_tokenizer
+    from d1a.suite import digest
     from scripts.interpolate_checkpoint import interpolate
     train_tiny(tiny_base, tmp_path / "sft", *FULL, "--max_steps", "3", monkeypatch=monkeypatch)
     train_tiny(tiny_base, tmp_path / "lora", "--lora", "4", "--weights_dtype", "bf16", "--head_lr", "1e-2", "--max_steps", "3", monkeypatch=monkeypatch)
@@ -664,7 +666,7 @@ def test_interpolation_toward_a_full_checkpoint_and_its_refusals(tiny_base, tmp_
     written: another base or revision, --blend_head without --toward, heads of another shape, a tensor the SFT does not have."""
     import shutil
     from safetensors.torch import load_file, save_file
-    from kev.checkpoint import read_meta, write_meta
+    from d1a.checkpoint import read_meta, write_meta
     from scripts.interpolate_checkpoint import interpolate
     train_tiny(tiny_base, tmp_path / "sft", *FULL, "--max_steps", "3", monkeypatch=monkeypatch)
     train_tiny(tiny_base, tmp_path / "other", *FULL, "--max_steps", "2", "--seed", "1", monkeypatch=monkeypatch)
@@ -697,14 +699,14 @@ def test_merged_lora_checkpoint_initializes_full_weight_training(tiny_base, tmp_
     """scripts/merge_lora_checkpoint.py (round 25 starts full-weight SFT from Kev-27B): the backbone is exactly what
     interpolate_checkpoint writes at alpha 0 toward the LoRA checkpoint (fp32 W + delta rounded once to bf16), with the same
     names and shapes as a full-weight run's save; head.pt is the LoRA's meta and head with lora 0 and weights "full"; it
-    loads as a full-weight checkpoint scoring like the LoRA served merged, and kev.train --full_ft 1 --init_from warm-starts
+    loads as a full-weight checkpoint scoring like the LoRA served merged, and d1a.train --full_ft 1 --init_from warm-starts
     backbone and head from it."""
     import json
     from safetensors.torch import load_file
-    from kev.checkpoint import Checkpoint, LoadOptions, read_meta
-    from kev.data import load_records, materialize
-    from kev.model import load_tokenizer
-    from kev.suite import digest, read_json
+    from d1a.checkpoint import Checkpoint, LoadOptions, read_meta
+    from d1a.data import load_records, materialize
+    from d1a.model import load_tokenizer
+    from d1a.suite import digest, read_json
     from scripts.interpolate_checkpoint import interpolate
     from scripts.merge_lora_checkpoint import merge, weights_sha256
     train_tiny(tiny_base, tmp_path / "sft", *FULL, "--max_steps", "2", monkeypatch=monkeypatch)
@@ -755,7 +757,7 @@ def test_merged_lora_checkpoint_initializes_full_weight_training(tiny_base, tmp_
 
 def test_master_adamw_is_adamw_on_fp32_masters():
     """MasterAdamW with host masters = torch AdamW after clip_grad_norm_, step for step; bf16 weights hold bf16(master)."""
-    from kev.full_ft import MasterAdamW
+    from d1a.full_ft import MasterAdamW
     torch.manual_seed(0)
     ref = [torch.nn.Parameter(torch.randn(5, 3)), torch.nn.Parameter(torch.randn(4))]
     ours = [torch.nn.Parameter(p.detach().clone()) for p in ref]
@@ -778,7 +780,7 @@ def test_nonfinite_gradient_aborts_before_any_weight_moves(tiny_base, tmp_path, 
     """A finite loss whose gradient is NaN passes batch_loss's loss check; the optimizer step refuses it
     (clip_grad_norm_(error_if_nonfinite=True) for a LoRA, MasterAdamW's global norm for full weights). No update runs and
     no checkpoint is written."""
-    from kev import full_ft, train
+    from d1a import full_ft, train
 
     class NanGrad(torch.autograd.Function):   # the value passes through, its gradient becomes NaN
         @staticmethod
@@ -801,7 +803,7 @@ def test_nonfinite_gradient_aborts_before_any_weight_moves(tiny_base, tmp_path, 
 
 def test_master_adamw_refuses_nonfinite_gradients():
     """A NaN gradient makes the global norm NaN; step() raises before any master, moment or weight changes."""
-    from kev.full_ft import MasterAdamW
+    from d1a.full_ft import MasterAdamW
     params = [torch.nn.Parameter(torch.randn(3, 2).to(torch.bfloat16)), torch.nn.Parameter(torch.randn(4).to(torch.bfloat16))]
     opt = MasterAdamW([{"params": params}], lr=1e-2, weight_decay=0.01, offload=True)
     before = [(p.detach().clone(), opt.state[p]["master"].clone()) for p in params]
@@ -819,9 +821,9 @@ def test_none_pair_max_state_pairs_only_short_states_and_the_plan_counts_them(ti
     cost, and without pairs cuts the same runs as before (the default path is today's)."""
     from collections import Counter
     from types import SimpleNamespace
-    from kev.data import load_records, materialize
-    from kev.model import MAX_STATE, encode, load_tokenizer
-    from kev.train import encode_batch, microbatch_plan, none_pairs, state_token_counts
+    from d1a.data import load_records, materialize
+    from d1a.model import MAX_STATE, encode, load_tokenizer
+    from d1a.train import encode_batch, microbatch_plan, none_pairs, state_token_counts
     tok = load_tokenizer(str(tiny_base / "base"))
     reqs = load_records(tiny_base / "data.jsonl")   # states of 6 + i tokens, each with a 3-option Choice
     counts = state_token_counts(tok, reqs)
@@ -852,9 +854,9 @@ def test_plan_shapes_are_the_encoded_shapes(tiny_base):
     """--pass_tokens_max plans on plan_shapes: per record, the (state, branches) token shapes of exactly the variants
     encode_batch then encodes (augmented, none-pair siblings included), with or without the gate's pairs."""
     from types import SimpleNamespace
-    from kev.data import load_records
-    from kev.model import MAX_STATE, load_tokenizer
-    from kev.train import encode_batch, none_pairs, plan_shapes, shape, state_token_counts
+    from d1a.data import load_records
+    from d1a.model import MAX_STATE, load_tokenizer
+    from d1a.train import encode_batch, none_pairs, plan_shapes, shape, state_token_counts
     tok = load_tokenizer(str(tiny_base / "base"))
     model = DecisionModel(str(tiny_base / "base"), tok, "cpu")
     reqs = load_records(tiny_base / "data.jsonl")
@@ -872,7 +874,7 @@ def test_pass_tokens_max_caps_every_pass_with_equal_counts_per_rank():
     number on every rank, until no pass is over it; each step still trains its own records once (a short last step with
     more runs than records repeats its cheapest, counted in the step's normaliser); a record over the ceiling on its
     own is refused; without shapes the plan is today's."""
-    from kev.train import microbatch_plan, pass_tokens
+    from d1a.train import microbatch_plan, pass_tokens
     # two full steps of 8 records (2 x 2 per rank) and a last step of 3; the short records at indices divisible by 3 carry siblings
     sizes = [300, 290, 280, 270, 260, 5, 6, 7, 8, 9, 12, 60, 70, 15, 25, 35, 400, 390, 7]
     reqs = [{"_meta": {"id": f"r{i}"}, "state": "s" * n, "questions": {"q": {"instr": "x"}}} for i, n in enumerate(sizes)]
@@ -896,7 +898,7 @@ def test_pass_tokens_max_caps_every_pass_with_equal_counts_per_rank():
 
 def test_pass_tokens_max_refuses_an_attention_only_base(tiny_base, tmp_path, monkeypatch):
     """pass_tokens measures the row form and the shared prefix, which a hybrid backbone always runs; an attention-only one
-    runs the packed mask (rows_form) for records under ROW_PASS_TOKENS, a cost the ceiling does not see, so kev.train
+    runs the packed mask (rows_form) for records under ROW_PASS_TOKENS, a cost the ceiling does not see, so d1a.train
     refuses the flag there once the model is built (and trains the hybrid tiny base with it)."""
     import shutil
     from transformers import Qwen3_5ForCausalLM, Qwen3_5TextConfig
@@ -916,9 +918,9 @@ def test_pass_tokens_max_refuses_an_attention_only_base(tiny_base, tmp_path, mon
 
 def test_pass_tokens_max_refusals(monkeypatch, capsys):
     """The ceiling caps the passes --length_sort plans: refused without it, with --row_budget and with --perm_kl (a
-    permuted copy is a second pass alive at the same time); a study trial the same (kev.experiment.validated_trial), where
+    permuted copy is a second pass alive at the same time); a study trial the same (d1a.experiment.validated_trial), where
     it is optional and absent from today's config hashes."""
-    from kev.experiment import validated_trial
+    from d1a.experiment import validated_trial
     for extra in ((), ("--length_sort", "1", "--perm_kl", "0.1"), ("--length_sort", "1", "--row_budget", "8192")):
         with pytest.raises(SystemExit):
             _parse_train(monkeypatch, "--pass_tokens_max", "40960", *extra)
@@ -938,9 +940,9 @@ def test_row_budget_changes_passes_not_gradients(tiny_base, shared):
     half of its record's mean); the accumulated gradient equals the single pass's, in the row form and through a shared
     prefix (whose pass cost counts the state once)."""
     import contextlib
-    from kev.data import load_records
-    from kev.model import MAX_STATE, load_tokenizer
-    from kev.train import batch_loss, encode_batch, row_passes
+    from d1a.data import load_records
+    from d1a.model import MAX_STATE, load_tokenizer
+    from d1a.train import batch_loss, encode_batch, row_passes
     tok = load_tokenizer(str(tiny_base / "base"))
     model = DecisionModel(str(tiny_base / "base"), tok, "cpu"); model.train()
     reqs = load_records(tiny_base / "data.jsonl")[:4]
@@ -961,10 +963,10 @@ def test_row_budget_changes_passes_not_gradients(tiny_base, shared):
 
 @pytest.mark.parametrize("checkpointing,lora", [(False, 0), (True, 0), (True, 4)])
 def test_shared_prefix_equals_rows(tiny_base, checkpointing, lora):
-    """kev.shared_prefix (each state once, branches continuing from it: attention keys and values, the DeltaNet conv
+    """d1a.shared_prefix (each state once, branches continuing from it: attention keys and values, the DeltaNet conv
     window and recurrent state) gives the row form's logits and gradients in fp32, over states of unequal length (left
     padding) and 1-4 questions; with gradient checkpointing each layer's two passes are recomputed together. With a LoRA
-    (kev.train --shared_prefix 1 without --full_ft) the same holds for the adapter's gradients (dropout off: eval mode,
+    (d1a.train --shared_prefix 1 without --full_ft) the same holds for the adapter's gradients (dropout off: eval mode,
     so the two passes draw no different masks)."""
     assert_shared_prefix_equals_rows(tiny_base, checkpointing, lora, ((5, 3), (17, 4), (1, 2), (40, 1)))
 
@@ -974,7 +976,7 @@ def test_shared_prefix_unpadded_states_run_without_a_state_mask(tiny_base, check
     """Under SDPA, states of one length (a long record alone in its micro-batch) run causal with no explicit state mask
     (a 64k-token state's would be 4 GB, and the flash kernel takes none): same logits and gradients as the row form. Mixed
     lengths still build the mask."""
-    import kev.shared_prefix as SP
+    import d1a.shared_prefix as SP
     shapes = []
     real = SP._masks
     monkeypatch.setattr(SP, "_masks", lambda allow, dtype, attn: (shapes.append(tuple(allow.shape)), real(allow, dtype, attn))[1])
@@ -986,17 +988,17 @@ def test_shared_prefix_unpadded_states_run_without_a_state_mask(tiny_base, check
 
 
 def test_local_predictor_scores_long_rows_through_the_shared_prefix(tiny_base, tmp_path, monkeypatch):
-    """kev.benchmark's predictor runs a record whose longest row exceeds kev.model.ROW_PASS_TOKENS (a state past 16k
+    """d1a.benchmark's predictor runs a record whose longest row exceeds d1a.model.ROW_PASS_TOKENS (a state past 16k
     tokens) on a hybrid torch backbone through the shared prefix (the state once, not once per question): same logits as
     the row form. On CUDA such a record also runs under SDPA's flash / memory-efficient kernels, off the fp32-exact
     contract, so it is labelled: the prediction and its rows carry `kernels`, report.json counts them in `long_rows`. A
     run with no long row has neither (existing rows and reports are unchanged); on the CPU a long row is exact and
     unlabelled."""
-    from kev import predictors as P
-    from kev.benchmark import evaluate_records
-    from kev.checkpoint import LoadOptions
-    from kev.data import load_records
-    from kev.model import ROW_PASS_TOKENS
+    from d1a import predictors as P
+    from d1a.benchmark import evaluate_records
+    from d1a.checkpoint import LoadOptions
+    from d1a.data import load_records
+    from d1a.model import ROW_PASS_TOKENS
     train_tiny(tiny_base, tmp_path / "full", *FULL, "--max_steps", "1", monkeypatch=monkeypatch)
     predictor = P.LocalPredictor(str(tmp_path / "full"), "cpu", LoadOptions(dtype=torch.float32, temperature=1.0))
     record = load_records(tiny_base / "data.jsonl")[7]
@@ -1022,9 +1024,9 @@ def test_local_predictor_long_rows_on_mlx_use_its_forward(monkeypatch):
     """The MLX backend (what a hybrid checkpoint resolves to on Apple Silicon) has no forward_batch and its forward already
     runs the state once: a long record goes through model.forward, unlabelled (no CUDA kernels involved)."""
     from types import SimpleNamespace
-    from kev import predictors as P
+    from d1a import predictors as P
     calls = []
-    class MLXShaped:   # the scoring interface kev.mlx_model.MLXDecisionModel exposes, minus everything unused here
+    class MLXShaped:   # the scoring interface d1a.mlx_model.MLXDecisionModel exposes, minus everything unused here
         backend, hybrid, head = "mlx", True, SimpleNamespace(temperature=1.0)
         def encode(self, tok, rec, **kw):
             return {"ids": [1] * 30 + [2, 3, 4], "seg": [0] * 30 + [1, 1, 1], "pos": list(range(33)), "decide_idx": [32], "opt_idx": [[31]]}
@@ -1042,7 +1044,7 @@ def test_local_predictor_long_rows_on_mlx_use_its_forward(monkeypatch):
 def assert_shared_prefix_equals_rows(tiny_base, checkpointing, lora, shapes, attn=None):
     """(state words, questions) per record -> the shared prefix's logits and gradients equal the row form's in fp32."""
     import random
-    from kev.model import load_tokenizer
+    from d1a.model import load_tokenizer
     tok, rng = load_tokenizer(str(tiny_base / "base")), random.Random(0)
     words = "it is charged twice which team billing shipping refund angry the customer".split()
     text = lambda n: " ".join(rng.choice(words) for _ in range(n))
@@ -1072,7 +1074,7 @@ LOCAL_RENDEZVOUS = ("--nnodes=1", "--rdzv-backend=c10d", "--rdzv-endpoint=127.0.
 def _run_train(args, out, ranks=1):
     import subprocess, sys
     launcher = ["-m", "torch.distributed.run", *LOCAL_RENDEZVOUS, f"--nproc_per_node={ranks}"] if ranks > 1 else []
-    done = subprocess.run([sys.executable, *launcher, "-m", "kev.train", *args, "--out", str(out)], capture_output=True, text=True)
+    done = subprocess.run([sys.executable, *launcher, "-m", "d1a.train", *args, "--out", str(out)], capture_output=True, text=True)
     assert done.returncode == 0, done.stderr[-3000:]
     return done.stdout
 
@@ -1088,7 +1090,7 @@ def test_resume_is_bit_identical(tiny_base, tmp_path, ranks, gate):
     --pass_tokens_max (the continuation plans the same extra micro-batches)."""
     import re
     from safetensors.torch import load_file
-    from kev.checkpoint import read_meta
+    from d1a.checkpoint import read_meta
     args = ["--base", str(tiny_base / "base"), "--data", str(tiny_base / "data.jsonl"), "--device", "cpu", "--batch", "2", "--accum", str(2 // ranks),
             "--lr", "1e-3", "--epochs", "2", "--p_none_pair", "0.5", "--length_sort", "1", *FULL, *gate]
     out = _run_train(args, tmp_path / "whole", ranks)
@@ -1104,7 +1106,7 @@ def test_resume_is_bit_identical(tiny_base, tmp_path, ranks, gate):
     head_a, head_b = read_meta(tmp_path / "whole").head, read_meta(tmp_path / "split").head
     assert all(torch.equal(a[k], b[k]) for k in a) and all(torch.equal(head_a[k], head_b[k]) for k in head_a)
     assert not (tmp_path / "split/resume").exists()   # the finished checkpoint supersedes the resume point
-    from kev.suite import read_json
+    from d1a.suite import read_json
     norms = [read_json(tmp_path / d / "training_metrics.json")["grad_norm"] for d in ("whole", "split")]
     assert norms[0] == norms[1] and [e["epoch"] for e in norms[0]] == [0, 1]   # carried across the resume point
 
@@ -1114,7 +1116,7 @@ def test_fsdp2_ranks_train_what_one_process_trains(tiny_base, tmp_path):
     with the same records per step: the sharded gradient is the sum over ranks, not the mean."""
     import subprocess, sys
     from safetensors.torch import load_file
-    common = ["-m", "kev.train", "--base", str(tiny_base / "base"), "--data", str(tiny_base / "data.jsonl"), "--device", "cpu", "--batch", "2",
+    common = ["-m", "d1a.train", "--base", str(tiny_base / "base"), "--data", str(tiny_base / "data.jsonl"), "--device", "cpu", "--batch", "2",
               "--lr", "1e-3", "--max_steps", "1", *FULL]
     subprocess.run([sys.executable, *common, "--accum", "2", "--out", str(tmp_path / "one")], check=True, capture_output=True)
     subprocess.run([sys.executable, "-m", "torch.distributed.run", *LOCAL_RENDEZVOUS, "--nproc_per_node=2", *common, "--accum", "1", "--out", str(tmp_path / "two")], check=True, capture_output=True)
@@ -1131,9 +1133,9 @@ def test_snapshots_are_checkpoints_kept_and_completed_on_resume(tiny_base, tmp_p
     bits; a snapshot before the resume point that is gone is reported, not invented."""
     import shutil
     from safetensors.torch import load_file
-    from kev.checkpoint import Checkpoint, read_meta
-    from kev.full_ft import SNAPSHOT_INFO, completed_snapshots, snapshot_path
-    from kev.suite import read_json
+    from d1a.checkpoint import Checkpoint, read_meta
+    from d1a.full_ft import SNAPSHOT_INFO, completed_snapshots, snapshot_path
+    from d1a.suite import read_json
     args = ["--base", str(tiny_base / "base"), "--data", str(tiny_base / "data.jsonl"), "--device", "cpu", "--batch", "2", "--accum", str(2 // ranks),
             "--lr", "1e-3", "--epochs", "2", *FULL, "--snapshot_fractions", "0.25,0.5"]
     snaps = lambda name: ["--snapshot_dir", str(tmp_path / f"{name}-snaps")]
@@ -1176,12 +1178,12 @@ def test_snapshots_are_checkpoints_kept_and_completed_on_resume(tiny_base, tmp_p
 
 
 def test_snapshot_schedule_and_trial_knobs(monkeypatch, capsys, tmp_path):
-    """Which steps get a snapshot; kev.train and kev.experiment refuse snapshots outside full-weight runs and bad lists;
+    """Which steps get a snapshot; d1a.train and d1a.experiment refuse snapshots outside full-weight runs and bad lists;
     a full-weight trial snapshots at experiment.SNAPSHOT_FRACTIONS into <trial>/snapshots unless its plan says otherwise
     (optional, so config hashes stay; the snapshot schedule is not part of a recipe)."""
-    import kev.experiment as E
-    from kev.autoresearch import knobs, recipe
-    from kev.full_ft import snapshot_fractions, snapshot_steps
+    import d1a.experiment as E
+    from d1a.autoresearch import knobs, recipe
+    from d1a.full_ft import snapshot_fractions, snapshot_steps
     assert snapshot_steps(8, (0.25, 0.5)) == [2, 4] and snapshot_steps(1553, (0.25, 0.5, 0.75)) == [389, 777, 1165]
     assert snapshot_steps(10, (0.3,)) == [3] and snapshot_steps(10, (0.99,)) == [] and snapshot_steps(10, (), 4) == [4, 8] and snapshot_steps(10, (0.5,), 5) == [5]
     assert snapshot_fractions("0.5,0.25") == (0.25, 0.5) and snapshot_fractions("none") == snapshot_fractions("") == ()
@@ -1205,21 +1207,21 @@ def test_snapshot_schedule_and_trial_knobs(monkeypatch, capsys, tmp_path):
     assert not flag(E.train_args({"base": "b", "lora": 16}, "suite", trial, "cuda"), "--snapshot_fractions")
     row = lambda cfg: {"config": cfg}
     assert recipe(row(full)) == recipe(row({**full, "snapshot_fractions": "none"})) and "snapshot_fractions" not in knobs({**full, "snapshot_fractions": "none"})
-    hub = {**full, "snapshot_hub_repo": "jaredpalmer/kev-snapshots"}
-    assert E.validated_trial(hub, manifest)["snapshot_hub_repo"] == "jaredpalmer/kev-snapshots" and not flag(E.train_args(hub, "suite", trial, "cuda"), "--snapshot_hub_repo")
+    hub = {**full, "snapshot_hub_repo": "JohnP1/d1a-snapshots"}
+    assert E.validated_trial(hub, manifest)["snapshot_hub_repo"] == "JohnP1/d1a-snapshots" and not flag(E.train_args(hub, "suite", trial, "cuda"), "--snapshot_hub_repo")
     assert recipe(row(full)) == recipe(row(hub))
     for bad in ({"base": "b", "snapshot_hub_repo": "a/b"}, {**full, "snapshot_hub_repo": "no-owner"}):
         with pytest.raises(ValueError): E.validated_trial(bad, manifest)
 
 
 def test_snapshot_count_is_capped_by_the_disk_budget(monkeypatch, capsys):
-    """kev.budget.MAX_SNAPSHOTS bounds what a run may plan (every snapshot is kept: ~51 GB each for a 27B on a 1 TiB disk
-    next to two 307 GB resume points); kev.train (at parse time, and again once the run's steps are known) and
-    kev.experiment.validated_trial refuse more, and an every-N plan needs a bounded step count."""
-    import kev.experiment as E
-    from kev.budget import CHECKPOINT_GB, FULL_FT_DISK, MAX_SNAPSHOTS, RESUME_POINT_GB
-    from kev.full_ft import too_many_snapshots
-    assert 2 * RESUME_POINT_GB + (1 + MAX_SNAPSHOTS) * CHECKPOINT_GB <= FULL_FT_DISK * 2 ** 20 / 1e9   # the disk arithmetic in kev/budget.py
+    """d1a.budget.MAX_SNAPSHOTS bounds what a run may plan (every snapshot is kept: ~51 GB each for a 27B on a 1 TiB disk
+    next to two 307 GB resume points); d1a.train (at parse time, and again once the run's steps are known) and
+    d1a.experiment.validated_trial refuse more, and an every-N plan needs a bounded step count."""
+    import d1a.experiment as E
+    from d1a.budget import CHECKPOINT_GB, FULL_FT_DISK, MAX_SNAPSHOTS, RESUME_POINT_GB
+    from d1a.full_ft import too_many_snapshots
+    assert 2 * RESUME_POINT_GB + (1 + MAX_SNAPSHOTS) * CHECKPOINT_GB <= FULL_FT_DISK * 2 ** 20 / 1e9   # the disk arithmetic in d1a/budget.py
     nine = tuple(round(0.1 * i, 1) for i in range(1, 10))
     assert too_many_snapshots(nine[:8]) is None and "9 snapshots planned" in too_many_snapshots(nine)
     assert too_many_snapshots((), 100, 900) is None and "9 snapshots planned" in too_many_snapshots((), 100, 1000)   # steps 100..900
@@ -1244,7 +1246,7 @@ def test_every_n_snapshots_over_the_cap_stop_before_training(tiny_base, tmp_path
 
 
 def test_pull_leaves_full_weights_and_resume_points_on_the_volume(tmp_path, monkeypatch, capsys):
-    """modal_app.pull (and kev.rounds' watcher, through pull_study) copies a study without full-weight shards (the final
+    """modal_app.pull (and d1a.rounds' watcher, through pull_study) copies a study without full-weight shards (the final
     checkpoint's and every snapshot's) and resume points; head.pt, configs, tokenizer, snapshot.json, results, rows and
     LoRA adapters come down. --weights copies everything (modal volume get)."""
     import modal_app
@@ -1269,18 +1271,18 @@ def test_pull_leaves_full_weights_and_resume_points_on_the_volume(tmp_path, monk
     calls = []
     monkeypatch.setattr(modal_app.subprocess, "run", lambda cmd, **kw: calls.append(cmd))
     modal_app.pull_volume("/s", tmp_path / "all")
-    assert calls[0][-4:] == ["get", "kev-runs", "/s", str(tmp_path / "all")]
+    assert calls[0][-4:] == ["get", "d1a-runs", "/s", str(tmp_path / "all")]
 
 
 def test_full_ft_plumbing():
     """Allowlist, admission bound and resources for full-weight trials; each rank's equal share of an epoch."""
-    from kev.budget import GPU_HOURLY, compute_bound, trial_resources
-    from kev.experiment import validated_trial
-    from kev.full_ft import rank_share
+    from d1a.budget import GPU_HOURLY, compute_bound, trial_resources
+    from d1a.experiment import validated_trial
+    from d1a.full_ft import rank_share
     manifest = {"base_revisions": {"b": "0" * 40}, "trainable_sources": []}
     trial = validated_trial({"base": "b", "full_ft": 1, "weights_dtype": "bf16", "row_budget": 16384, "max_steps": 20, "accum": 128}, manifest)
     assert (trial["full_ft"], trial["row_budget"], trial["max_steps"]) == (1, 16384, 20) and "max_steps" not in validated_trial({"base": "b"}, manifest)
-    from kev.model import MAX_STATE, MAX_TRAIN_STATE
+    from d1a.model import MAX_STATE, MAX_TRAIN_STATE
     gate = MAX_STATE * 8
     assert validated_trial({"base": "b", "p_none_pair": 0.25, "none_pair_max_state": gate}, manifest)["none_pair_max_state"] == gate
     assert "none_pair_max_state" not in validated_trial({"base": "b", "p_none_pair": 0.25}, manifest)   # absent: today's recipe and config hash
@@ -1292,12 +1294,12 @@ def test_full_ft_plumbing():
             validated_trial({"base": "b", **bad}, manifest)
     assert trial_resources("H200", True)[1][0] >= 12 * 25.6e9 / 2 ** 20 and trial_resources("H200:8", True) != trial_resources("H200", True)
     assert compute_bound("H200:8", 3600, 1) == pytest.approx(compute_bound("H200", 3600, 1) + 7 * GPU_HOURLY["H200"])
-    from kev.budget import FULL_FT_RETRIES, MAX_BUDGET, MAX_TIMEOUT, hourly_rate
+    from d1a.budget import FULL_FT_RETRIES, MAX_BUDGET, MAX_TIMEOUT, hourly_rate
     assert compute_bound("H200:8", 3600, 2, True) == pytest.approx(hourly_rate("H200:8", True) * 2 * (1 + FULL_FT_RETRIES))   # every attempt counted
     assert MAX_TIMEOUT[True] == 86400 and compute_bound("H200:8", 28800, 1, True) <= MAX_BUDGET[True]   # an 8 x H200 day: three 8 h attempts
     assert validated_trial({"base": "b", "full_ft": 1, "weights_dtype": "bf16", "shared_prefix": 0}, manifest)["shared_prefix"] == 0
     assert [rank_share(list(range(5)), r, 2) for r in (0, 1)] == [[0, 2, 4], [1, 3, 0]] and rank_share([1, 2], 0, 1) == [1, 2]
-    from kev.train import microbatch_plan
+    from d1a.train import microbatch_plan
     reqs = [{"state": "s" * n, "questions": {"q": {"instr": "x"}}} for n in (1, 90, 5, 70, 3, 80, 2, 4, 6, 7)]
     knobs = lambda sort: SimpleNamespace(batch=2, accum=2, length_sort=sort, shared_prefix=1)
     plain = [microbatch_plan(reqs, knobs(0), 2, rank) for rank in (0, 1)]
@@ -1311,11 +1313,11 @@ def test_full_ft_plumbing():
 
 
 def test_continue_trial_only_continues_the_same_full_weight_run(tmp_path, monkeypatch):
-    """kev.experiment.continue_trial (the next attempt after a timeout, modal_app.continue_full_trial) retrains with the trial's own
-    config, which kev.train continues from its resume point, and scores it; it refuses a LoRA trial, a finished one and
+    """d1a.experiment.continue_trial (the next attempt after a timeout, modal_app.continue_full_trial) retrains with the trial's own
+    config, which d1a.train continues from its resume point, and scores it; it refuses a LoRA trial, a finished one and
     one whose code changed."""
-    import kev.experiment as E
-    from kev.suite import read_json, write_json
+    import d1a.experiment as E
+    from d1a.suite import read_json, write_json
     sources, trial, calls = E.source_hashes(), tmp_path / "00-trial-0", []
     monkeypatch.setattr(E, "train_checkpoint", lambda config, suite, output, device: calls.append(config) or str(output / "checkpoint"))
     monkeypatch.setattr(E, "score_trial", lambda run, suite, output, *args, **kwargs: ({"run": run}, []))
@@ -1324,7 +1326,7 @@ def test_continue_trial_only_continues_the_same_full_weight_run(tmp_path, monkey
     assert E.continue_trial("suite", trial, sources, "cuda")[0] == {"run": str(trial / "checkpoint")} and calls == [{"full_ft": 1, "weights_dtype": "bf16"}]
     assert len(read_json(trial / "provenance.json")["continued"]) == 1
     with pytest.raises(ValueError):
-        E.continue_trial("suite", trial, {**sources, "kev/train.py": "0"}, "cuda")
+        E.continue_trial("suite", trial, {**sources, "d1a/train.py": "0"}, "cuda")
     write_json(trial / "provenance.json", {"config": {"lora": 16}, "source_hashes": sources})
     with pytest.raises(ValueError):
         E.continue_trial("suite", trial, sources, "cuda")
@@ -1333,8 +1335,8 @@ def test_continue_trial_only_continues_the_same_full_weight_run(tmp_path, monkey
 def test_resume_writer_keeps_a_later_point_being_written(tmp_path):
     """Rank 0 finishes a point after the other ranks have started the next one (a background write outlasting the
     interval): it removes only earlier points, never the one in progress."""
-    from kev.full_ft import LATEST, ResumeWriter
-    from kev.suite import read_json
+    from d1a.full_ft import LATEST, ResumeWriter
+    from d1a.suite import read_json
     for step in (1, 9): (tmp_path / f"step-{step:07d}").mkdir()
     writer = ResumeWriter(tmp_path, background=False)
     writer._write_point(5, {"optimizer": {}}, {"world": 1})
@@ -1343,8 +1345,8 @@ def test_resume_writer_keeps_a_later_point_being_written(tmp_path):
 
 def _parse_train(monkeypatch, *args):
     import sys
-    from kev import train
-    monkeypatch.setattr(sys, "argv", ["kev.train", "--out", "/nonexistent/kev-test-run", *args])
+    from d1a import train
+    monkeypatch.setattr(sys, "argv", ["d1a.train", "--out", "/nonexistent/kev-test-run", *args])
     return train.parse_args()
 
 
@@ -1360,9 +1362,9 @@ def test_row_budget_refuses_split_loss_terms(monkeypatch, capsys):
 
 
 def test_full_ft_refuses_old_torch(monkeypatch, capsys):
-    """kev.full_ft needs torch >= 2.8 (FSDPModule.set_gradient_divide_factor) while pyproject allows 2.6: --full_ft 1
+    """d1a.full_ft needs torch >= 2.8 (FSDPModule.set_gradient_divide_factor) while pyproject allows 2.6: --full_ft 1
     stops at argument parsing with the reason."""
-    import kev.full_ft as F
+    import d1a.full_ft as F
     assert F.unsupported_torch("2.8.0+cu128") is None and F.unsupported_torch("2.10.1") is None
     assert "torch >= 2.8" in F.unsupported_torch("2.7.1+cu126") and "2.6.0" in F.unsupported_torch("2.6.0")
     monkeypatch.setattr(F, "unsupported_torch", lambda: "--full_ft 1 needs torch >= 2.8 (test)")
@@ -1374,8 +1376,8 @@ def test_full_ft_refuses_old_torch(monkeypatch, capsys):
 def test_padding_repeats_shuffled_order_not_the_longest():
     """Filling every rank to the same count repeats the first records of the shuffled order: in rank_share (plain) and in
     microbatch_plan's short last step (--length_sort 1, padded before its records are sorted by length)."""
-    from kev.full_ft import rank_share
-    from kev.train import microbatch_plan
+    from d1a.full_ft import rank_share
+    from d1a.train import microbatch_plan
     assert rank_share([5, 1, 9], 1, 2) == [1, 5]
     reqs = [{"state": "s" * n, "questions": {"q": {"instr": "x"}}} for n in (50, 60, 70, 80, 3, 900, 800)]   # last step: 3, 900, 800
     plans = [microbatch_plan(reqs, SimpleNamespace(batch=1, accum=2, length_sort=1, shared_prefix=1), 2, rank) for rank in (0, 1)]
@@ -1386,7 +1388,7 @@ def test_padding_repeats_shuffled_order_not_the_longest():
 def test_grad_norm_in_training_metrics(tiny_base, tmp_path, monkeypatch):
     """training_metrics.json carries, per epoch, the mean and max global gradient norm before clipping and the number of
     clipped steps, for LoRA (clip_grad_norm_) and full weights (MasterAdamW's own norm)."""
-    from kev.suite import read_json
+    from d1a.suite import read_json
     for name, args in (("lora", ("--lora", "4")), ("full", FULL)):
         train_tiny(tiny_base, tmp_path / name, *args, "--accum", "1", "--epochs", "2", monkeypatch=monkeypatch)
         metrics = read_json(tmp_path / name / "training_metrics.json")
@@ -1397,9 +1399,9 @@ def test_grad_norm_in_training_metrics(tiny_base, tmp_path, monkeypatch):
 
 def test_continue_trial_scores_a_finished_checkpoint_without_training(tmp_path, monkeypatch):
     """An attempt that ran out of time while scoring left a finished checkpoint (head.pt): the next attempt scores it
-    and does not train again (kev.train --resume 1 would find no resume point and start over)."""
-    import kev.experiment as E
-    from kev.suite import write_json
+    and does not train again (d1a.train --resume 1 would find no resume point and start over)."""
+    import d1a.experiment as E
+    from d1a.suite import write_json
     sources, trial = E.source_hashes(), tmp_path / "00-trial-0"
     (trial / "checkpoint").mkdir(parents=True); (trial / "checkpoint" / "head.pt").write_bytes(b"")
     (trial / "calibration").mkdir(); (trial / "calibration" / "predictions.jsonl").write_bytes(b"")   # the killed attempt's partial read
@@ -1411,7 +1413,7 @@ def test_continue_trial_scores_a_finished_checkpoint_without_training(tmp_path, 
 
 def test_resume_writer_bounds_the_wait_for_peers(tmp_path, monkeypatch):
     """Rank 0 waits PEER_WAIT for the other ranks' files, then fails loudly instead of hanging; latest.json is untouched."""
-    import kev.full_ft as F
+    import d1a.full_ft as F
     monkeypatch.setattr(F, "PEER_WAIT", 0)
     writer = F.ResumeWriter(tmp_path, background=False)
     writer.world = 2   # a peer that never writes
@@ -1421,13 +1423,13 @@ def test_resume_writer_bounds_the_wait_for_peers(tmp_path, monkeypatch):
 
 
 def test_full_weight_trial_failures_are_returned_and_seen(tmp_path, monkeypatch):
-    """A full-weight trial that fails with an error returns {"failed": ...} (only a timeout is continued); kev.rounds.poll_modal
+    """A full-weight trial that fails with an error returns {"failed": ...} (only a timeout is continued); d1a.rounds.poll_modal
     raises TrialFailed for it, so the watcher marks it failed."""
     import types
     import modal
     import modal_app
-    from kev import rounds
-    from kev.suite import write_json
+    from d1a import rounds
+    from d1a.suite import write_json
     write_json(tmp_path / "failed.json", {"error": "ValueError: boom"})
     result = modal_app.failed_trial("trial-0", tmp_path)
     assert result == {"label": "trial-0", "failed": "ValueError: boom"}
@@ -1466,8 +1468,8 @@ def _entries(*calls):
 def _ledgered_study(tmp_path, monkeypatch, record, status, lease=None, fail=False):
     """A study with a spawn record, a fake run_full_trial, fake call statuses and the trial's lease (dict or callable)."""
     import modal_app
-    from kev import rounds
-    from kev.suite import write_json
+    from d1a import rounds
+    from d1a.suite import write_json
     (tmp_path / "runs").mkdir(exist_ok=True)
     write_json(tmp_path / "runs/s.spawn.json", record)
     fn = _FakeModalFunction(fail)
@@ -1483,7 +1485,7 @@ def _record(*calls):
             "full_ft": True, "modal_retries": 0}
 
 
-ARGS = ("s", "00-trial-0", {"full_ft": 1}, "evals/sft-v2-r22", "evals/v4/transfer-v4", {"kev/x.py": "h"}, "c" * 40)
+ARGS = ("s", "00-trial-0", {"full_ft": 1}, "evals/sft-v2-r22", "evals/v4/transfer-v4", {"d1a/x.py": "h"}, "c" * 40)
 
 
 def test_full_weight_studies_spawn_without_modal_retries(tmp_path, monkeypatch):
@@ -1491,8 +1493,8 @@ def test_full_weight_studies_spawn_without_modal_retries(tmp_path, monkeypatch):
     study now spawns every trial with retries off and writes the attempt ledger its continuations are counted in; each
     attempt is recorded pending (a nonce) before its spawn, and the nonce goes to the attempt for its lease."""
     import modal_app
-    from kev.budget import compute_bound
-    from kev.suite import read_json
+    from d1a.budget import compute_bound
+    from d1a.suite import read_json
     monkeypatch.setattr(modal_app, "ROOT", tmp_path)
     jobs = [modal_app.Job("s", 0, "trial-0", {"full_ft": 1}, "evals/smoke-v1", {}, "0" * 40, None, None)]
     monkeypatch.setattr(modal_app, "admit_study", lambda *a: (jobs, 987.99, {"gpu": "H200:8", "timeout": 28800, "retries": 0, "cpu": 16, "memory": (1, 2),
@@ -1514,9 +1516,9 @@ def test_full_weight_studies_spawn_without_modal_retries(tmp_path, monkeypatch):
 
 
 def test_admit_study_turns_modal_retries_off(tmp_path, monkeypatch):
-    import kev.experiment
+    import d1a.experiment
     import modal_app
-    monkeypatch.setattr(kev.experiment, "load_plan", lambda suite, path: [{"full_ft": 1, "weights_dtype": "bf16"}])
+    monkeypatch.setattr(d1a.experiment, "load_plan", lambda suite, path: [{"full_ft": 1, "weights_dtype": "bf16"}])
     monkeypatch.setattr(modal_app, "ROOT", tmp_path)
     monkeypatch.setattr(modal_app, "local_git_commit", lambda: "0" * 40)
     monkeypatch.setattr(modal_app, "local_source_hashes", lambda: {})
@@ -1525,12 +1527,12 @@ def test_admit_study_turns_modal_retries_off(tmp_path, monkeypatch):
 
 
 def test_continue_full_trial_spawns_counted_attempts_one_at_a_time(tmp_path, monkeypatch):
-    """modal_app.continue_full_trial (resume --trial, which kev.rounds watch runs after a timeout): only a call that ended by
+    """modal_app.continue_full_trial (resume --trial, which d1a.rounds watch runs after a timeout): only a call that ended by
     a timeout gets a next attempt, with the ledger's GPU and timeout, retries off and a pending entry's nonce; the ledger
     records it; a running call and a spent budget are refused; a trial without a ledger needs --beyond-bound and is not
     recorded."""
-    from kev.budget import FULL_FT_RETRIES
-    from kev.suite import read_json
+    from d1a.budget import FULL_FT_RETRIES
+    from d1a.suite import read_json
     status = {"fc-0": "running", "fc-new-1": "timeout", "fc-new-2": "timeout"}
     modal_app, fn = _ledgered_study(tmp_path, monkeypatch, _record("fc-0"), status)
     with pytest.raises(SystemExit, match="is running"):
@@ -1541,7 +1543,7 @@ def test_continue_full_trial_spawns_counted_attempts_one_at_a_time(tmp_path, mon
     assert fn.options[-1] == {"gpu": "H200:8", "cpu": 16, "memory": (409600, 471040), "timeout": 28800, "retries": 0}
     args, kwargs = fn.spawned[-1]
     ledger = read_json(tmp_path / "runs/s.spawn.json")
-    assert args == ("s", 0, "trial-0", {"full_ft": 1}, "evals/sft-v2-r22", {"kev/x.py": "h"}, "c" * 40, None, "evals/v4/transfer-v4")
+    assert args == ("s", 0, "trial-0", {"full_ft": 1}, "evals/sft-v2-r22", {"d1a/x.py": "h"}, "c" * 40, None, "evals/v4/transfer-v4")
     assert kwargs == {"attempt": {"nonce": ledger["attempts"]["trial-0"][-1]["nonce"], "number": 2}}
     assert modal_app.continue_full_trial(*ARGS) == "fc-new-2"
     ledger = read_json(tmp_path / "runs/s.spawn.json")
@@ -1560,7 +1562,7 @@ def test_continue_full_trial_spawns_counted_attempts_one_at_a_time(tmp_path, mon
 def test_continue_full_trial_records_the_attempt_before_its_spawn(tmp_path, monkeypatch):
     """Review B1: a crash between the spawn and the record left an unrecorded live attempt. The entry is now written first;
     a launcher that dies inside the spawn leaves it pending, and the next continuation refuses while it may still start."""
-    from kev.suite import read_json
+    from d1a.suite import read_json
     clock = _Clock()
     modal_app, fn = _ledgered_study(tmp_path, monkeypatch, _record("fc-0"), {"fc-0": "timeout"}, fail=True)
     with pytest.raises(ConnectionError):
@@ -1577,8 +1579,8 @@ def test_a_pending_attempt_is_adopted_from_its_lease_or_abandoned_once_stale(tmp
     """A pending entry whose container started names its call in the lease (adopted: the watcher then polls it, nothing is
     spawned while it runs); one that never took the lease within LEASE_STALE is counted as abandoned and the next attempt
     goes ahead."""
-    from kev.budget import LEASE_STALE
-    from kev.suite import read_json
+    from d1a.budget import LEASE_STALE
+    from d1a.suite import read_json
     clock = _Clock()
     record = _record("fc-0", None); record["attempts"]["trial-0"][-1]["at"] = clock.t; record["calls"]["trial-0"] = "fc-0"
     live = {"nonce": "n1", "attempt": 2, "call_id": "fc-orphan", "started": clock.t, "heartbeat": clock.t, "ended": None}
@@ -1599,7 +1601,7 @@ def test_a_pending_attempt_is_adopted_from_its_lease_or_abandoned_once_stale(tmp
 def test_continue_full_trial_waits_for_the_old_containers_lease(tmp_path, monkeypatch):
     """Review B2: a timed-out container keeps running (and committing) for its cancellation grace. The continuation waits,
     bounded, until the lease is ended or stale; a lease that stays fresh past the wait is a refusal."""
-    from kev.budget import LEASE_STALE
+    from d1a.budget import LEASE_STALE
     clock = _Clock()
     beat = {"t": clock.t}
     lease = lambda study, trial: {"nonce": "n0", "attempt": 1, "call_id": "fc-0", "started": 0.0, "heartbeat": beat["t"], "ended": None}
@@ -1620,7 +1622,7 @@ def test_continue_full_trial_waits_for_the_old_containers_lease(tmp_path, monkey
 
 def test_continue_full_trial_refuses_a_call_that_did_not_time_out(tmp_path, monkeypatch):
     modal_app, fn = _ledgered_study(tmp_path, monkeypatch, _record("fc-0"), {})
-    from kev import rounds
+    from d1a import rounds
     def failed(call_id): raise RuntimeError("CUDA out of memory")
     def offline(call_id): raise ConnectionResetError()
     monkeypatch.setattr(rounds, "poll_modal", failed)
@@ -1637,7 +1639,7 @@ def test_continue_full_trial_refuses_a_call_that_did_not_time_out(tmp_path, monk
 
 
 class _FakeVolume:
-    """The kev-leases volume as two containers see it: a shared committed dict of files; reload() copies it into this
+    """The d1a-leases volume as two containers see it: a shared committed dict of files; reload() copies it into this
     container's view (a directory), commit() copies the view back. `others` runs before each reload (another container)."""
     def __init__(self, root, shared, others=()):
         self.root, self.shared, self.others, self.commits = Path(root), shared, list(others), 0
@@ -1662,7 +1664,7 @@ def test_an_attempt_refuses_while_another_attempts_lease_is_fresh(tmp_path):
     """Review B2, the container side: an attempt that starts while another attempt's heartbeat is younger than LEASE_STALE
     (the old container in its cancellation grace, or an unrecorded spawn) refuses; a stale or ended lease is taken over."""
     import json
-    from kev.budget import LEASE_STALE, lease_state
+    from d1a.budget import LEASE_STALE, lease_state
     clock, shared = _Clock(), {}
     old, old_volume = _lease(tmp_path, shared, clock, "old")
     assert old.acquire() is None and old_volume.commits == 1
@@ -1698,7 +1700,7 @@ def test_a_refused_attempt_touches_nothing(tmp_path, monkeypatch):
     failed.json, no run, and poll_modal reads it as "refused" (continued, never a failure)."""
     import json
     import modal_app
-    from kev.experiment import source_hashes
+    from d1a.experiment import source_hashes
     clock = _Clock()
     lease = tmp_path / "leases/s/00-trial-0/attempt.json"; lease.parent.mkdir(parents=True)
     lease.write_text(json.dumps({"nonce": "old", "attempt": 1, "call_id": "fc-old", "started": clock(), "heartbeat": time.time(), "ended": None}), encoding="utf-8")
@@ -1725,7 +1727,7 @@ def test_resume_points_are_committed_as_they_complete(tmp_path, monkeypatch, cap
     """While a full-weight trial trains, modal_app commits the runs volume after each completed resume point (a timeout
     skips trial()'s finally); a failed commit is printed loudly and tried again on the next look."""
     import modal_app
-    from kev.suite import write_json
+    from d1a.suite import write_json
     commits = []
     def commit():
         commits.append(len(commits))
@@ -1748,8 +1750,8 @@ def test_snapshots_are_committed_as_they_complete(tmp_path, monkeypatch, capsys)
     """The same watcher commits the runs volume once a snapshot is complete (its snapshot.json exists), so a snapshot
     survives a timeout; snapshots an earlier attempt left are not committed again, an incomplete one is not committed."""
     import modal_app
-    from kev.full_ft import SNAPSHOT_INFO, snapshot_path
-    from kev.suite import write_json
+    from d1a.full_ft import SNAPSHOT_INFO, snapshot_path
+    from d1a.suite import write_json
     commits, snaps = [], tmp_path / "snapshots"
     snapshot_path(snaps, 2).mkdir(parents=True); write_json(snapshot_path(snaps, 2) / SNAPSHOT_INFO, {"step": 2})   # an earlier attempt's
     monkeypatch.setattr(modal_app, "runs_volume", SimpleNamespace(commit=lambda: commits.append(1)))
@@ -1780,8 +1782,8 @@ def test_a_failed_snapshot_withholds_the_resume_point_and_the_continuation_rewri
     """The headline invariant: a snapshot whose background write fails (a full disk) keeps the resume point being written
     after it from becoming latest.json (ResumeWriter._write_point's after.join() path), training raises, and a
     continuation from the previous point finds the snapshot's step ahead of it and writes it."""
-    from kev.full_ft import LATEST, ResumeWriter, SnapshotWriter, completed_snapshots, snapshot_path
-    from kev.suite import read_json, write_json
+    from d1a.full_ft import LATEST, ResumeWriter, SnapshotWriter, completed_snapshots, snapshot_path
+    from d1a.suite import read_json, write_json
     resume, snaps = tmp_path / "resume", tmp_path / "snapshots"
     (resume / "step-0000003").mkdir(parents=True); write_json(resume / LATEST, {"dir": "step-0000003", "step": 3})
     first = SnapshotWriter(snaps, [4], background=True)
@@ -1803,8 +1805,8 @@ def test_a_failed_snapshot_withholds_the_resume_point_and_the_continuation_rewri
 def test_a_complete_snapshot_is_never_deleted(tmp_path, capsys):
     """A writer that reaches a step whose snapshot is complete (a racing writer, an earlier attempt) leaves it alone;
     an unpadded step directory from before zero-padding still counts as that step."""
-    from kev.full_ft import SNAPSHOT_INFO, SnapshotWriter, completed_snapshot_dirs, completed_snapshots, snapshot_path
-    from kev.suite import write_json
+    from d1a.full_ft import SNAPSHOT_INFO, SnapshotWriter, completed_snapshot_dirs, completed_snapshots, snapshot_path
+    from d1a.suite import write_json
     done = snapshot_path(tmp_path, 4); done.mkdir(parents=True); write_json(done / SNAPSHOT_INFO, {"step": 4}); (done / "head.pt").write_bytes(b"kept")
     lm = _FakeLM()
     SnapshotWriter(tmp_path, [4], background=False)._write(4, lm, None, _finish, {"step": 4}, 0.0)
@@ -1832,14 +1834,14 @@ class _FakeHub:
 
 
 def test_mirror_uploads_complete_checkpoints_to_a_private_repo_only(tmp_path):
-    """kev.mirror: a snapshot goes to <study>/<trial>/step-N and a final checkpoint to <study>/<trial>/final in a private
+    """d1a.mirror: a snapshot goes to <study>/<trial>/step-N and a final checkpoint to <study>/<trial>/final in a private
     repo (created private when missing), the commit is recorded next to it (snapshot.json["hub"], hub.json), a public repo
     is refused, a failure is retried once and never raised, an incomplete snapshot and an already mirrored one are skipped."""
-    from kev.full_ft import SNAPSHOT_INFO
-    from kev.mirror import RECORD, destination, mirror
-    from kev.suite import read_json, write_json
+    from d1a.full_ft import SNAPSHOT_INFO
+    from d1a.mirror import RECORD, destination, mirror
+    from d1a.suite import read_json, write_json
     import modal_app
-    from kev.mirror import DEFAULT_REPO
+    from d1a.mirror import DEFAULT_REPO
     assert modal_app.mirror_snapshots.info.raw_f.__defaults__[2] == DEFAULT_REPO
     root = tmp_path / "runs"
     snap, final = root / "s/00-trial-0/snapshots/step-0000389/checkpoint", root / "s/00-trial-0/checkpoint"
@@ -1848,19 +1850,19 @@ def test_mirror_uploads_complete_checkpoints_to_a_private_repo_only(tmp_path):
     assert destination(snap, root) == "s/00-trial-0/step-0000389" and destination(final, root) == "s/00-trial-0/final"
     assert destination(root / "interp/w0.5/checkpoint", root) == "interp/w0.5/final"
     logs, hub = [], _FakeHub(exists=False)
-    entry = mirror(snap, "me/kev-snapshots", api=hub, root=root, log=logs.append)
-    assert hub.created == [("me/kev-snapshots", True)] and entry["commit"] == "c1" and read_json(snap / SNAPSHOT_INFO)["hub"] == entry
+    entry = mirror(snap, "me/d1a-snapshots", api=hub, root=root, log=logs.append)
+    assert hub.created == [("me/d1a-snapshots", True)] and entry["commit"] == "c1" and read_json(snap / SNAPSHOT_INFO)["hub"] == entry
     assert read_json(snap / SNAPSHOT_INFO)["step"] == 389 and hub.uploads[0]["path_in_repo"] == "s/00-trial-0/step-0000389" and "resume/*" in hub.uploads[0]["ignore_patterns"]
-    assert mirror(snap, "me/kev-snapshots", api=hub, root=root, log=logs.append) == entry and len(hub.uploads) == 1   # recorded: skipped
+    assert mirror(snap, "me/d1a-snapshots", api=hub, root=root, log=logs.append) == entry and len(hub.uploads) == 1   # recorded: skipped
     flaky = _FakeHub(failures=1)
-    assert mirror(final, "me/kev-snapshots", api=flaky, root=root, log=logs.append)["commit"] == "c1" and read_json(final / RECORD)["path"] == "s/00-trial-0/final"
+    assert mirror(final, "me/d1a-snapshots", api=flaky, root=root, log=logs.append)["commit"] == "c1" and read_json(final / RECORD)["path"] == "s/00-trial-0/final"
     assert any("attempt 1/2" in line for line in logs)
     down = _FakeHub(failures=5)
     assert mirror(final, "me/other", api=down, root=root, log=logs.append) is None and "gave up after 2 attempts" in logs[-1]
     public = _FakeHub(private=False)
     assert mirror(final, "me/public", api=public, root=root, log=logs.append, force=True) is None and public.uploads == [] and "not a private repo" in logs[-1]
     half = root / "s/00-trial-0/snapshots/step-0000777/checkpoint"; half.mkdir(parents=True); (half / "head.pt").write_bytes(b"h")
-    assert mirror(half, "me/kev-snapshots", api=hub, root=root, log=logs.append) is None and "not a complete checkpoint" in logs[-1]
+    assert mirror(half, "me/d1a-snapshots", api=hub, root=root, log=logs.append) is None and "not a complete checkpoint" in logs[-1]
 
 
 def test_committed_snapshots_and_the_final_checkpoint_are_mirrored(tmp_path, monkeypatch, capsys):
@@ -1870,9 +1872,9 @@ def test_committed_snapshots_and_the_final_checkpoint_are_mirrored(tmp_path, mon
     failed spawn is logged, not raised. mirror_targets lists a study's complete snapshots and final checkpoints on the
     volume. No threads or sleeps: the test calls VolumeWatcher.poll and drives commit_resume_points with _ScriptedStop."""
     import modal_app
-    from kev.full_ft import SNAPSHOT_INFO, snapshot_path
-    from kev.suite import write_json
-    events, snaps, final, repo = [], tmp_path / "snapshots", tmp_path / "checkpoint", "me/kev-snapshots"
+    from d1a.full_ft import SNAPSHOT_INFO, snapshot_path
+    from d1a.suite import write_json
+    events, snaps, final, repo = [], tmp_path / "snapshots", tmp_path / "checkpoint", "me/d1a-snapshots"
     fail_commits = []
     def commit():
         if fail_commits: fail_commits.pop(); events.append("commit failed"); raise RuntimeError("volume busy")
@@ -1906,7 +1908,7 @@ def test_committed_snapshots_and_the_final_checkpoint_are_mirrored(tmp_path, mon
     modal_app.commit_resume_points(watcher, _ScriptedStop(point))   # a failed commit on the last look ends the loop too
     assert events == ["commit failed"] and "resume point 9 NOT committed" in capsys.readouterr().out
     monkeypatch.setattr(modal_app, "run_mirror", SimpleNamespace(spawn=lambda *a: (_ for _ in ()).throw(RuntimeError("no app"))))
-    modal_app.spawn_mirror([final], "me/kev-snapshots")
+    modal_app.spawn_mirror([final], "me/d1a-snapshots")
     assert "could not start the upload" in capsys.readouterr().out
     tree = {"/s": ({"00-trial-0", "01-trial-1"}, set()), "/s/00-trial-0": ({"checkpoint", "snapshots"}, set()), "/s/01-trial-1": ({"checkpoint"}, set()),
             "/s/00-trial-0/checkpoint": (set(), {"head.pt"}), "/s/01-trial-1/checkpoint": (set(), {"config.json"}),
@@ -1920,8 +1922,8 @@ def test_committed_snapshots_and_the_final_checkpoint_are_mirrored(tmp_path, mon
 def test_score_trial_uses_the_suites_admission_context(monkeypatch, tmp_path):
     """Round 19: in-trial scoring built its predictor with the 384-token default, so a long-state suite (evals/sft-v1, a
     7,552-token state context) rejected its first long calibration record. The predictor must get the suite's context."""
-    import kev.experiment as E
-    from kev.model import MAX_TRAIN_STATE, training_context
+    import d1a.experiment as E
+    from d1a.model import MAX_TRAIN_STATE, training_context
     long_state = training_context(MAX_TRAIN_STATE)
     seen = {}
 
@@ -1944,7 +1946,7 @@ def test_score_trial_uses_the_suites_admission_context(monkeypatch, tmp_path):
 def test_the_in_trial_temperature_says_it_is_not_shipped():
     """Round 19: a trial's temperature is fitted on held-out items of its own training sources (in distribution); its record
     (calibration/temperature.json, result.json calibration_fit) says so, so nobody serves or ships it."""
-    import kev.experiment as E
+    import d1a.experiment as E
     fit = E.calibration_fit(0.95, [{"variant": "clean"}, {"variant": "permuted"}, {"variant": "clean"}], "rows-sha", "suite-sha")
     assert fit == {"temperature": 0.95, "aggregation": "micro", "objective": "raw-logit NLL", "split": "calibration", "role": E.IN_TRIAL_TEMPERATURE,
                    "rows_sha256": "rows-sha", "suite_sha256": "suite-sha", "n": 2}
@@ -1952,11 +1954,11 @@ def test_the_in_trial_temperature_says_it_is_not_shipped():
 
 
 def test_jev_refusals_are_counted_only_when_asked(monkeypatch):
-    """JevPredictor with count_refusals: an HTTP 400/413/422 answer raises JevRefused (a ContextOverflow, so kev.benchmark
+    """JevPredictor with count_refusals: an HTTP 400/413/422 answer raises JevRefused (a ContextOverflow, so d1a.benchmark
     lists the record in rejected.json and continues) and is counted in accounting(); without it, or for another client
     error (401), the read stops as before. The worker process is faked."""
-    import json, kev.predictors as P
-    from kev.model import ContextOverflow
+    import json, d1a.predictors as P
+    from d1a.model import ContextOverflow
 
     class Worker:
         def __init__(self, status): self.status = status; self.stdin = self; self.stdout = self
@@ -1976,7 +1978,7 @@ def test_jev_refusals_are_counted_only_when_asked(monkeypatch):
 def test_jev_attempts_bound_the_retries_on_gateway_errors(monkeypatch):
     """JevPredictor tries a request `attempts` times on hosted-side failures (5xx) before stopping the read; the default,
     4, is the old fixed count."""
-    import json, kev.predictors as P
+    import json, d1a.predictors as P
     monkeypatch.setattr(P.time, "sleep", lambda s: None)
 
     class Worker:
@@ -1997,7 +1999,7 @@ def test_jev_counts_a_hosted_error_on_an_oversize_request_as_a_refusal(monkeypat
     """Past Jev's context the gateway answers 400 or 503. With count_refusals, a 503 (or a request that times out, no
     status) on a request estimated past OVERSIZE x JEV_CONTEXT_TOKENS is a refusal at once, not retried; the same 503 on a
     normal-size request is retried and then stops the read, as without the flag."""
-    import json, kev.predictors as P
+    import json, d1a.predictors as P
     monkeypatch.setattr(P.time, "sleep", lambda s: None)
 
     class Worker:

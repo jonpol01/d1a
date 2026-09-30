@@ -1,3 +1,5 @@
+# Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables).
 """The devtools-v1 builder's label mappings and selection rules (scripts/build_devtools_v1.py) on small synthetic inputs.
 No weights, no network. Run: uv run python -m pytest tests/test_devtools_v1.py -q
 """
@@ -7,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from kev.data import materialize
-from kev.suite import read_jsonl, text_digest
+from d1a.data import materialize
+from d1a.suite import read_jsonl, text_digest
 from scripts.build_devtools_v1 import (COMMIT_TYPES, Components, assign_match, balanced_pairs, check_invariants, choose, codereviewer_candidates,
                                        codereviewer_state, commit_type, deal_groups, is_balanced, line_safe, message_negatives, q_choice, q_noul,
                                        round_robin, state_key)

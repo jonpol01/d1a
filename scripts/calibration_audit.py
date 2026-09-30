@@ -1,3 +1,5 @@
+# Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables).
 import argparse
 import json
 import random
@@ -10,9 +12,9 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from kev.metrics import metrics, paired_bootstrap, probabilities_at_temperature, risk_coverage_curve
-from kev.checkpoint import read_meta
-from kev.suite import digest, load_split, read_json, write_json
+from d1a.metrics import metrics, paired_bootstrap, probabilities_at_temperature, risk_coverage_curve
+from d1a.checkpoint import read_meta
+from d1a.suite import digest, load_split, read_json, write_json
 
 RUNS = {
     "Kev-0.8B": "night2-08b-du2/00-trial-0",

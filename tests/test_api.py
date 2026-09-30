@@ -1,3 +1,5 @@
+# Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); checks the d1a-latest model name.
 """Conformance: the docs' example requests must round-trip through /v1/systemone with the documented shapes.
 Run with the server up:  uv run --extra serve python -m pytest tests -q
 """
@@ -6,7 +8,7 @@ import httpx, pytest
 
 pytestmark = pytest.mark.server
 
-BASE = os.environ.get("KEV_BASE_URL", "http://127.0.0.1:8008")
+BASE = os.environ.get("D1A_BASE_URL", "http://127.0.0.1:8008")
 
 DEPARTMENT = {"returns": "Exchanges, refunds, wrong or damaged items", "shipping": "Delivery status, delays, lost packages", "billing": "Charges, invoices, payment problems"}
 
@@ -107,7 +109,7 @@ def test_sdk_models():
     from typesafe_sdk import TypeSafeClient
     with TypeSafeClient(api_key="local", base_url=BASE, model="kev-latest") as client:
         cards = client.models.list().models
-    assert {"kev-latest", "jev-latest"} <= {c.name for c in cards}   # jev-latest is the SDK's default model
+    assert {"d1a-latest", "kev-latest", "jev-latest"} <= {c.name for c in cards}   # jev-latest is the SDK's default model
     assert all(c.description and c.release_date for c in cards)
 
 

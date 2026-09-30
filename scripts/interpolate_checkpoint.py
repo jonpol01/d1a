@@ -1,8 +1,10 @@
+# Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables).
 """WiSE-FT for full-weight checkpoints: a text backbone alpha * sft + (1 - alpha) * other, where other is the base the SFT
 was trained from (round 20) or another checkpoint of the same base (`--toward`, round 23), with the SFT pointer head or
 the two heads blended the same way (`--blend_head`).
 
-A full-weight SFT checkpoint (kev.train --full_ft 1) is a save_pretrained backbone plus head.pt. Interpolating its
+A full-weight SFT checkpoint (d1a.train --full_ft 1) is a save_pretrained backbone plus head.pt. Interpolating its
 weights with the base it was trained from trades what fine-tuning learned against what the base knew, without training
 (Wortsman et al., "Robust fine-tuning of zero-shot models", 2022). Round 20 reads six such checkpoints (PLAN.md). Round
 23 blends toward Kev-27B instead, a LoRA checkpoint of the same base that is strong where the SFT drifted.
@@ -14,7 +16,7 @@ weights with the base it was trained from trades what fine-tuning learned agains
     uv run modal run modal_app.py::interpolate --sft /runs/r19-27b-lr2e6/00-trial-0/checkpoint --prefix 27b-a   # on Modal
 
 The other endpoint:
-- the base (default): built exactly as training builds it (kev.model.DecisionModel on meta.base @ meta.base_revision in the
+- the base (default): built exactly as training builds it (d1a.model.DecisionModel on meta.base @ meta.base_revision in the
   run's weights dtype), so its state_dict carries the names save_backbone wrote;
 - `--toward` a full-weight checkpoint: its saved backbone, streamed tensor by tensor from its shards;
 - `--toward` a LoRA checkpoint: its merged backbone in fp32, W + delta, where W is the base built as its loader builds it
@@ -27,7 +29,7 @@ endpoint in name and shape, and every tensor of the other endpoint must be cover
 
 The SFT side streams tensor by tensor from its safetensors shards, and each output shard is written as soon as it is
 complete, with the SFT shard's file name, tensor names, dtype and metadata, and the SFT index copied, so the result loads
-through kev.checkpoint's full-weight rule unchanged. Arithmetic is fp32 (bf16 sides upcast exactly), rounded once to the
+through d1a.checkpoint's full-weight rule unchanged. Arithmetic is fp32 (bf16 sides upcast exactly), rounded once to the
 SFT tensor's dtype. head.pt is the SFT's (same meta and temperature) with `interpolation` added to its meta: {alpha, sft:
 {path, weights_sha256}, base: "<repo>@<revision>"}, plus with `--toward`: toward {path, resolved, kind, weights_sha256,
 head_sha256, merge?} and head {kind: "sft" | "blend", sft: {head_sha256, temperature}, toward: {head_sha256, temperature}}.
@@ -49,9 +51,9 @@ from safetensors import safe_open
 from safetensors.torch import save_file
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from kev.checkpoint import Checkpoint, read_meta, write_meta  # noqa: E402
-from kev.model import DecisionModel, load_tokenizer  # noqa: E402
-from kev.suite import digest, write_json  # noqa: E402
+from d1a.checkpoint import Checkpoint, read_meta, write_meta  # noqa: E402
+from d1a.model import DecisionModel, load_tokenizer  # noqa: E402
+from d1a.suite import digest, write_json  # noqa: E402
 
 CHUNK = 1 << 24                                                      # elements per fp32 step: bounds the temporaries (~200 MB)
 NOT_COPIED = ("head.pt", "training_config.json", "training_metrics.json")   # head.pt is rewritten; the rest describe the SFT run
@@ -77,13 +79,13 @@ class Endpoint(NamedTuple):
 
 
 def build_backbone(meta):
-    """The base backbone as kev.train (and kev.checkpoint's LoRA loader) builds it: DecisionModel in the run's weights dtype."""
+    """The base backbone as d1a.train (and d1a.checkpoint's LoRA loader) builds it: DecisionModel in the run's weights dtype."""
     tok = load_tokenizer(meta.base, revision=meta.base_revision)
     return DecisionModel(meta.base, tok, "cpu", revision=meta.base_revision, head_dim=meta.head_dim, dtype=DTYPES[meta.weights_dtype])
 
 
 def base_backbone(meta):
-    """{name: tensor} of the base backbone as kev.train builds it before training."""
+    """{name: tensor} of the base backbone as d1a.train builds it before training."""
     return build_backbone(meta).lm.state_dict()
 
 
@@ -208,7 +210,7 @@ def interpolate(sft, alphas, outs, base=None, revision=None, on_done=None, log=p
     outs = [Path(o) for o in outs]
     if taken := [str(o) for o in outs if o.exists()]: raise FileExistsError(f"refusing to overwrite {taken}")
     ck = Checkpoint(sft)
-    if not ck.full: raise ValueError(f"{sft} is a LoRA adapter; interpolate a full-weight checkpoint (kev.train --full_ft 1)")
+    if not ck.full: raise ValueError(f"{sft} is a LoRA adapter; interpolate a full-weight checkpoint (d1a.train --full_ft 1)")
     meta = ck.meta
     if (base or meta.base) != meta.base or (revision or meta.base_revision) != meta.base_revision:
         raise ValueError(f"{sft} was trained from {meta.base}@{meta.base_revision}, not {base}@{revision}")

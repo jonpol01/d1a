@@ -1,3 +1,5 @@
+# Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables).
 """documents-v1: apply the B2 label rules to the candidates and the LLM answers (scripts/label_documents_v1.py), write the
 adjudication queue and, once adjudications exist, the frozen suite.
 
@@ -23,7 +25,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from kev.suite import PRIVATE_DATASET, SERVING_CONTEXT_8K as SERVING_CONTEXT, digest, read_json, read_jsonl, read_manifest, write_json, write_jsonl  # noqa: E402
+from d1a.suite import PRIVATE_DATASET, SERVING_CONTEXT_8K as SERVING_CONTEXT, digest, read_json, read_jsonl, read_manifest, write_json, write_jsonl  # noqa: E402
 
 WORK = Path("runs/documents-v1-work")
 TEACHERS = ("deepseek/deepseek-v3.2", "alibaba/qwen3-235b-a22b-thinking")
@@ -57,7 +59,7 @@ def train_split(work):
         for qid, q in r["questions"].items():
             votes = [vote(ans, m, r["_meta"]["id"], qid)[0] for m in TEACHERS]
             c["questions"] += 1; c["unlabelled"] += any(v is None for v in votes)
-            if all(v == q["label"] for v in votes): qs[qid] = dict(q); c["kept"] += 1   # kept whole: kev.data.materialize needs "src"
+            if all(v == q["label"] for v in votes): qs[qid] = dict(q); c["kept"] += 1   # kept whole: d1a.data.materialize needs "src"
         if qs: kept.append({**r, "questions": qs})
     return kept, dict(c)
 
@@ -203,7 +205,7 @@ def main():
     ap.add_argument("--spot-check", action="store_true", help="write the 50-item human sample from the (final) test split")
     ap.add_argument("--min-agreement", type=int, help="required with --freeze: spot-check accepts needed out of 50 (documents-v1 and v2 registered 47)")
     ap.add_argument("--work", default=str(WORK)); ap.add_argument("--version", default="documents-v1")
-    ap.add_argument("--private", action="store_true", help="partitions go only to kev.suite.PRIVATE_DATASET; the manifest pins that commit")
+    ap.add_argument("--private", action="store_true", help="partitions go only to d1a.suite.PRIVATE_DATASET; the manifest pins that commit")
     a = ap.parse_args()
     if a.freeze and a.min_agreement is None: ap.error("--freeze needs --min-agreement (the registered spot-check bar)")
     work = Path(a.work)
