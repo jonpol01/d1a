@@ -125,7 +125,7 @@ uv run python -m d1a.train --suite evals/v7/decision-v7 \
     --p_none_pair 0.25 --device cuda --out runs/d1a-e2b
 ```
 
-For E4B pass `--base google/gemma-4-E4B --base_revision <sha>`. To fine-tune on your own data, start from a checkpoint: `--data mine.jsonl --init_from JohnP1/d1a-e2b`. `python -m d1a.train --help` lists every option.
+For E4B pass `--base google/gemma-4-E4B --base_revision <sha>`. To fine-tune on your own data, start from a checkpoint: `--data mine.jsonl --init_from JohnP1/d1a-e2b`. For long runs add `--save_every_minutes 30`: a crash then loses at most 30 minutes, and `--resume 1` with the same arguments continues bit for bit. A single non-finite loss or gradient skips its batch instead of ending the run (three in a row still stop it). `python -m d1a.train --help` lists every option.
 
 Score a checkpoint on the frozen suites:
 

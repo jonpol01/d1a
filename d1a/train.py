@@ -1,5 +1,5 @@
 # Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: Gemma 4 support (from jonpol01/kev); the default base is google/gemma-4-E2B at a pinned commit; package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables).
+# Changes for D1A Copyright 2026 John Soliva: Gemma 4 support (from jonpol01/kev); the default base is google/gemma-4-E2B at a pinned commit; package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); resume points for LoRA runs; a non-finite loss or gradient skips its batch (up to MAX_NONFINITE in a row) instead of ending the run.
 """LoRA fine-tune of the decision model on labelled requests (a frozen suite's training partition, records built on the
 fly from the public sources, or your own JSONL), with the pointer head trained from scratch. `--full_ft 1` trains the
 whole backbone instead (d1a.full_ft: bf16 weights, fp32 masters; several GPUs through torchrun + FSDP2).
@@ -372,7 +372,7 @@ def batch_loss(model, a, batch, dev, anchors, anchor_sources, autocast):
         kls = [permutation_kl(z1.float(), z2.float(), perm, dev) for z1, z2, perm in zip(logits, logits2, v.permuted[1]) if perm is not None]
         kl = sum(kls) / len(kls); loss = loss + a.perm_kl * kl; terms["kl"] += kl.item(); terms["kl_n"] += 1
     if not torch.isfinite(loss):
-        raise ValueError("non-finite training loss")
+        raise NonFinite("non-finite training loss")
     return loss, terms
 
 
@@ -441,10 +441,10 @@ def parse_args():
                                                                    "branch, none-pair siblings included) no forward/backward pass may exceed; the plan cuts on exact "
                                                                    "token shapes and gives a step more micro-batches (every rank the same count) until none does (0 = off)")
     ap.add_argument("--max_steps", type=int, default=0, help="stop after this many optimizer steps (0 = every epoch); the lr schedule spans them")
-    ap.add_argument("--save_every_steps", type=int, default=0, help="full-weight: write a resume point (<out>/resume) every N optimizer steps")
-    ap.add_argument("--save_every_minutes", type=float, default=0, help="full-weight: write a resume point once this many minutes have passed since the last")
-    ap.add_argument("--resume", type=int, choices=[0, 1], default=0, help="full-weight: continue from <out>/resume if it holds a resume point (same arguments), else start")
-    ap.add_argument("--stop_after", type=int, default=0, help="full-weight: exit after this optimizer step without saving the checkpoint (a run split across containers; tests)")
+    ap.add_argument("--save_every_steps", type=int, default=0, help="write a resume point (<out>/resume) every N optimizer steps")
+    ap.add_argument("--save_every_minutes", type=float, default=0, help="write a resume point once this many minutes have passed since the last")
+    ap.add_argument("--resume", type=int, choices=[0, 1], default=0, help="continue from <out>/resume if it holds a resume point (same arguments), else start")
+    ap.add_argument("--stop_after", type=int, default=0, help="exit after this optimizer step without saving the checkpoint (a run split across containers; tests)")
     ap.add_argument("--snapshot_fractions", default="", help="full-weight: also write a loadable checkpoint (the final one's files) after these fractions of the optimizer steps, "
                                                              "e.g. 0.25,0.5,0.75, into <snapshot_dir>/step-<N>/checkpoint; kept, never deleted ('' or none: no snapshots)")
     ap.add_argument("--snapshot_every_steps", type=int, default=0, help="full-weight: also write a snapshot every N optimizer steps")
@@ -483,8 +483,6 @@ def parse_args():
                  "nor --anchor_w (a split record's parts would weight its anchored questions by their part's share of all its questions, "
                  "not 1 / anchored questions), nor under torchrun (FSDP2 ranks must run the same number of backward passes; sharded "
                  "ranks have the memory without it)")
-    if (a.save_every_steps or a.save_every_minutes or a.resume or a.stop_after) and not a.full_ft:
-        ap.error("resume points are for full-weight runs (--full_ft 1)")
     try: fractions = full_ft.snapshot_fractions(a.snapshot_fractions)
     except ValueError as error: ap.error(str(error))
     if a.snapshot_every_steps < 0 or ((fractions or a.snapshot_every_steps) and not a.full_ft):
@@ -514,6 +512,12 @@ RESUME_KNOBS = ("resume", "save_every_steps", "save_every_minutes", "stop_after"
 RESUMED = ("step", "seen", "tokens_seen", "peak_mem", "optimizer_seconds", "step_seconds", "elapsed", "epoch", "microbatch", "grad_norms")   # counters a resume point carries
 
 
+class NonFinite(ValueError):
+    """A training loss that is not finite: its micro-batch is skipped (see MAX_NONFINITE)."""
+
+
+MAX_NONFINITE = 3   # a non-finite loss or gradient skips its micro-batch or step; this many in a row end the run (the weights themselves are broken)
+LORA_WEIGHTS = "weights.pt"   # a LoRA run's resume point also holds its trainable tensors (a full-weight run's optimizer holds its fp32 masters)
 MAX_GRAD_NORM = 1.0   # both optimizers clip the global gradient norm to this (full_ft.MasterAdamW's default)
 
 
@@ -605,12 +609,17 @@ def main():
     grad_norms = []   # per epoch, each optimizer step's global gradient norm before clipping
     resume_dir, resume_args = out_dir / "resume", {k: v for k, v in vars(a).items() if k not in RESUME_KNOBS}
     position = full_ft.load_resume(resume_dir, opt, sched, resume_args) if a.resume else None
+    if position and not a.full_ft:
+        saved = torch.load(resume_dir / position["dir"] / LORA_WEIGHTS, map_location="cpu", weights_only=True)
+        with torch.no_grad():
+            for p, t in zip(model.trainable_parameters(), saved, strict=True): p.copy_(t)
     if position:
         step, seen, tokens_seen, peak_mem, optimizer_seconds, step_seconds, elapsed, start_epoch, start_mb, grad_norms = (position[k] for k in RESUMED)
         seen, tokens_seen = seen / world, tokens_seen / world   # saved as sums over the ranks (global_sum below adds them back)
         run = Counter(position["run"])
         print(f"resumed from {resume_dir / position['dir']}: step {step}, epoch {start_epoch}, micro-batch {start_mb}", flush=True)
-    writer = full_ft.ResumeWriter(resume_dir, background=world > 1) if a.full_ft else None   # FSDP2: state on the GPUs, written from a host copy
+    writer = full_ft.ResumeWriter(resume_dir, background=world > 1) if a.full_ft or a.save_every_steps or a.save_every_minutes else None   # FSDP2: state on the GPUs, written from a host copy
+    nonfinite, skipped = 0, Counter()   # non-finite losses / gradients in a row, and skipped micro-batches and steps in all
     snapshots = None
     if a.full_ft and (plan_steps := full_ft.snapshot_steps(steps, full_ft.snapshot_fractions(a.snapshot_fractions), a.snapshot_every_steps)):
         snapshots = full_ft.SnapshotWriter(snapshot_root(a), plan_steps, background=world > 1)   # FSDP2: written from rank 0's gathered copy
@@ -637,17 +646,30 @@ def main():
             variants = sum(v.share for v in batch)   # a record split by --row_budget counts once
             # weight by source records in the accumulation group (over all ranks) so none-pair siblings do not inflate a record's share
             group_records = step_records * (variants / len(chunk))
-            for part in row_passes(batch, a.row_budget, a.shared_prefix):
-                loss, terms = batch_loss(model, a, part, dev, anchors, anchor_sources, autocast)
-                (loss / group_records).backward()
-                run += terms
+            try:
+                for part in row_passes(batch, a.row_budget, a.shared_prefix):
+                    loss, terms = batch_loss(model, a, part, dev, anchors, anchor_sources, autocast)
+                    (loss / group_records).backward()
+                    run += terms
+            except NonFinite:
+                # its earlier passes' gradients stay in the step (a share of the micro-batch, like a record --row_budget split)
+                nonfinite += 1; skipped["microbatches"] += 1
+                print(f"!!! ep{ep} step {step}: non-finite loss, micro-batch {mb} skipped ({nonfinite} in a row)", flush=True)
+                if nonfinite >= MAX_NONFINITE or a.full_ft: raise
+                if not ends_step: continue
+            else: nonfinite = 0
             run["n"] += variants; seen += round(variants); tokens_seen += sum(v.tokens for v in batch)
             peak_mem = max(peak_mem, allocated_bytes(dev))
             if ends_step:
-                if not a.full_ft: norm = float(torch.nn.utils.clip_grad_norm_(model.trainable_parameters(), MAX_GRAD_NORM, error_if_nonfinite=True))   # MasterAdamW clips by the global norm itself; both refuse a non-finite norm (a NaN gradient from a finite loss)
-                started = time.time(); opt.step(); sync(dev); optimizer_seconds += time.time() - started
-                grad_norms += [[] for _ in range(ep + 1 - len(grad_norms))]
-                grad_norms[ep].append(round(opt.grad_norm if a.full_ft else norm, 6))
+                if not a.full_ft: norm = float(torch.nn.utils.clip_grad_norm_(model.trainable_parameters(), MAX_GRAD_NORM))   # MasterAdamW clips by the global norm itself and refuses a non-finite norm
+                if not a.full_ft and not math.isfinite(norm):   # a NaN gradient from a finite loss: this step's update is dropped, the schedule moves on
+                    nonfinite += 1; skipped["steps"] += 1
+                    print(f"!!! ep{ep} step {step}: non-finite gradient norm, optimizer step skipped ({nonfinite} in a row)", flush=True)
+                    if nonfinite >= MAX_NONFINITE: raise NonFinite(f"{nonfinite} non-finite losses or gradients in a row")
+                else:
+                    started = time.time(); opt.step(); sync(dev); optimizer_seconds += time.time() - started
+                    grad_norms += [[] for _ in range(ep + 1 - len(grad_norms))]
+                    grad_norms[ep].append(round(opt.grad_norm if a.full_ft else norm, 6))
                 sched.step(); opt.zero_grad(); step += 1
                 step_seconds.append(round(time.time() - last, 3)); last = time.time()
                 if dev == "mps": empty_cache(dev)   # MPS only: per-step cache release keeps the unified-memory footprint down; on CUDA it would just slow the step
@@ -661,7 +683,10 @@ def main():
                     snap_meta = dataclasses.replace(meta, head=head, extra={"args": vars(a), "suite_sha256": suite_hash, "init_source": init_source, "snapshot": info})
                     snapshots.save(step, model.lm, lambda d, m=snap_meta: finish_checkpoint(d, m, tok), info)
                     last = time.time()   # the time training blocked, not part of the next step's
-                if a.full_ft and full_ft.save_due(step, a.save_every_steps, a.save_every_minutes, saved_at, max(resume_seconds, default=0)):
+                if writer and full_ft.save_due(step, a.save_every_steps, a.save_every_minutes, saved_at, max(resume_seconds, default=0)):
+                    if not a.full_ft:   # before writer.save, which makes the point the latest
+                        (point := resume_dir / f"step-{step:07d}").mkdir(parents=True, exist_ok=True)
+                        torch.save([p.detach().to("cpu", copy=True) for p in model.trainable_parameters()], point / LORA_WEIGHTS)
                     values = (step, *full_ft.global_sum([seen, tokens_seen]), peak_mem, optimizer_seconds, step_seconds, time.time() - t0, ep, mb + 1, grad_norms)
                     writer.save(step, opt, sched, {**dict(zip(RESUMED, values)), "run": dict(run), "world": world, "args": resume_args}, after=snapshots)
                     resume_seconds.append(round(time.time() - last, 3)); saved_at = last = time.time()   # the time training blocked, not part of the next step's
@@ -685,7 +710,7 @@ def main():
                "requested_records": a.epochs * len(reqs), "truncated_records": 0, "rejected_records": 0,
                "optimizer_steps": step, "forward_tokens": round(tokens_seen), "step_seconds": step_seconds, "optimizer_seconds": optimizer_seconds, "resume_seconds": resume_seconds, "resume_write_seconds": writer.seconds if writer else [], "world_size": world,
                "backbone_save_seconds": round(backbone_seconds, 1), "snapshots": snapshots.written if snapshots else [],   # snapshots: this attempt's (each snapshot.json has its own)
-               "grad_norm": grad_norm_summary(grad_norms),
+               "grad_norm": grad_norm_summary(grad_norms), "nonfinite_skipped": dict(skipped),
                "weights": meta.weights, "peak_device_bytes": peak_mem, "device": dev, "dtype": a.dtype, "batch": a.batch,
                "peak_rss_bytes": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * (1 if sys.platform == "darwin" else 1024)})
     print("saved", a.out, flush=True)
