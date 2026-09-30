@@ -16,6 +16,10 @@ the Apache License 2.0. This file records where D1A's code came from and what D1
   `d1a/train.py` (Gemma's reserved `<unused0>`–`<unused4>` tokens as delimiters with a leading `<bos>`, a packed mask for
   the sliding-window layers, text-only loading, re-admission of suite records under Gemma's tokenizer) with tests in
   `tests/test_unit.py` and `tests/test_model.py`.
+- **MLX backend for Gemma 4 and MLX exports**: `d1a/mlx_model.py` runs Gemma 4 bases on Apple Silicon (row form on
+  replicated plain and sliding-window caches, KV-shared layers) besides Kev's Qwen3.5 path, and writes merged, optionally
+  quantized export folders (`scripts/export_mlx.py`) that `d1a/checkpoint.py` loads from `d1a_config.json` and
+  `d1a/serve.py` serves; `backend="auto"` now picks MLX for Gemma 4 on Apple Silicon.
 - **Default base**: `d1a.train` defaults to `google/gemma-4-E2B` at commit `d29ff6b45f081a49ee2733a859c9c9c2d95d1a6f`.
   Qwen bases, including the hybrid Qwen3.5 code paths, still work unchanged.
 - **Renames**: the Python package `kev` is `d1a` (`python -m d1a.serve|train|benchmark|...`, all imports, pyproject
@@ -143,6 +147,7 @@ tools/review/src/App.tsx
 Files taken from Kev and modified that cannot hold a comment (JSON, generated lockfiles).
 
 ```text
+scripts/golden_presets.json
 tools/review/package-lock.json
 tools/review/package.json
 uv.lock

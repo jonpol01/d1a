@@ -5,13 +5,14 @@ backend (the MLX exports) against them.
     python scripts/golden_vectors.py score --run JohnP1/d1a-e2b@v0.1-1epoch --device cpu --out golden.json \
         --upload JohnP1/d1a-golden
     # a candidate on this Mac against it
-    python scripts/golden_vectors.py compare --golden golden.json --run exports/d1a-e2b-mlx-4bit --out report.json
+    python scripts/golden_vectors.py compare --golden golden.json --run runs/exports/d1a-e2b-mlx-4bit --out report.json
 
-The record set: every 6th record of each variant of the decision-v7 development split (~200), the five playground presets
-(scripts/golden_presets.json, copied from playground/src/lib/d1a.ts) and three long records whose states (~1k tokens,
-development states joined) pass Gemma 4's 512-token sliding window. Records are encoded as d1a.serve encodes
-them (serving context), and each record stores its input, its token ids and the probabilities, so the file is a
-self-contained test vector: an implementation must reproduce the ids exactly and the probabilities to its tolerance.
+The record set: every 6th record of each variant of the decision-v7 development split (~200), the five playground
+presets (scripts/golden_presets.json: those of playground/src/lib/d1a.ts, from Kev's playground) and three long records
+whose states (~1k tokens, development states joined) pass Gemma 4's 512-token sliding window. Records are encoded as
+d1a.serve encodes them (serving context), and each record stores its input, its token ids and the probabilities, so the
+file is a self-contained test vector: an implementation must reproduce the ids exactly and the probabilities to its
+tolerance.
 """
 import argparse, json, os, platform, subprocess, time
 from pathlib import Path
@@ -66,7 +67,7 @@ def cpu_quota():
     """CPUs this process may use: a container's cgroup quota (an HF job reports the host's 64 CPUs while 8 are its
     share, and 64 torch threads on 8 CPUs ran ~10x slower), else the affinity mask."""
     try:
-        quota, period = Path("/sys/fs/cgroup/cpu.max").read_text().split()
+        quota, period = Path("/sys/fs/cgroup/cpu.max").read_text(encoding="ascii").split()
         if quota != "max": return max(1, int(quota) // int(period))
     except (OSError, ValueError):
         pass

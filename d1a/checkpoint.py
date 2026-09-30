@@ -1,12 +1,16 @@
 # Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables).
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); the MLX backend for Gemma 4 bases and MLX export folders (d1a_config.json).
 """Trained checkpoints: a run directory or a Hub repo holding a LoRA adapter (or, for a full-weight run, the whole bf16
-backbone), `head.pt` and the tokenizer.
+backbone), `head.pt` and the tokenizer; or an MLX export of one (d1a_config.json).
 
 Loader rule: `adapter_config.json` present -> a LoRA adapter on `meta.base` at `meta.base_revision`; no adapter and
 `config.json` + `model*.safetensors` (save_pretrained of the backbone, `meta.weights == "full"`) -> the backbone is loaded from
 the checkpoint directory itself, nothing is merged, in the dtype head.pt's `weights_dtype` names (it must match the `dtype`
 save_pretrained wrote to config.json). The tokenizer always comes from the base (both layouts carry a copy).
+`d1a_config.json` present (EXPORT_CONFIG, written by d1a.mlx_model.export_mlx / scripts/export_mlx.py) -> an MLX export:
+the adapter already merged into the base and saved by mlx-lm (config.json + model*.safetensors, optionally quantized),
+the pointer head in fp32 in head.safetensors and the tokenizer files; it loads through the MLX backend only, with its
+own tokenizer, and needs neither the base nor the adapter.
 
 This is the one place that knows the layout of `head.pt` and how a checkpoint becomes a `DecisionModel`:
 `d1a.serve`, `d1a.benchmark`, `d1a.train --init_from`, `d1a.publish`, the scripts and the Hugging Face Space all go
@@ -30,6 +34,9 @@ import torch
 from .model import DecisionModel, is_hybrid, load_tokenizer, pad_id
 
 HUB_ID = re.compile(r"[\w.-]+/[\w.-]+(@[\w.-]+)?")
+EXPORT_CONFIG, EXPORT_HEAD = "d1a_config.json", "head.safetensors"   # an MLX export folder (loader rule in the module docstring)
+EXPORT_FORMAT, EXPORT_VERSION = "d1a-mlx", 1
+MLX_ATTENTION_BASES = ("gemma4_text",)   # attention-only text configs the MLX backend runs, besides the hybrid ones
 
 
 def is_hub_id(run):
@@ -61,7 +68,7 @@ class Meta:
     weights_dtype: str = "fp32"
     temperature: float = 1.0
     holdout: list = field(default_factory=list)
-    weights: str = "lora"          # "lora": an adapter on the base; "full": the whole backbone is in the checkpoint (d1a.train --full_ft)
+    weights: str = "lora"          # "lora": an adapter on the base; "full": the whole backbone is in the checkpoint (d1a.train --full_ft); "mlx": an MLX export (never written to a head.pt)
     extra: dict = field(default_factory=dict)
 
     KNOWN = ("base", "head", "base_revision", "lora", "head_dim", "option_isolation", "special_embeddings", "weights_dtype", "temperature", "holdout", "weights")
@@ -80,6 +87,41 @@ def read_meta(run):
 
 def write_meta(run, meta):
     torch.save(meta.to_dict(), f"{run}/head.pt")
+
+
+def weight_shards(path):
+    """The safetensors weight files of a saved backbone (model.safetensors or model-*-of-*.safetensors), sorted."""
+    return sorted(Path(path).glob("model*.safetensors"))
+
+
+def export_config(ck, leading, delimiters, pad, hidden_size, quantization, dtype):
+    """The d1a_config.json of an MLX export of checkpoint `ck`: what the loader needs (base, head size, temperature), the
+    encoder's token layout the export was made for (checked against the export's tokenizer at load), the weight format,
+    and where it came from."""
+    meta = ck.meta
+    return {"format": EXPORT_FORMAT, "format_version": EXPORT_VERSION, "base": meta.base, "base_revision": meta.base_revision,
+            "source": ck.requested, "source_revision": Path(ck.path).name if is_hub_id(ck.requested) else None,   # a Hub snapshot directory is named by its commit
+            "adapter_sha256": ck.weights_sha256(), "lora": meta.lora, "head_dim": meta.head_dim, "hidden_size": hidden_size,
+            "temperature": meta.temperature, "leading_ids": list(leading), "bos_id": leading[0] if leading else None,
+            "delimiter_ids": list(delimiters), "pad_id": pad, "dtype": dtype, "quantization": quantization, "head": EXPORT_HEAD}
+
+
+def read_export(path):
+    """The checked d1a_config.json of an MLX export folder, or None for any other checkpoint."""
+    f = Path(path) / EXPORT_CONFIG
+    if not f.exists(): return None
+    cfg = json.loads(f.read_text(encoding="utf-8"))
+    version = cfg.get("format_version")
+    if cfg.get("format") != EXPORT_FORMAT or not isinstance(version, int) or not 1 <= version <= EXPORT_VERSION:
+        raise ValueError(f"{f}: format {cfg.get('format')!r} version {version!r}; this D1A reads {EXPORT_FORMAT} versions 1-{EXPORT_VERSION}")
+    return cfg
+
+
+def export_meta(path, cfg):
+    """A Meta for an MLX export: the fields its d1a_config.json carries and the fp32 head from head.safetensors."""
+    from safetensors.torch import load_file
+    return Meta(base=cfg["base"], head=load_file(str(Path(path) / cfg["head"])), base_revision=cfg["base_revision"], lora=cfg["lora"],
+                head_dim=cfg["head_dim"], temperature=cfg["temperature"], weights="mlx", extra={"export": cfg})
 
 
 @dataclass(frozen=True)
@@ -104,12 +146,13 @@ class LoadOptions:
                  parity with eager and is a few percent faster.
     lora_scale   WiSE-FT-style interpolation between base (0) and fine-tuned weights (1), at inference.
     temperature  None = the temperature the checkpoint carries (fitted by scripts/calibrate_checkpoint.py); 1.0 = raw logits.
-    backend      None = torch, the path every reported number uses. "mlx" = d1a.mlx_model (Metal kernels for the hybrid
-                 Qwen3.5 backbones through mlx-lm; the pointer head and encoder are shared; refused for attention-only
-                 bases, which MPS already runs well). "auto" = mlx when the device is mps, the base is hybrid, mlx-lm is
+    backend      None = torch, the path every reported number uses. "mlx" = d1a.mlx_model (Metal kernels through mlx-lm
+                 for the hybrid Qwen3.5 and the Gemma 4 backbones; the pointer head and encoder are shared; refused for
+                 other attention-only bases). "auto" = mlx when the device is mps, the base is one of those, mlx-lm is
                  installed and fp32 was not asked for (an explicit dtype=float32 means "the exact path"), else torch;
                  d1a.serve uses auto. The MLX path always merges the adapter and ignores `attn` and `dtype` (the backbone
-                 runs as stored, bf16).
+                 runs as stored, bf16). An MLX export (d1a_config.json) runs on mlx whatever None/"auto"/"mlx" says, and
+                 refuses "torch".
     cuda_graphs  replay the serving passes of a hybrid backbone on CUDA (state prefix, question rows on a cached state) as
                  CUDA graphs, batched across requests (d1a.cuda_graphs, DecisionModel.probs_batch). None = off, the eager
                  path every reported number uses; d1a.serve turns it on for CUDA. Exact up to floating-point
@@ -170,7 +213,8 @@ class Checkpoint:
     def __init__(self, run):
         self.requested = str(run)                    # what the caller asked for (a Hub id stays a Hub id in labels)
         self.path = resolve_run(run)
-        self.meta = read_meta(self.path)
+        self.export = read_export(self.path)         # d1a_config.json of an MLX export, else None
+        self.meta = export_meta(self.path, self.export) if self.export else read_meta(self.path)
 
     def file(self, name):
         return Path(self.path) / name
@@ -181,7 +225,8 @@ class Checkpoint:
     @property
     def full(self):
         """The loader rule (module docstring): True for a full-weight checkpoint, False for a LoRA adapter; head.pt's
-        `weights` must agree with the files."""
+        `weights` must agree with the files. An MLX export is neither (its weights are mlx-lm's): False."""
+        if self.export is not None: return False
         found = "lora" if self.file("adapter_config.json").exists() else "full" if self.file("config.json").exists() and self.shards() else None
         if found != self.meta.weights:
             raise ValueError(f"{self.path}: head.pt says weights={self.meta.weights!r} but the directory holds "
@@ -190,12 +235,13 @@ class Checkpoint:
 
     def shards(self):
         """The backbone's safetensors files of a full-weight checkpoint (model.safetensors or model-*-of-*.safetensors)."""
-        return sorted(Path(self.path).glob("model*.safetensors"))
+        return weight_shards(self.path)
 
     def weights_sha256(self):
-        """What a run's provenance pins: the adapter file's sha256, or for full weights the sha256 over every shard's."""
+        """What a run's provenance pins: the adapter file's sha256, or for full weights and MLX exports the sha256 over
+        every shard's."""
         from .suite import digest   # lazy: the Space vendors this module without d1a/suite.py
-        if not self.full: return digest(self.file("adapter_model.safetensors"))
+        if self.export is None and not self.full: return digest(self.file("adapter_model.safetensors"))
         import hashlib
         return hashlib.sha256("".join(f"{p.name}:{digest(p)}\n" for p in self.shards()).encode()).hexdigest()
 
@@ -209,36 +255,64 @@ class Checkpoint:
                 return HfApi().model_info(repo, revision=revision or None).last_modified.date().isoformat()
             except Exception:
                 pass
-        return datetime.date.fromtimestamp(self.file("head.pt").stat().st_mtime).isoformat()
+        return datetime.date.fromtimestamp(self.file(EXPORT_CONFIG if self.export else "head.pt").stat().st_mtime).isoformat()
+
+    def text_config(self):
+        """The base's text config, read without loading weights."""
+        from transformers import AutoConfig
+        return AutoConfig.from_pretrained(self.meta.base, revision=self.meta.base_revision).get_text_config()
 
     def hybrid_base(self):
-        """Whether the base has Gated DeltaNet layers (Qwen3.5), read from its config without loading weights."""
-        from transformers import AutoConfig
-        return is_hybrid(AutoConfig.from_pretrained(self.meta.base, revision=self.meta.base_revision).get_text_config())
+        """Whether the base has Gated DeltaNet layers (Qwen3.5)."""
+        return is_hybrid(self.text_config())
+
+    def mlx_base(self):
+        """Whether the MLX backend runs this base: the hybrid Qwen3.5 bases and the attention-only MLX_ATTENTION_BASES
+        (Gemma 4)."""
+        cfg = self.text_config()
+        return is_hybrid(cfg) or cfg.model_type in MLX_ATTENTION_BASES
 
     def backend(self, device, opts=LoadOptions()):
         """The backend `load` will use: LoadOptions.backend resolved ("auto" -> mlx only where it pays and is installed)."""
         if opts.backend not in LoadOptions.BACKENDS: raise ValueError(f"unknown backend {opts.backend!r}")
+        if self.export is not None:
+            if opts.backend == "torch":
+                raise ValueError(f"{self.requested} is an MLX export: it runs on backend=mlx only; load its source checkpoint {self.export['source']} for torch")
+            return "mlx"
         if opts.backend != "auto": return opts.backend or "torch"
         exact = opts.dtype is torch.float32   # D1A_DTYPE=fp32: the caller wants the reported-numbers path, not a faster one
-        return "mlx" if str(device) == "mps" and not exact and mlx_available() and not self.full and self.hybrid_base() else "torch"
+        return "mlx" if str(device) == "mps" and not exact and mlx_available() and not self.full and self.mlx_base() else "torch"
 
     def load(self, device, opts=LoadOptions()):
         """-> (tokenizer, model) in eval mode with the LoRA applied (or the full backbone loaded) and the pointer head loaded. The model is a
         DecisionModel (torch) or an MLXDecisionModel (backend mlx); both expose the same scoring interface."""
         meta = self.meta
-        tok = load_tokenizer(meta.base, revision=meta.base_revision)
+        tok = self._export_tokenizer() if self.export else load_tokenizer(meta.base, revision=meta.base_revision)
         m = self._load_mlx(tok, opts) if self.backend(device, opts) == "mlx" else self._load_torch(tok, device, opts)
         m.head.load_state_dict(meta.head); m.eval()
         m.head.temperature = meta.temperature if opts.temperature is None else opts.temperature
         return tok, m
 
+    def _export_tokenizer(self):
+        """An MLX export's own tokenizer, checked against the token layout the export was made for."""
+        from .model import layout
+        tok, cfg = load_tokenizer(self.path), self.export
+        leading, delimiters, _ = layout(tok)
+        if (list(leading), list(delimiters), pad_id(tok)) != (cfg["leading_ids"], cfg["delimiter_ids"], cfg["pad_id"]):
+            raise ValueError(f"{self.path}: the tokenizer encodes leading {leading} / delimiters {delimiters} / pad {pad_id(tok)}, "
+                             f"but the export was made for {cfg['leading_ids']} / {cfg['delimiter_ids']} / {cfg['pad_id']}")
+        return tok
+
     def _load_mlx(self, tok, opts):
         if self.full: raise ValueError("the MLX backend merges an adapter into the base; full-weight checkpoints run on backend=torch")
+        if not mlx_available(): raise ValueError("the MLX backend needs mlx-lm on Apple Silicon (the `mlx` extra)")
         from .mlx_model import MLXDecisionModel, merge_lora   # after the refusal: without mlx-lm the import would hide it
         if not opts.merge: raise ValueError("the MLX backend always merges the adapter (D1A_MERGE=0 needs backend=torch)")
         if self.meta.option_isolation: raise ValueError("option_isolation needs the packed mask; not available on the MLX backend")
-        if not self.hybrid_base(): raise ValueError(f"the MLX backend is for the hybrid (Qwen3.5) bases; {self.meta.base} is attention-only and runs on MPS with backend=torch")
+        if self.export is not None:
+            if opts.lora_scale != 1: raise ValueError(f"an MLX export holds merged weights; lora_scale needs its source checkpoint {self.export['source']}")
+            return MLXDecisionModel(self.path, pad_id(tok), head_dim=self.meta.head_dim)
+        if not self.mlx_base(): raise ValueError(f"the MLX backend is for the hybrid (Qwen3.5) and Gemma 4 bases; {self.meta.base} is another attention-only base and runs on MPS with backend=torch")
         base_dir = resolve_run(f"{self.meta.base}@{self.meta.base_revision or ''}")   # the base snapshot the torch path already cached
         m = MLXDecisionModel(base_dir, pad_id(tok), head_dim=self.meta.head_dim)
         merge_lora(m.lm, self.path, opts.lora_scale)
@@ -302,6 +376,7 @@ class Checkpoint:
         run will save; every architecture field is compared BEFORE loading, because peft and load_state_dict(strict=False)
         load matching keys silently and a half-loaded model still trains and still reports a loss. Returns provenance."""
         from .suite import digest   # lazy: the Space vendors this module without d1a/suite.py
+        if self.export is not None: raise ValueError(f"--init_from {self.path} is an MLX export; start from its source checkpoint {self.export['source']}")
         for name in self.COMPAT_FIELDS:
             theirs, mine = getattr(self.meta, name), getattr(ours, name)
             if theirs != mine and not (name == "base_revision" and None in (theirs, mine)):
