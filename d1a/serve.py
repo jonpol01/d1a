@@ -1,5 +1,5 @@
 # Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); serves d1a-latest and keeps kev-latest and jev-latest as compatibility names; model cards name D1A; serves MLX export folders.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); serves d1a-latest and keeps kev-latest and jev-latest as compatibility names; model cards name D1A; serves MLX export folders; --device with a GPU usability probe; a startup self-check of the readout.
 """FastAPI sidecar for the playground: loads one checkpoint, exposes prefill-only decisions.
 
 Run: uv run --extra serve python -m d1a.serve --run runs/d1a --port 8008
@@ -11,7 +11,7 @@ comparison). D1A_PREFIX_CACHE / D1A_PREFIX_MIN_TOKENS / D1A_PREFIX_MAX_TOKENS si
 date preprocessing (api.with_date_facts). Backend and precision follow LoadOptions (D1A_BACKEND, D1A_DTYPE, ...): on Apple
 Silicon the hybrid Qwen3.5 checkpoints run on MLX by default, elsewhere on torch in bf16.
 """
-import argparse, asyncio, atexit, hmac, os, queue, random, sys, threading, time, traceback, uuid
+import argparse, asyncio, atexit, hmac, math, os, queue, random, subprocess, sys, threading, time, traceback, uuid
 from concurrent.futures import Future
 import torch
 from dataclasses import dataclass, field, replace
@@ -269,16 +269,44 @@ def models():
     return {"models": [{"name": name, **card} for name in MODEL_NAMES]}
 
 
+def usable(device):
+    """Whether a real kernel runs on `device`, tried in a child process: a GPU whose driver or torch wheel lacks the local
+    architecture can pass is_available() and then kill the process on its first kernel, which no try/except catches."""
+    if device == "cpu": return True
+    code = f"import torch; torch.ones(8, device={device!r}).mul(2).sum().item()"
+    try: return subprocess.run([sys.executable, "-c", code], capture_output=True, timeout=300).returncode == 0
+    except subprocess.TimeoutExpired: return False
+
+
+SELF_CHECK = SystemOneRequest(model="d1a-latest", state="Startup self-check: the order shipped late.",
+                              questions={"c": {"type": "choice", "instr": "Was the order late?", "criteria": {"yes": "Yes", "no": "No"}},
+                                         "n": {"type": "noul", "instr": "Did the order ship late?"}})
+
+
+def self_check(probs):
+    """Refuse to serve a model that would answer wrongly without an error: one request through the real encode and
+    readout path must return finite probabilities that sum to 1 (a broken export or precision fails here, not on a
+    user's request). `probs(rec) -> (probabilities per question, stats)`. Raises SystemExit naming the failure."""
+    ps, _ = probs(to_record(SELF_CHECK)[0])
+    for q, p in zip(SELF_CHECK.questions, ps):
+        if not all(math.isfinite(x) and 0 <= x <= 1 for x in p) or abs(sum(p) - 1) > 1e-3:
+            raise SystemExit(f"self-check failed: question {q!r} got probabilities {p}")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--run", default="runs/d1a")
     ap.add_argument("--fallback", default="runs/smoke")
     ap.add_argument("--host", default="127.0.0.1", help="interface to bind; 0.0.0.0 to serve beyond this machine (a container, a VM behind a proxy)")
     ap.add_argument("--port", type=int, default=8008)
+    ap.add_argument("--device", choices=("auto", "cuda", "mps", "cpu"), default="auto", help="accelerator; auto = cuda, then mps, then cpu, skipping one that cannot run a kernel")
     a = ap.parse_args()
     run = a.run if is_hub_id(a.run) or os.path.exists(f"{a.run}/head.pt") or os.path.exists(f"{a.run}/{EXPORT_CONFIG}") else a.fallback
     if run != a.run: print(f"{a.run} not found, falling back to {run}")
-    dev = default_device()
+    dev = default_device() if a.device == "auto" else a.device
+    if not usable(dev):
+        if a.device != "auto": raise SystemExit(f"--device {dev}: a test kernel failed on this machine")
+        print(f"{dev} is available but a test kernel failed on it; serving on cpu (pass --device to insist)"); dev = "cpu"
     opts = LoadOptions.from_env()
     if dev == "mps" and opts.attn is None: opts = replace(opts, attn="sdpa")   # serving default on Apple GPUs (parity measured)
     if dev != "cpu" and opts.dtype is None: opts = replace(opts, dtype=torch.bfloat16)   # serving default: 2-4.5x faster than fp32 on an L4, same answers (LoadOptions.dtype); D1A_DTYPE=fp32 for the exact path
@@ -290,6 +318,7 @@ def main():
     tok, model = ck.load(dev, opts)
     if fused_default and not opts.fused and model.hybrid: print("fused Qwen3.5 kernels off: install the flash-linear-attention version d1a/fused_qwen35.py pins (FLA_VERSION) to turn them on")
     app.state.server = Server(ck, tok, model, dev)
+    self_check(app.state.server.probs)
     print(f"serving {ck.requested} ({ck.path}) on {dev} via {model.backend} ({model.dtype}) {a.host}:{a.port}")   # /v1/models reports the run as given, not the resolved cache path
     import uvicorn
     uvicorn.run(app, host=a.host, port=a.port)
