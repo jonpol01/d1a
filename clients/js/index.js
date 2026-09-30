@@ -1,6 +1,6 @@
 // Client for a D1A (or Kev) System One server: typed questions in, a probability per option out.
 class Client {
-  constructor(baseUrl = "http://127.0.0.1:8009", { apiKey, model = "kev-latest" } = {}) {
+  constructor(baseUrl = "http://127.0.0.1:8009", { apiKey, model = "d1a-latest" } = {}) {
     this.baseUrl = baseUrl.replace(/\/$/, ""); this.apiKey = apiKey; this.model = model;
   }
   async decide(state, questions) {

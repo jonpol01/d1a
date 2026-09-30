@@ -6,7 +6,7 @@ __version__ = "0.0.1"
 
 
 class Client:
-    def __init__(self, base_url="http://127.0.0.1:8009", api_key=None, model="kev-latest", timeout=120):
+    def __init__(self, base_url="http://127.0.0.1:8009", api_key=None, model="d1a-latest", timeout=120):
         self.base_url, self.api_key, self.model, self.timeout = base_url.rstrip("/"), api_key, model, timeout
 
     def decide(self, state, questions):
