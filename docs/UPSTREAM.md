@@ -166,7 +166,6 @@ evals/
 .gitattributes
 .python-version
 LICENSE
-d1a/__init__.py
 d1a/composition.py
 d1a/contrastive.py
 d1a/data.py
