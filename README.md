@@ -26,8 +26,8 @@ A causal LM backbone with a LoRA adapter runs one prefill pass over the document
 |---|---|
 | Training and serving on Gemma 4 E2B / E4B (and Qwen) | yes, this repo |
 | D1A-E2B (Gemma 4 E2B, 2 epochs) | [JohnP1/d1a-e2b](https://huggingface.co/JohnP1/d1a-e2b) (tag `v0.2-2epoch`; `v0.1-1epoch` keeps the first version) |
-| D1A-E2B for Apple Silicon (MLX, 8-bit) | [JohnP1/d1a-e2b-mlx-q8](https://huggingface.co/JohnP1/d1a-e2b-mlx-q8) (4.2 GB in memory) |
-| D1A-E4B | training; weights will land in [JohnP1/d1a-e4b](https://huggingface.co/JohnP1/d1a-e4b) |
+| D1A-E2B for Apple Silicon (MLX, 8-bit) | [JohnP1/d1a-e2b-mlx-q8](https://huggingface.co/JohnP1/d1a-e2b-mlx-q8) (v0.2, 4.2 GB in memory) |
+| D1A-E4B (Gemma 4 E4B, 2 epochs) | [JohnP1/d1a-e4b](https://huggingface.co/JohnP1/d1a-e4b) (tag `v0.1-2epoch`; the most accurate D1A so far) |
 | Live demos of nine use cases | [jonpol01/d1a-playground](https://github.com/jonpol01/d1a-playground) |
 | Thin clients (Python, JS) | [`clients/`](clients) |
 
@@ -158,11 +158,12 @@ Early. On the development partitions of decision-v7:
 
 | Model | Base | Accuracy: Trained Sources (dev) | Accuracy: New Sources (dev) |
 |---|---|---|---|
+| D1A-E4B (JohnP1/d1a-e4b), 2 epochs | Gemma-4-E4B | 0.853 | 0.680 |
 | D1A-E2B v0.2 (JohnP1/d1a-e2b), 2 epochs | Gemma-4-E2B | 0.824 | 0.602 |
 | D1A-E2B v0.1, 1 epoch | Gemma-4-E2B | 0.794 | 0.569 |
 | Kev-0.8B base recipe, 2 epochs (reference) | Qwen3.5-0.8B-Base | 0.817 | 0.622 |
 
-Two epochs put D1A-E2B ahead of the Qwen reference on sources it trained on and still behind it on new ones; its calibration error also rose (ECE 0.040 to 0.057), which is being looked at. E4B is training.
+D1A-E4B is the most accurate so far, ahead of Jev (0.845) on sources it trained on and behind it (0.857) on new ones. Two epochs raised the calibration error from 0.040 to about 0.057 on both sizes, which is being looked at. E4B needed half E2B's learning rate (5e-5): at 1e-4 it diverged mid-epoch.
 
 - On one Windows/WSL2 machine with an NVIDIA GPU, PyTorch's fused SDPA attention kernel corrupted memory during Gemma training. Loading the model with eager attention fixed it. If training crashes or produces NaNs there, try eager attention first.
 - Options within one question can still influence each other; asking questions together or separately gives the same probabilities, but option order is not irrelevant.
