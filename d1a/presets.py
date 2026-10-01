@@ -59,10 +59,11 @@ def gate_state(agent, card, command):
     return f"agent: {agent}\ncard: {card.strip()}\ncommand: {command.strip()}"
 
 
-def fail_up(probs, small=0.6, medium=0.5):
+def fail_up(probs, small=0.7, medium=0.5):
     """The smallest tier the model is sure enough is enough: small only if p(small) >= `small`, medium only if
-    p(small) + p(medium) >= `medium`, else large. Measured zero-shot (D1A-E4B, 1,625 prompts): sends fewer prompts too
-    low than argmax (6% vs 8%) at a few more sent too high."""
+    p(small) + p(medium) >= `medium`, else large. On the calibrated routing checkpoint (JohnP1/d1a-e4b-routing, held-out
+    factory cards) small >= 0.7 sends 2.8% too low against 4.6% at 0.6, for 9% sent too high; zero-shot it also beats
+    argmax (6% vs 8% too low)."""
     if probs["small"] >= small: return "small"
     if probs["small"] + probs["medium"] >= medium: return "medium"
     return "large"

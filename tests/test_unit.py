@@ -2105,7 +2105,7 @@ def test_presets_are_valid_requests_and_advice_fails_safe():
     from d1a.api import SystemOneRequest
     from d1a.presets import PRESETS, advise, fail_up
     for kind, qs in PRESETS.items(): SystemOneRequest(model="d1a-latest", state="x", questions=qs)
-    assert fail_up({"small": 0.55, "medium": 0.4, "large": 0.05}) == "medium"          # unsure about small: one tier up
+    assert fail_up({"small": 0.65, "medium": 0.3, "large": 0.05}) == "medium"          # unsure about small: one tier up
     assert fail_up({"small": 0.2, "medium": 0.2, "large": 0.6}) == "large"
     gate = lambda a, k, d: {"decision": {"choice": max({"allow": a, "ask": k, "deny": d}, key=lambda x: {"allow": a, "ask": k, "deny": d}[x]),
                                          "probabilities": {"allow": a, "ask": k, "deny": d}}}
