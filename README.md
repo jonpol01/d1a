@@ -165,6 +165,8 @@ Gemma's tokenizer has none of the Qwen delimiter tokens, so D1A uses Gemma's res
 
 ## Status and Limitations
 
+Reports: [D1A-E4B routing v0.1](docs/reports/2026-10-routing-v0.1.md) ([日本語](docs/reports/2026-10-routing-v0.1.ja.md)): model routing and agent-kit decisions, before and after training, with what the numbers do and do not show.
+
 Early. On the development partitions of decision-v7:
 
 | Model | Base | Accuracy: Trained Sources (dev) | Accuracy: New Sources (dev) |
