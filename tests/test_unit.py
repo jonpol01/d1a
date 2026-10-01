@@ -2097,3 +2097,39 @@ def test_serve_latency_summary():
     assert latency_summary([]) is None
     assert latency_summary([float(i) for i in range(1, 101)]) == {"recent": 100, "p50_ms": 50.0, "p95_ms": 95.0, "max_ms": 100.0}
     assert latency_summary([7.0]) == {"recent": 1, "p50_ms": 7.0, "p95_ms": 7.0, "max_ms": 7.0}
+
+
+def test_presets_are_valid_requests_and_advice_fails_safe():
+    """Every preset is a valid System One request, and advise() turns unsure answers into the safe action: route up,
+    ask a person, do not close a card."""
+    from d1a.api import SystemOneRequest
+    from d1a.presets import PRESETS, advise, fail_up
+    for kind, qs in PRESETS.items(): SystemOneRequest(model="d1a-latest", state="x", questions=qs)
+    assert fail_up({"small": 0.55, "medium": 0.4, "large": 0.05}) == "medium"          # unsure about small: one tier up
+    assert fail_up({"small": 0.2, "medium": 0.2, "large": 0.6}) == "large"
+    gate = lambda a, k, d: {"decision": {"choice": max({"allow": a, "ask": k, "deny": d}, key=lambda x: {"allow": a, "ask": k, "deny": d}[x]),
+                                         "probabilities": {"allow": a, "ask": k, "deny": d}}}
+    assert advise("gate", gate(0.7, 0.1, 0.2))["decision"] == "ask"                     # likely fine, not sure: ask
+    assert advise("gate", gate(0.4, 0.05, 0.55))["decision"] == "deny"
+    judge = {"next": {"choice": "complete"}, "done": {"noul": 0.6}, "human": {"noul": 0.1}, "blocked": {"noul": 0.1}}
+    assert advise("judge", judge)["next"] == "consult"                                   # not sure it is done: do not close
+    intake = {"consult": {"noul": 0.3}, "has_target": {"noul": 0.07}, "clear_done": {"noul": 0.9}, "worker": {"choice": "developer"},
+              "tier": {"probabilities": {"small": 0.1, "medium": 0.8, "large": 0.1}}}
+    assert advise("intake", intake)["consult"] is True                                   # no target named: ask first
+
+
+def test_mcp_server_tools(monkeypatch):
+    """d1a.mcp_server exposes the presets as MCP tools; each sends its preset's questions and returns advice."""
+    pytest.importorskip("mcp")
+    import asyncio
+    from d1a import mcp_server
+    from d1a.presets import PRESETS
+    sent = []
+    def fake_ask(state, questions):
+        sent.append((state, questions))
+        return {"answers": {"decision": {"choice": "allow", "probabilities": {"allow": 0.95, "ask": 0.03, "deny": 0.02}}}, "latency_ms": 1.0}
+    monkeypatch.setattr(mcp_server, "ask", fake_ask)
+    names = {t.name for t in asyncio.run(mcp_server.server().list_tools())}
+    assert names == {"d1a_intake", "d1a_judge", "d1a_tier", "d1a_gate", "d1a_route", "d1a_decide"}
+    out = mcp_server.d1a_gate("developer", "fix the CI", "gh run view 1 --log-failed")
+    assert out["advice"] == {"decision": "allow"} and sent[0][1] is PRESETS["gate"] and "command: gh run view" in sent[0][0]
