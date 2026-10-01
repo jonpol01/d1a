@@ -1,5 +1,5 @@
 # Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); serves d1a-latest and keeps kev-latest and jev-latest as compatibility names; model cards name D1A; serves MLX export folders; --device with a GPU usability probe; a startup self-check of the readout; recent batch latency in /v1/models.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); serves d1a-latest and keeps kev-latest and jev-latest as compatibility names; model cards name D1A; serves MLX export folders; --device with a GPU usability probe; a startup self-check of the readout; recent batch latency in /v1/models; a 75 s keep-alive for proxies in front of it.
 """FastAPI sidecar for the playground: loads one checkpoint, exposes prefill-only decisions.
 
 Run: uv run --extra serve python -m d1a.serve --run runs/d1a --port 8008
@@ -32,6 +32,7 @@ PREFIX_MAX_TOKENS = int(os.environ.get("D1A_PREFIX_MAX_TOKENS", "65536"))  # sta
 DATE_FACTS = os.environ.get("D1A_DATE_FACTS", "0") == "1"
 API_KEY = os.environ.get("D1A_API_KEY")                                  # unset = open server; set = require Authorization: Bearer <key>, as the TypeSafe clients always send
 MAX_BATCH = 64                                                           # requests the model thread takes at once (d1a.cuda_graphs splits them to fit its buffers)
+KEEP_ALIVE_S = 75                                                        # idle keep-alive; above Node's pooled-socket reuse window, so a proxy (the playground's Next.js rewrite) never reuses a socket uvicorn just closed (ECONNRESET, #42); uvicorn's default is 5
 MODEL_NAMES = ("d1a-latest", "kev-latest", "jev-latest")                 # all name this checkpoint (any name is served): kev-latest for clients written against Kev, jev-latest is the TypeSafe SDK default model, so an unconfigured client works
 
 
@@ -331,7 +332,7 @@ def main():
     self_check(app.state.server.probs)
     print(f"serving {ck.requested} ({ck.path}) on {dev} via {model.backend} ({model.dtype}) {a.host}:{a.port}")   # /v1/models reports the run as given, not the resolved cache path
     import uvicorn
-    uvicorn.run(app, host=a.host, port=a.port)
+    uvicorn.run(app, host=a.host, port=a.port, timeout_keep_alive=KEEP_ALIVE_S)
 
 
 if __name__ == "__main__":
