@@ -1,5 +1,5 @@
 # Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); serves d1a-latest and keeps kev-latest and jev-latest as compatibility names; model cards name D1A; serves MLX export folders; --device with a GPU usability probe; a startup self-check of the readout; recent batch latency in /v1/models; a 75 s keep-alive for proxies in front of it.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); serves d1a-latest and keeps kev-latest and jev-latest as compatibility names; model cards name D1A; serves MLX export folders; --device with a GPU usability probe; a startup self-check of the readout and a warning when serving an uncalibrated checkpoint; recent batch latency in /v1/models; a 75 s keep-alive for proxies in front of it.
 """FastAPI sidecar for the playground: loads one checkpoint, exposes prefill-only decisions.
 
 Run: uv run --extra serve python -m d1a.serve --run runs/d1a --port 8008
@@ -272,7 +272,7 @@ def models():
     card = {"description": f"D1A pointer head on {meta.base}, serving {ck.requested} at temperature {s.model.head.temperature:.2f}",
             "release_date": s.release_date,
             "run": ck.requested, "base": meta.base, "lora": meta.lora, "device": s.device, "backend": s.model.backend, "dtype": s.model.dtype,
-            "temperature": s.model.head.temperature,
+            "temperature": s.model.head.temperature, "calibrated": s.model.head.temperature != 1.0,
             "cuda_graphs": graphs.stats() if (graphs := getattr(s.model, "graphs", None)) else None,
             "prefix_cache": {"size": s.prefix_cache.size, "min_state_tokens": s.prefix_cache.min_tokens, "max_tokens": s.prefix_cache.max_tokens, "hits": s.prefix_cache.hits,
                              "misses": s.prefix_cache.misses, "cached_states": len(s.prefix_cache.entries), "oom_retries": s.prefix_cache.oom_retries},
@@ -330,6 +330,9 @@ def main():
     if fused_default and not opts.fused and model.hybrid: print("fused Qwen3.5 kernels off: install the flash-linear-attention version d1a/fused_qwen35.py pins (FLA_VERSION) to turn them on")
     app.state.server = Server(ck, tok, model, dev)
     self_check(app.state.server.probs)
+    if model.head.temperature == 1.0:   # 1.0 = never calibrated: d1a.train and the study harness leave head.pt at 1.0 on purpose
+        print("!!! serving an uncalibrated checkpoint (temperature 1.0): probabilities will be overconfident. Fit one with "
+              "scripts/calibrate_checkpoint.py before publishing; thresholds on probabilities assume it.", flush=True)
     print(f"serving {ck.requested} ({ck.path}) on {dev} via {model.backend} ({model.dtype}) {a.host}:{a.port}")   # /v1/models reports the run as given, not the resolved cache path
     import uvicorn
     uvicorn.run(app, host=a.host, port=a.port, timeout_keep_alive=KEEP_ALIVE_S)
