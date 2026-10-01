@@ -92,6 +92,17 @@ answers = m.decide("Shoes arrived late and I was charged twice.",
 print(answers["team"]["probabilities"], answers["urgent"]["noul"])
 ```
 
+### From Agents (MCP)
+
+`d1a.mcp_server` gives agents (Hermes, Claude Code, any MCP client) the decisions of an agent factory as tools: `d1a_intake` (a new request: which worker, how large a model, ask the user first?), `d1a_judge` (a card and its latest report: done, blocked, needs a person, next step), `d1a_tier` (small, medium or large model for the implementation), `d1a_gate` (may this tool call run: allow, ask, deny), `d1a_route` (which model size answers a prompt) and `d1a_decide` (your own questions). Each returns the answers with probabilities plus `advice`, an action whose defaults fail safe: unsure answers route up, ask a person, or keep a card open (`d1a.presets.advise`).
+
+```bash
+pip install "d1a[mcp] @ git+https://github.com/jonpol01/d1a"
+D1A_URL=http://127.0.0.1:8009 python -m d1a.mcp_server        # stdio; asks a running d1a.serve
+```
+
+Register it as a stdio MCP server (command `python`, args `-m d1a.mcp_server`, env `D1A_URL`) in the agent's MCP settings, and allow the tool names above. `D1A_RUN=<checkpoint>` loads a model in the MCP process instead of calling a server. The question sets are in `d1a/presets.py`, worded exactly as the routing training data asks them.
+
 ### Clients
 
 Dependency-free clients for any System One server live in [`clients/python`](clients/python) (PyPI `d1a-client`, import `d1a_client`) and [`clients/js`](clients/js) (npm `d1a-client`):
