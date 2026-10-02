@@ -1,6 +1,6 @@
 # Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables).
-"""The breadth-v1 builder's mappings (scripts/build_breadth_v1.py) and the Decision-Index-style scorer (scripts/breadth_report.py)
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); the tests of the removed breadth scorer left.
+"""The breadth-v1 builder's mappings (scripts/build_breadth_v1.py)
 on small synthetic inputs, plus the frozen suite's structure. No weights, no network.
 Run: uv run python -m pytest tests/test_breadth_v1.py -q
 """
@@ -10,10 +10,8 @@ from pathlib import Path
 
 import pytest
 
-from d1a.benchmark import labels
 from d1a.data import materialize
 from d1a.suite import PRIVATE_DATASET, load_split, read_json
-from scripts import breadth_report as br
 from scripts.build_breadth_v1 import (AREAS, BM25, DATASETS, MAX_OPTIONS, OOS, SGD_NONE, apibank_parse, ascii_board, bag_records, bfcl_candidate, cfcolor_record,
                                       chance, check_invariants, chess_options, clinc_options, contractnli_questions, decode_action_value, describe_move,
                                       fen_board, hellaswag_candidate, humicroedit_pair, musr_candidate, palette_hex, retrieval_choice, router_options,
@@ -210,56 +208,6 @@ def test_chance():
     r = {"questions": {"a": {"type": "noul"}, "b": {"type": "choice", "criteria": {"x": None, "y": None, "z": None, "w": None}}}}
     assert chance(r, "accuracy") == [0.5, 0.25] and chance(r, "case_exact") == [0.125]
 
-# ---------------------------------------------------------------- scoring helper
-
-
-def _record(rid, source, qs):
-    return {"_meta": {"id": rid, "source": source}, "questions": qs}
-
-
-def _row(rid, qid, q, p):
-    keys, y = labels(q)
-    return {"id": rid, "question": qid, "variant": "clean", "label": y, "p": p, "keys": keys, "type": q["type"]}
-
-
-def test_skill_formula():
-    assert br.skill(0.25, 0.25) == 0 and br.skill(1.0, 0.25) == 1 and br.skill(0.1, 0.25) == 0
-    assert br.skill(0.625, 0.25) == pytest.approx(0.5)
-
-
-def test_dataset_score_counts_unanswered_as_wrong():
-    q = {"type": "choice", "criteria": {"a": None, "b": None, "c": None, "d": None}, "label": "a"}
-    recs = [_record(f"r{i}", "d", {"q": q}) for i in range(4)]
-    rows = {("r0", "q"): _row("r0", "q", q, [0.7, 0.1, 0.1, 0.1]), ("r1", "q"): _row("r1", "q", q, [0.1, 0.7, 0.1, 0.1]),
-            ("r2", "q"): _row("r2", "q", q, [0.9, 0.05, 0.03, 0.02])}
-    s = br.dataset_score(recs, rows, "accuracy")
-    assert s["score"] == 0.5 and s["answered"] == 0.75 and s["accuracy_answered"] == pytest.approx(2 / 3)
-    assert s["chance"] == 0.25 and s["skill"] == pytest.approx((0.5 - 0.25) / 0.75)
-
-
-def test_dataset_score_case_exact():
-    n = {"type": "noul", "label": True}
-    recs = [_record("r0", "d", {"a": n, "b": {**n, "label": False}}), _record("r1", "d", {"a": n, "b": n})]
-    rows = {("r0", "a"): _row("r0", "a", n, [0.2, 0.8]), ("r0", "b"): _row("r0", "b", {**n, "label": False}, [0.6, 0.4]),
-            ("r1", "a"): _row("r1", "a", n, [0.2, 0.8]), ("r1", "b"): _row("r1", "b", n, [0.9, 0.1])}
-    s = br.dataset_score(recs, rows, "case_exact")
-    assert s["units"] == 2 and s["score"] == 0.5 and s["chance"] == 0.25
-    with pytest.raises(ValueError):
-        br.dataset_score(recs, {("r0", "a"): {**rows[("r0", "a")], "label": 0}}, "case_exact")
-
-
-def test_score_system_areas_and_index():
-    manifest = {"datasets": {"x": {"area": "one", "metric": "accuracy"}, "y": {"area": "one", "metric": "accuracy"}, "z": {"area": "two", "metric": "accuracy"}},
-                "areas": {"one": {"label": "One", "datasets": ["x", "y"]}, "two": {"label": "Two", "datasets": ["z"]}}}
-    n = {"type": "noul", "label": True}
-    recs = [_record("x0", "x", {"q": n}), _record("y0", "y", {"q": n}), _record("z0", "z", {"q": n})]
-    rows = [_row("x0", "q", n, [0.1, 0.9]), _row("y0", "q", n, [0.9, 0.1]), _row("z0", "q", n, [0.4, 0.6])]
-    out = br.score_system(recs, rows, manifest)
-    assert out["areas"]["one"]["skill"] == 0.5 and out["areas"]["two"]["skill"] == 1.0
-    assert out["overall"]["index"] == pytest.approx(75.0) and out["overall"]["raw_index"] == pytest.approx(75.0)
-    assert out["datasets"]["y"]["calibration"]["n"] == 1 and "_rows" not in out["datasets"]["x"]
-    assert "| One |" in br.markdown({"S": out}, manifest)
-
 # ---------------------------------------------------------------- the frozen suite
 
 
@@ -290,13 +238,3 @@ def test_frozen_partitions_structure():
         assert set(by) == set(DATASETS) and all(r["_meta"]["area"] == DATASETS[r["_meta"]["source"]]["area"] for r in recs)
         assert {d: len(v) for d, v in by.items()} == m["files"][f"{split}.jsonl"]["by_source"]
     check_invariants(parts)
-
-
-def test_bootstrap_index_is_paired_and_brackets_the_point_estimate():
-    manifest = {"datasets": {"x": {"area": "one", "metric": "accuracy"}}, "areas": {"one": {"label": "One", "datasets": ["x"]}}}
-    n = {"type": "noul", "label": True}
-    recs = [_record(f"x{i}", "x", {"q": n}) for i in range(40)]
-    good = [_row(f"x{i}", "q", n, [0.1, 0.9] if i % 4 else [0.9, 0.1]) for i in range(40)]
-    out = br.bootstrap_index(recs, {"A": good, "B": good}, manifest, samples=200)
-    point = br.score_system(recs, good, manifest)["overall"]["index"]
-    assert out["index"]["A"][0] <= point <= out["index"]["A"][1] and out["difference"]["B"] == [0.0, 0.0]
