@@ -1,5 +1,5 @@
 # Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); Gemma 4 bases (sliding-window and KV-shared layers) and quantized MLX exports (export_mlx).
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); Gemma 4 bases (sliding-window and KV-shared layers) and quantized MLX exports (export_mlx); model-family details from d1a.backbone.
 """Apple Silicon backend for the Qwen3.5 and Gemma 4 checkpoints: mlx-lm's Metal implementation of the backbone under
 D1A's own encoder and pointer head.
 
@@ -32,6 +32,7 @@ from mlx.utils import tree_flatten
 from mlx_lm.models.cache import KVCache, RotatingKVCache, make_prompt_cache
 from mlx_lm.utils import load_model
 
+from .backbone import for_mlx
 from .checkpoint import weight_shards
 from .model import PointerHead, encode, probs_one, rows_of, rows_per_pass
 
@@ -134,9 +135,8 @@ class MLXDecisionModel:
         # array belongs to the stream of the thread that built it, and d1a.serve runs the model on its own thread ("There is
         # no Stream(gpu, 1) in current thread"), so they are evaluated here, on the loading thread.
         mx.eval([v for _, module in self.lm.named_modules() for v in module.values() if isinstance(v, mx.array)])   # `_freqs`: in the module's dict, not among its parameters
-        # hybrid (Qwen3.5): the state cache holds DeltaNet conv + recurrent states, replicated by mlx-lm's batch merge as
-        # before; attention-only (Gemma 4): plain and rotating KV caches, replicated with their scalar offset (replicate)
-        self.hybrid = not all(type(c) in (KVCache, RotatingKVCache) for c in make_prompt_cache(self.lm))
+        self.backbone = for_mlx(make_prompt_cache(self.lm))   # d1a.backbone: hybrid form and how the state cache is copied
+        self.hybrid = self.backbone.hybrid
         self.pad_id = pad_id
         self.head = PointerHead(self.text.norm.weight.shape[0], dp=head_dim).eval()   # the final norm's width: a quantized embedding's weight is packed
 
@@ -197,7 +197,8 @@ class MLXDecisionModel:
         chunk, out = rows_per_pass([r["ids"] for r in rows], enc["seg"].count(0)), []
         for start in range(0, len(rows), chunk):
             part = rows[start:start + chunk]
-            batch = [type(c).merge([c] * len(part)) if self.hybrid else replicate(c, len(part)) for c in cache]   # both copy the arrays: `cache` is not mutated
+            merge = self.backbone.mlx_cache_copy == "merge"
+            batch = [type(c).merge([c] * len(part)) if merge else replicate(c, len(part)) for c in cache]   # both copy the arrays: `cache` is not mutated
             h = self._hidden([r["ids"] for r in part], batch)
             out += [self._logits(h[i], r["decide"], r["opts"]) for i, r in enumerate(part)]
         return out

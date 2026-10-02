@@ -23,6 +23,7 @@ class Attention:
     name = "attention"
     hybrid = False      # recurrent layers that cannot honour the packed mask: run one causal row per question instead
     lora_extra = ()     # LoRA target names beyond the attention and MLP projections, for the "all" and "attn" presets
+    mlx_cache_copy = "replicate"   # d1a.mlx_model: plain and rotating KV caches are copied with their scalar offset
 
     def __init__(self, config):
         self.config = config
@@ -77,6 +78,7 @@ class Qwen35(Attention):
     hybrid = True
     # Gated DeltaNet projections (transformers 5 names, verified on Qwen3_5TextModel); the mixer's out_proj too
     lora_extra = ("in_proj_qkv", "in_proj_z", "in_proj_a", "in_proj_b", "out_proj")
+    mlx_cache_copy = "merge"       # DeltaNet conv + recurrent states: copied by mlx-lm's batch merge
 
     @classmethod
     def matches(cls, config):
@@ -98,3 +100,10 @@ REGISTRY = (Qwen35, Gemma4)   # first match wins; Attention is the fallback
 def for_config(config):
     """The backbone for a (text) model config."""
     return next((cls for cls in REGISTRY if cls.matches(config)), Attention)(config)
+
+
+def for_mlx(caches):
+    """The backbone of an mlx-lm model, from the prompt cache it builds (mlx-lm's configs differ from transformers'): any
+    cache that is not a plain or rotating KV cache holds recurrent state (Qwen3.5's DeltaNet layers)."""
+    from mlx_lm.models.cache import KVCache, RotatingKVCache
+    return (Attention if all(type(c) in (KVCache, RotatingKVCache) for c in caches) else Qwen35)(None)
