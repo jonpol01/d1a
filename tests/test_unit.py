@@ -1682,3 +1682,16 @@ def test_backbone_families():
     assert "in_proj_qkv" in bq.lora_extra and bg.lora_extra == () and (bq.prefix_min_tokens, bg.prefix_min_tokens) == (0, 384)
     assert isinstance(bg.new_cache(), DynamicCache)
     assert Attention.unwrap(SimpleNamespace(language_model="text")) == "text"
+
+
+def test_backbone_mlx_cache_copy():
+    """The MLX copy rule follows the family: Qwen3.5's recurrent DeltaNet states are copied by mlx-lm's merge, Gemma 4's
+    plain and rotating KV caches by replicate (d1a.mlx_model)."""
+    from types import SimpleNamespace
+    from d1a.backbone import Attention, Gemma4, Qwen35
+    assert Qwen35.mlx_cache_copy == "merge" and Attention.mlx_cache_copy == Gemma4.mlx_cache_copy == "replicate"
+    pytest.importorskip("mlx_lm")
+    from mlx_lm.models.cache import ArraysCache, KVCache, RotatingKVCache
+    from d1a.backbone import for_mlx
+    assert type(for_mlx([KVCache(), RotatingKVCache(max_size=8)])) is Attention
+    assert type(for_mlx([KVCache(), ArraysCache(size=2)])) is Qwen35
