@@ -12,6 +12,8 @@ the Apache License 2.0. This file records where D1A's code came from and what D1
 
 ## What D1A Changed
 
+- **Ported from later upstream Kev**: the suites mirror pin (`d1a/suite.py` `SUITES_REVISION` = kev-suites `cc4bac8`) from Kev commit `6b1da9d` (#198), which publishes the `hard-v1` and `documents-v1` training partitions. Every other partition is unchanged at that revision.
+
 - **Gemma 4 support** (from the jonpol01/kev fork, by John Soliva): Gemma 4 E2B / E4B bases in `d1a/model.py` and
   `d1a/train.py` (Gemma's reserved `<unused0>`–`<unused4>` tokens as delimiters with a leading `<bos>`, a packed mask for
   the sliding-window layers, text-only loading, re-admission of suite records under Gemma's tokenizer) with tests in
