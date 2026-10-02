@@ -6,12 +6,19 @@ All notable changes to D1A's code (the `d1a` package, its server and its tools) 
   change an API; every such change is listed under *Upgrade notes*. The version lives in `pyproject.toml`.
 - **Releases** are cut by pushing a `vX.Y.Z` tag. CI then checks that the tag, `pyproject.toml` and this file agree,
   runs the tests, builds the package and publishes a GitHub release whose text is that version's section below.
-- **Model checkpoints are versioned separately**, as tags of their Hugging Face repositories (for example
-  `JohnP1/d1a-e4b@v0.2-hybrid`). Each release lists the checkpoints it was tested with.
+- **Model checkpoints are versioned separately**: one Hugging Face repository per size and format, one tag per model
+  version (for example `JohnP1/d1a-e4b@v0.3`). Each release lists the checkpoints it was tested with; the table under
+  *Model versions* at the end of this file lists them all.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
+
+### Added
+
+- `recipes/pr-labeler`: how D1A-E4B v0.3 learned to label pull requests, as scripts: fetch labeled PRs from GitHub,
+  build records with the labeling job's own questions, translate them into other languages (on MLX or any
+  OpenAI-compatible server), train and score on one GPU (Hugging Face Jobs or your own), and read the results.
 
 ### Security
 
@@ -126,6 +133,22 @@ agent tools, model routing, and photos and voice.
 
 Not released. The starting point: Kev imported at `jaredpalmer/kev@0fe8fc9` with the Gemma 4 port from
 `jonpol01/kev@13374b3`.
+
+## Model versions
+
+Checkpoints on Hugging Face, newest first. Each version continues training the previous one of its size. Load one as
+`repo@tag`; the MLX repositories (`-mlx-q8`) carry the same versions for Apple Silicon.
+
+| Model | Tag | What it adds | Older tag name |
+|---|---|---|---|
+| JohnP1/d1a-e4b | `v0.3` | pull-request labeling (type, blast radius, severity), English and Japanese | |
+| JohnP1/d1a-e4b | `v0.2` | Kev's later stages (dates, missing evidence, hard, tool-use and long-document decisions), Japanese (JGLUE), agent routing | `v0.2-hybrid` |
+| JohnP1/d1a-e4b | `v0.1` | general decisions (decision-v7, 2 epochs, calibrated) | `v0.1.1-2epoch-calibrated` |
+| JohnP1/d1a-e2b | `v0.2` | general decisions, 2 epochs, calibrated | `v0.2.1-2epoch-calibrated` |
+| JohnP1/d1a-e2b | `v0.1` | general decisions, 1 epoch | `v0.1-1epoch` |
+
+Retired, kept for reproducibility: JohnP1/d1a-e4b-routing and its MLX build (now part of v0.2), and
+JohnP1/d1a-e4b-pr-labeler-mlx-q8 (now v0.3).
 
 [Unreleased]: https://github.com/jonpol01/d1a/compare/v0.2.0...HEAD
 [0.2.0]: https://github.com/jonpol01/d1a/releases/tag/v0.2.0
