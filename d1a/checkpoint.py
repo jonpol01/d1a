@@ -1,5 +1,5 @@
 # Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); the MLX backend for Gemma 4 bases and MLX export folders (d1a_config.json).
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); the MLX backend for Gemma 4 bases and MLX export folders (d1a_config.json); the ple_flash load option (D1A_PLE_FLASH).
 """Trained checkpoints: a run directory or a Hub repo holding a LoRA adapter (or, for a full-weight run, the whole bf16
 backbone), `head.pt` and the tokenizer; or an MLX export of one (d1a_config.json).
 
@@ -157,6 +157,8 @@ class LoadOptions:
                  CUDA graphs, batched across requests (d1a.cuda_graphs, DecisionModel.probs_batch). None = off, the eager
                  path every reported number uses; d1a.serve turns it on for CUDA. Exact up to floating-point
                  reassociation, not bit for bit (the passes are padded to buckets).
+    ple_flash    on the MLX backend, read Gemma 4's per-layer embeddings from the weight files per request instead of holding
+                 them in memory (d1a.mlx_model.FlashEmbedding; same values). None = on; False (D1A_PLE_FLASH=0) keeps them in memory.
     fused        rewrite a merged hybrid backbone on CUDA with fused Triton kernels (d1a.fused_qwen35; needs
                  flash-linear-attention fused_qwen35.FLA_VERSION and refuses any other). None = off; d1a.serve turns it on
                  for CUDA when fused_available() (D1A_FUSED=0 to decline). Equal to the reference layers up to bf16 rounding.
@@ -169,13 +171,14 @@ class LoadOptions:
     backend: str | None = None
     cuda_graphs: bool | None = None
     fused: bool | None = None
+    ple_flash: bool | None = None
 
     BACKENDS = (None, "torch", "mlx", "auto")
 
     @classmethod
     def from_env(cls, env=os.environ):
         """D1A_DTYPE=bf16|fp16|fp32, D1A_MERGE=0, D1A_ATTN=sdpa|eager, D1A_LORA_SCALE, D1A_TEMPERATURE, D1A_BACKEND=torch|mlx|auto,
-        D1A_CUDA_GRAPHS=0|1, D1A_FUSED=0|1.
+        D1A_CUDA_GRAPHS=0|1, D1A_FUSED=0|1, D1A_PLE_FLASH=0|1.
         For command-line entry points only; library code passes an explicit LoadOptions. Explicit values that equal a
         library default are kept (fp32 as torch.float32, "torch" as a string) so a caller with its own default, like
         d1a.serve, can tell "asked for it" from "did not say"."""
@@ -186,7 +189,8 @@ class LoadOptions:
                    lora_scale=float(env.get("D1A_LORA_SCALE", "1")),
                    temperature=float(env["D1A_TEMPERATURE"]) if env.get("D1A_TEMPERATURE") else None, backend=backend,
                    cuda_graphs={"0": False, "1": True}.get(env.get("D1A_CUDA_GRAPHS", "")),
-                   fused={"0": False, "1": True}.get(env.get("D1A_FUSED", "")))
+                   fused={"0": False, "1": True}.get(env.get("D1A_FUSED", "")),
+                   ple_flash={"0": False, "1": True}.get(env.get("D1A_PLE_FLASH", "")))
 
 
 def mlx_available():
@@ -311,10 +315,10 @@ class Checkpoint:
         if self.meta.option_isolation: raise ValueError("option_isolation needs the packed mask; not available on the MLX backend")
         if self.export is not None:
             if opts.lora_scale != 1: raise ValueError(f"an MLX export holds merged weights; lora_scale needs its source checkpoint {self.export['source']}")
-            return MLXDecisionModel(self.path, pad_id(tok), head_dim=self.meta.head_dim)
+            return MLXDecisionModel(self.path, pad_id(tok), head_dim=self.meta.head_dim, ple_flash=opts.ple_flash is not False)
         if not self.mlx_base(): raise ValueError(f"the MLX backend is for the hybrid (Qwen3.5) and Gemma 4 bases; {self.meta.base} is another attention-only base and runs on MPS with backend=torch")
         base_dir = resolve_run(f"{self.meta.base}@{self.meta.base_revision or ''}")   # the base snapshot the torch path already cached
-        m = MLXDecisionModel(base_dir, pad_id(tok), head_dim=self.meta.head_dim)
+        m = MLXDecisionModel(base_dir, pad_id(tok), head_dim=self.meta.head_dim, ple_flash=opts.ple_flash is not False)
         merge_lora(m.lm, self.path, opts.lora_scale)
         return m
 
