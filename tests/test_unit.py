@@ -1720,7 +1720,7 @@ def test_media_model_loads_on_demand_and_never_unloads_while_in_use():
         assert m is od.model and len(loads) == 1
         assert not od.reap(now=od.last + 10_000)       # busy: kept however long ago the last request ended
     assert not od.reap(now=od.last + 30)               # idle, but not long enough
-    assert od.reap(now=od.last + 60) and od.model is None
+    assert od.reap(now=od.last + 61) and od.model is None   # not +60: (last + 60) - last can round to 59.999...
     with od.use(): pass
     assert len(loads) == 2                             # the next request loads it again
 
@@ -1755,3 +1755,6 @@ def test_the_package_version_has_release_notes():
     assert rn.check("v99.0.0") and rn.check("version-2")
     body = rn.section("1.2.0", "## [Unreleased]\n\n## [1.2.0] - 2026-01-02\n\n- a\n\n## 1.0.0 - x\n\n- b\n\n[1.2.0]: https://x\n")
     assert body == "- a"
+    # GitHub renders every line break of a release text, so wrapped lines are joined; blocks stay as they are
+    assert rn.unwrap("para\nwraps\n\n- item\n  continues\n- next\n\n| a |\n|---|\n\n### H\ntext") == \
+        "para wraps\n\n- item continues\n- next\n\n| a |\n|---|\n\n### H\ntext"
