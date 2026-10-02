@@ -1663,3 +1663,22 @@ def test_extra_suites_join_the_run(tiny_base, tmp_path, monkeypatch, capsys):
     train_tiny(tiny_base, tmp_path / "out", "--lora", "4", "--max_steps", "1", "--extra_suites", "evals/devtools-v1", monkeypatch=monkeypatch)
     out = capsys.readouterr().out
     assert f"extra suite devtools-v1: {n} training records" in out and "training requests" in out
+
+
+def test_backbone_families():
+    """d1a.backbone picks the family from the config: Qwen3.5 (DeltaNet) runs rows with its cache and extra LoRA names,
+    Gemma 4 (sliding layers) the packed form with a second mask, a plain model neither; d1a.model's helpers agree."""
+    from types import SimpleNamespace
+    from transformers import DynamicCache
+    from d1a.backbone import Attention, Gemma4, Qwen35, for_config
+    from d1a.model import is_hybrid, sliding_window
+    qwen = SimpleNamespace(layer_types=["linear_attention", "full_attention"])
+    gemma = SimpleNamespace(layer_types=["sliding_attention"] * 4 + ["full_attention"], sliding_window=512)
+    plain = SimpleNamespace(layer_types=None)
+    bq, bg, bp = for_config(qwen), for_config(gemma), for_config(plain)
+    assert (type(bq), type(bg), type(bp)) == (Qwen35, Gemma4, Attention)
+    assert (bq.hybrid, bg.hybrid, bp.hybrid) == (True, False, False) and (is_hybrid(qwen), is_hybrid(gemma)) == (True, False)
+    assert (bq.sliding_window, bg.sliding_window, bp.sliding_window) == (None, 512, None) == (sliding_window(qwen), sliding_window(gemma), sliding_window(plain))
+    assert "in_proj_qkv" in bq.lora_extra and bg.lora_extra == () and (bq.prefix_min_tokens, bg.prefix_min_tokens) == (0, 384)
+    assert isinstance(bg.new_cache(), DynamicCache)
+    assert Attention.unwrap(SimpleNamespace(language_model="text")) == "text"
