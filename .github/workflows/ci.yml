@@ -50,11 +50,11 @@ jobs:
         timeout-minutes: 3
         run: uv run python -c "import mlx.core as mx; print('metal', mx.metal.is_available(), mx.default_device()); print(mx.ones(4).sum().item())"
       # the tests that need MLX (they skip on Linux); the full suite runs in the Linux jobs
-      - name: MLX tests (on the CPU: the runner's emulated GPU stalls them)
+      - name: MLX tests, on the CPU (the runner's emulated GPU stalls them)
         timeout-minutes: 15
         env:
           D1A_TEST_MLX_DEVICE: cpu
-        run: uv run python -m pytest tests/test_mlx_export.py tests/test_unit.py -k "mlx or ple" -v
+        run: uv run python -m pytest tests/test_mlx_export.py tests/test_unit.py -k "mlx or ple_on_flash" -v
 
   lint:
     runs-on: ubuntu-latest
