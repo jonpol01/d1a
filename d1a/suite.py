@@ -1,5 +1,5 @@
 # Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables).
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); the suites mirror pinned at kev-suites cc4bac8 as in upstream Kev 6b1da9d (adds the hard-v1 and documents-v1 train partitions).
 import argparse
 import copy
 import fcntl
@@ -38,7 +38,7 @@ ADMISSION_BRANCH_HEADROOM = 64
 # usually the private PRIVATE_DATASET; only its manifest is in git, which publishes the hashes but not the text.
 SUITES_DATASET = "jaredpalmer/kev-suites"
 PRIVATE_DATASET = "jaredpalmer/kev-private-evals"
-SUITES_REVISION = "a88f56db5341397299137cb68775c2ea6e3f68cb"
+SUITES_REVISION = "cc4bac803e73112689ec327ffa481c519cbc7a05"
 # partitions larger than this stay out of git (gitignored; the manifest's sha256 still pins them)
 GIT_LIMIT = 10 * 1024 * 1024
 # the pinned tokenizer suites built for the Qwen3.5 family are admitted and length-counted under (hard-v1, devtools-v1, long states)
