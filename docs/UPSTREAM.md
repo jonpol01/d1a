@@ -134,6 +134,8 @@ tools/review/src/App.tsx
 Files taken from Kev and modified that cannot hold a comment (JSON, generated lockfiles).
 
 ```text
+playground/package-lock.json
+playground/package.json
 scripts/golden_presets.json
 tools/review/package-lock.json
 tools/review/package.json
@@ -161,8 +163,6 @@ playground/AGENTS.md
 playground/CLAUDE.md
 playground/components.json
 playground/eslint.config.mjs
-playground/package-lock.json
-playground/package.json
 playground/postcss.config.mjs
 playground/public/file.svg
 playground/public/globe.svg
