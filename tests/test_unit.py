@@ -1708,3 +1708,18 @@ def test_media_audio_is_mono_16k_and_bounded():
     assert out.ndim == 1 and len(out) == int(1.5 * SAMPLE_RATE) and abs(float(out.mean()) - 0.25) < 1e-3
     with pytest.raises(ValueError):
         decode_audio(wav(MAX_AUDIO_S + 1, 8_000, 1))
+
+
+def test_media_model_loads_on_demand_and_never_unloads_while_in_use():
+    # an idle media server must give its ~10 GB back, but a request in flight keeps the model it is using
+    from d1a.media import OnDemand
+    loads = []
+    od = OnDemand(lambda: loads.append(1) or object(), idle_s=60, device="cpu")
+    assert od.model is None and not loads
+    with od.use() as m:
+        assert m is od.model and len(loads) == 1
+        assert not od.reap(now=od.last + 10_000)       # busy: kept however long ago the last request ended
+    assert not od.reap(now=od.last + 30)               # idle, but not long enough
+    assert od.reap(now=od.last + 60) and od.model is None
+    with od.use(): pass
+    assert len(loads) == 2                             # the next request loads it again

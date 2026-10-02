@@ -11,8 +11,12 @@ A separate process from d1a.serve on purpose: the text server stays on its fast 
 multimodal base (bf16 torch, ~10 GB for E2B) is loaded only where these demos run. The media is encoded once per
 request; each question then runs as its own row on a copy of that prefix cache (rows_of: the same tokens and positions
 the packed form gives a question).
+
+On demand: the process starts without the model, loads it on the first request (about 20-30 s) and drops it again after
+--idle-unload seconds without one (default 600; 0 keeps it loaded), so an idle server holds almost no memory.
 """
-import argparse, base64, copy, io, threading, time
+import argparse, base64, copy, gc, io, threading, time
+from contextlib import contextmanager
 import torch
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,7 +24,7 @@ from pydantic import BaseModel, Field
 from typing import Literal
 from .api import SystemOneRequest, output_tokens, to_answers, to_record
 from .checkpoint import Checkpoint
-from .device import default_device
+from .device import default_device, empty_cache
 from .model import PointerHead, encode, layout, rows_of
 
 SAMPLE_RATE = 16_000             # what Gemma 4's audio feature extractor expects
@@ -69,12 +73,13 @@ class MediaModel:
         self.device = device
         self.proc = AutoProcessor.from_pretrained(meta.base, revision=meta.base_revision)
         self.tok = self.proc.tokenizer
-        full = AutoModelForImageTextToText.from_pretrained(meta.base, revision=meta.base_revision, dtype=dtype, attn_implementation="sdpa")
+        # straight onto the device: loading on the CPU and moving it holds two copies at once (15 GB peak for E2B on a Mac)
+        full = AutoModelForImageTextToText.from_pretrained(meta.base, revision=meta.base_revision, dtype=dtype, attn_implementation="sdpa", device_map=device)
         inner = full.model
         if not (hasattr(inner, "vision_tower") and hasattr(inner, "audio_tower")):
             raise SystemExit(f"{meta.base} has no vision and audio encoders; the media server is for Gemma 4 bases")
         inner.language_model = PeftModel.from_pretrained(inner.language_model, ck.path).merge_and_unload()
-        self.model = inner.to(device).eval()
+        self.model = inner.eval()
         self.head = PointerHead(full.config.get_text_config().hidden_size, dp=meta.head_dim).to(device).eval()
         self.head.load_state_dict(meta.head)
         self.head.temperature = meta.temperature
@@ -122,6 +127,41 @@ class MediaModel:
                 "latency_ms": round((time.perf_counter() - t0) * 1000, 1)}
 
 
+class OnDemand:
+    """Builds a model on first use and drops it after `idle_s` seconds unused; never while a request holds it."""
+
+    def __init__(self, load, idle_s, device):
+        self.load, self.idle_s, self.device = load, idle_s, device
+        self.model, self.busy, self.last = None, 0, 0.0
+        self.lock = threading.Lock()   # held while loading, so concurrent first requests wait for one load
+
+    @contextmanager
+    def use(self):
+        with self.lock:
+            if self.model is None: self.model = self.load()
+            self.busy += 1
+        try:
+            yield self.model
+        finally:
+            with self.lock:
+                self.busy -= 1; self.last = time.monotonic()
+
+    def reap(self, now=None):
+        """Drop the model when it has been idle for idle_s. Returns whether it did."""
+        with self.lock:
+            idle = (time.monotonic() if now is None else now) - self.last
+            if self.model is None or self.busy or self.idle_s <= 0 or idle < self.idle_s: return False
+            self.model = None
+        gc.collect(); empty_cache(self.device)
+        return True
+
+    def run_reaper(self):
+        def loop():
+            while True:
+                time.sleep(min(30, self.idle_s)); self.reap()
+        if self.idle_s > 0: threading.Thread(target=loop, daemon=True).start()
+
+
 app = FastAPI(title="d1a-media")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
@@ -129,17 +169,18 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 @app.post("/v1/systemone/media")
 def systemone_media(req: MediaRequest):
     try:
-        return app.state.model.answer(req)
+        with app.state.models.use() as m:
+            return m.answer(req)
     except ValueError as e:   # undecodable base64, image or audio; too long or too large
         raise HTTPException(422, str(e))
 
 
 @app.get("/v1/models")
 def models():
-    m = app.state.model; meta = m.checkpoint.meta
-    return {"models": [{"name": "d1a-media", "run": m.checkpoint.requested, "base": meta.base, "device": m.device, "backend": "torch",
-                        "dtype": str(next(m.model.parameters()).dtype).removeprefix("torch."), "temperature": m.head.temperature,
-                        "calibrated": m.head.temperature != 1.0, "media": ["image", "audio"]}]}
+    od = app.state.models; meta = app.state.checkpoint.meta   # reports without loading the model
+    return {"models": [{"name": "d1a-media", "run": app.state.checkpoint.requested, "base": meta.base, "device": od.device, "backend": "torch",
+                        "dtype": "bfloat16", "temperature": meta.temperature, "calibrated": meta.temperature != 1.0, "media": ["image", "audio"],
+                        "loaded": od.model is not None, "idle_unload_s": od.idle_s}]}
 
 
 def main():
@@ -148,10 +189,14 @@ def main():
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8010)
     ap.add_argument("--device", choices=("auto", "cuda", "mps", "cpu"), default="auto")
+    ap.add_argument("--idle-unload", type=int, default=600, help="seconds without a request before the model is dropped from memory; 0 keeps it loaded")
     a = ap.parse_args()
     dev = default_device() if a.device == "auto" else a.device
-    app.state.model = MediaModel(a.run, dev)
-    print(f"serving images and audio with {a.run} on {dev} at {a.host}:{a.port}", flush=True)
+    app.state.checkpoint = Checkpoint(a.run)   # fetches the adapter and head now, so a bad --run fails at startup
+    app.state.models = OnDemand(lambda: MediaModel(a.run, dev), a.idle_unload, dev)
+    app.state.models.run_reaper()
+    print(f"serving images and audio with {a.run} on {dev} at {a.host}:{a.port}; the model loads on the first request"
+          + (f" and unloads after {a.idle_unload} s idle" if a.idle_unload > 0 else ""), flush=True)
     import uvicorn
     uvicorn.run(app, host=a.host, port=a.port, timeout_keep_alive=75)
 
