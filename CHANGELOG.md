@@ -13,6 +13,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Security
+
+- torch 2.13.0 (from 2.8.0), which fixes three memory-corruption advisories: GHSA-vgrw-7cvw-pwgx (`unpack_sequence`,
+  medium), GHSA-qfhq-4f3w-5fph (`lstm_cell`, low) and GHSA-rrmf-rvhw-rf47 (`torch.jit.script`, low). D1A calls none of
+  these functions. On D1A-E2B's PyTorch path (Apple GPU) the answers are unchanged (0 of 40 top answers differ) and the
+  median latency drops from 424–543 ms to 298–320 ms.
+
+### Fixed
+
+- Multi-process full fine-tuning on the CPU (FSDP2 over gloo) failed on torch 2.13, which reduces gradients with
+  PREMUL_SUM once a divide factor is set; D1A now asks for plain sums, the same result for its factor of 1.
+
 ## [0.2.0] - 2026-10-02
 
 The first D1A release: Kev's decision model moved onto Gemma 4, with trained checkpoints, an Apple Silicon backend,

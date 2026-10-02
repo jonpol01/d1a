@@ -1,5 +1,5 @@
 # Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables).
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); FSDP2 sums gradients without PREMUL_SUM on torch >= 2.13 (gloo lacks it).
 """Full-weight training (`d1a.train --full_ft 1`): the whole text backbone and the pointer head are trained, not a LoRA.
 
 The backbone's working weights are bf16 (what the forward and backward run in, and what the checkpoint stores). Plain
@@ -180,7 +180,10 @@ def shard(model):
     policy = MixedPrecisionPolicy(param_dtype=torch.bfloat16, reduce_dtype=torch.float32)
     units = [*model.lm.layers, model.lm]
     for unit in units: fully_shard(unit, mesh=mesh, mp_policy=policy)
-    for unit in units: unit.set_gradient_divide_factor(1.0)
+    for unit in units:
+        unit.set_gradient_divide_factor(1.0)
+        # with a factor, torch >= 2.13 reduces with PREMUL_SUM, which gloo (CPU) lacks; the factor is 1, so a plain sum is the same
+        if hasattr(unit, "set_force_sum_reduction_for_comms"): unit.set_force_sum_reduction_for_comms(True)
     for t in model.head.parameters(): dist.broadcast(t.data, 0)
 
 
