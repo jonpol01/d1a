@@ -1742,3 +1742,16 @@ def test_ple_on_flash_matches_the_in_memory_table(tmp_path, bits):
     got = FlashEmbedding([tmp_path / "model.safetensors"], emb)(ids)
     assert got.shape == (2, 4, 128) and got.dtype == mx.bfloat16
     assert bool(mx.array_equal(got, emb(ids)))
+
+
+def test_the_package_version_has_release_notes():
+    # releases publish CHANGELOG.md's section for the pyproject.toml version, so a version bump without notes fails here,
+    # not at release time; the section extractor must drop the file's trailing link references
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("release_notes", Path(__file__).parent.parent / "scripts" / "release_notes.py")
+    rn = importlib.util.module_from_spec(spec); spec.loader.exec_module(rn)
+    version = rn.package_version()
+    assert rn.check(f"v{version}") == []
+    assert rn.check("v99.0.0") and rn.check("version-2")
+    body = rn.section("1.2.0", "## [Unreleased]\n\n## [1.2.0] - 2026-01-02\n\n- a\n\n## 1.0.0 - x\n\n- b\n\n[1.2.0]: https://x\n")
+    assert body == "- a"
