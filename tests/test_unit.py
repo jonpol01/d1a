@@ -1695,3 +1695,16 @@ def test_backbone_mlx_cache_copy():
     from d1a.backbone import for_mlx
     assert type(for_mlx([KVCache(), RotatingKVCache(max_size=8)])) is Attention
     assert type(for_mlx([KVCache(), ArraysCache(size=2)])) is Qwen35
+
+
+def test_media_audio_is_mono_16k_and_bounded():
+    # the browser and phones record 44.1/48 kHz stereo; Gemma 4's feature extractor reads 16 kHz mono only
+    sf = pytest.importorskip("soundfile")
+    import io, numpy as np
+    from d1a.media import MAX_AUDIO_S, SAMPLE_RATE, decode_audio
+    def wav(seconds, sr, channels):
+        buf = io.BytesIO(); sf.write(buf, np.full((int(seconds * sr), channels), 0.25, dtype="float32"), sr, format="WAV"); return buf.getvalue()
+    out = decode_audio(wav(1.5, 48_000, 2))
+    assert out.ndim == 1 and len(out) == int(1.5 * SAMPLE_RATE) and abs(float(out.mean()) - 0.25) < 1e-3
+    with pytest.raises(ValueError):
+        decode_audio(wav(MAX_AUDIO_S + 1, 8_000, 1))
