@@ -1,5 +1,5 @@
 # Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a; the removed research-round and skill tests left the unit-test list; the MLX export tests joined it.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a; the removed research-round and skill tests left the unit-test list; the MLX export tests joined it; tests on Python 3.12 and 3.13 and on Apple Silicon (MLX), a lint pass, and a package build and install check.
 name: ci
 
 on:
@@ -7,17 +7,77 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read   # every job only reads the repository
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Unit tests only: no model weights, no server. The tokenizer (~10 MB) is downloaded from the Hub.
+  UNIT_TESTS: tests/test_unit.py tests/test_research.py tests/test_generators.py tests/test_conventions.py tests/test_documents_tools.py tests/test_hard_v1.py tests/test_devtools_v1.py tests/test_breadth_v1.py tests/test_mlx_export.py
+
 jobs:
   python:
+    name: tests (Python ${{ matrix.python }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
+          python-version: ${{ matrix.python }}
       - run: uv sync --extra serve --extra media
-      # Unit tests only: no model weights, no server. The tokenizer (~10 MB) is downloaded from the Hub.
-      - run: uv run python -m pytest tests/test_unit.py tests/test_research.py tests/test_generators.py tests/test_conventions.py tests/test_documents_tools.py tests/test_hard_v1.py tests/test_devtools_v1.py tests/test_breadth_v1.py tests/test_mlx_export.py -q
+      - run: uv run python -m pytest $UNIT_TESTS -q
+
+  apple-silicon:
+    name: tests on Apple Silicon (MLX)
+    runs-on: macos-15
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --extra serve --extra media --extra mlx
+      # MLX itself works on this runner (a virtual machine): fail in a few minutes instead of hanging the job
+      - name: MLX smoke check
+        timeout-minutes: 3
+        run: uv run python -c "import mlx.core as mx; print('metal', mx.metal.is_available(), mx.default_device()); print(mx.ones(4).sum().item())"
+      # the tests that need MLX (they skip on Linux); the full suite runs in the Linux jobs
+      - name: MLX tests, on the CPU (the runner's emulated GPU stalls them)
+        timeout-minutes: 15
+        env:
+          D1A_TEST_MLX_DEVICE: cpu
+        run: uv run python -m pytest tests/test_mlx_export.py tests/test_unit.py -k "mlx or ple_on_flash" -v
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      # errors only (syntax errors, undefined names, invalid comparisons), not style: Kev's code keeps its own style
+      - run: uvx ruff check --select E9,F63,F7,F82 --output-format github d1a scripts tests clients
+
+  package:
+    name: package builds and installs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv build
+      # the wheel installs on its own and reports pyproject.toml's version, which CHANGELOG.md must cover
+      - run: |
+          uv venv /tmp/wheel-check
+          uv pip install --python /tmp/wheel-check --no-deps dist/*.whl
+          uv pip install --python /tmp/wheel-check "pydantic>=2.9"
+          /tmp/wheel-check/bin/python -c "import d1a, d1a.api, tomllib; v = tomllib.load(open('pyproject.toml', 'rb'))['project']['version']; assert d1a.__version__ == v, (d1a.__version__, v); print('d1a', v)"
+          python3 scripts/release_notes.py --check "v$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")"
 
   playground:
     runs-on: ubuntu-latest

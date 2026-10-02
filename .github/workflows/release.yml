@@ -1,0 +1,28 @@
+name: release
+
+# Push a vX.Y.Z tag to release. The tag, pyproject.toml and CHANGELOG.md must agree (scripts/release_notes.py --check);
+# the unit tests run again on the tagged commit; the GitHub release text is that version's CHANGELOG.md section,
+# written by hand, and the wheel and sdist are attached.
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: python3 scripts/release_notes.py --check "$GITHUB_REF_NAME"
+      - run: uv sync --extra serve --extra media
+      - run: uv run python -m pytest tests/test_unit.py tests/test_research.py tests/test_generators.py tests/test_conventions.py tests/test_documents_tools.py tests/test_hard_v1.py tests/test_devtools_v1.py tests/test_breadth_v1.py tests/test_mlx_export.py -q
+      - run: uv build
+      - run: python3 scripts/release_notes.py "$GITHUB_REF_NAME" > release-notes.md
+      - run: gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --title "D1A ${GITHUB_REF_NAME#v}" --notes-file release-notes.md
+        env:
+          GH_TOKEN: ${{ github.token }}

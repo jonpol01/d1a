@@ -246,6 +246,10 @@ python scripts/check_license.py          # license and provenance rules (see CON
 
 These suites need no model weights (the tokenizer, about 10 MB, is downloaded from the Hub). `tests/test_model.py`, `tests/test_mlx.py` and `tests/test_api.py` need weights or a running server.
 
+## Releases
+
+D1A's code is versioned with [Semantic Versioning](https://semver.org) and released on [GitHub](https://github.com/jonpol01/d1a/releases); [CHANGELOG.md](CHANGELOG.md) says what changed in each version, and model checkpoints carry their own Hugging Face tags. How to cut a release: [CONTRIBUTING.md](CONTRIBUTING.md#releasing).
+
 ## License
 
 Apache-2.0: see [LICENSE](LICENSE) and [NOTICE](NOTICE).
