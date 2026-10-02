@@ -1,5 +1,5 @@
 # Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: Gemma 4 support (from jonpol01/kev); the default base is google/gemma-4-E2B at a pinned commit; package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); resume points for LoRA runs; a non-finite loss or gradient skips its batch (up to MAX_NONFINITE in a row) instead of ending the run.
+# Changes for D1A Copyright 2026 John Soliva: Gemma 4 support (from jonpol01/kev); the default base is google/gemma-4-E2B at a pinned commit; package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); resume points for LoRA runs; a non-finite loss or gradient skips its batch (up to MAX_NONFINITE in a row) instead of ending the run; --extra_suites trains on several frozen suites' training partitions in one run.
 """LoRA fine-tune of the decision model on labelled requests (a frozen suite's training partition, records built on the
 fly from the public sources, or your own JSONL), with the pointer head trained from scratch. `--full_ft 1` trains the
 whole backbone instead (d1a.full_ft: bf16 weights, fp32 masters; several GPUs through torchrun + FSDP2).
@@ -101,10 +101,16 @@ def training_requests(a, tok, manifest, holdout):
         reqs = load_split(a.suite, "train"); validate_training(reqs, manifest)
     else:
         reqs = build(a.n_per_source, "train", a.seed, exclude=holdout)
+    extra_eval_only = set()
+    for suite in [s for s in a.extra_suites.split(",") if s]:   # each extra suite's own rules apply to its records
+        m = read_manifest(suite); extra = load_split(suite, "train"); validate_training(extra, m)
+        extra_eval_only |= set(m.get("eval_only_sources", []))
+        print(f"extra suite {Path(suite).name}: {len(extra)} training records", flush=True)
+        reqs = reqs + extra
     # every frozen suite is admitted under a Qwen tokenizer (its base_revisions, or the tokenizer its manifest names); a base
     # from another tokenizer family (Gemma 4: its own delimiters, <bos>, a different vocabulary) was never admitted
     foreign = bool(manifest) and not a.data and delimiter_ids(tok) != [tok.convert_tokens_to_ids(t) for t in SPECIAL]
-    if not manifest or a.data or foreign:
+    if not manifest or a.data or foreign or a.extra_suites:
         # frozen suites are filtered to the training context when they are frozen (d1a.suite.select_unique); records built
         # on the fly here are not, so apply the same rule instead of letting the strict encoder abort the run (issue #5).
         # A foreign tokenizer gets the suite's own admission rule, branch headroom included, since augmentation (a none
@@ -119,7 +125,7 @@ def training_requests(a, tok, manifest, holdout):
         reqs = kept
     if not reqs:
         raise ValueError("empty training set")
-    eval_only = set(EVAL_ONLY) | set(manifest.get("eval_only_sources", []) if manifest else [])
+    eval_only = set(EVAL_ONLY) | set(manifest.get("eval_only_sources", []) if manifest else []) | extra_eval_only
     forbidden = {r["_meta"]["source"] for r in reqs} & eval_only
     if forbidden:
         raise ValueError(f"training data contains eval-only sources: {sorted(forbidden)}")
@@ -425,6 +431,7 @@ def parse_args():
     ap.add_argument("--out", default="runs/d1a")
     ap.add_argument("--data", default="", help="your own labelled requests, one JSON object per line (see d1a.data.load_records); an alternative to --suite for fine-tuning, or combined with --suite and --replay")
     ap.add_argument("--max_state", type=int, default=MAX_STATE, help=f"state tokens per training record (default {MAX_STATE}); raising it admits long-state --data records, the packed limit grows by the same amount")
+    ap.add_argument("--extra_suites", default="", help="comma-separated frozen suite directories whose training partitions are added to this run (each checked against its own manifest), e.g. evals/hard-v1,evals/devtools-v1")
     ap.add_argument("--replay", type=int, default=0, help="with --data and --suite: mix in this many records sampled (by --seed) from the suite's training partition, so a delta fine-tune does not forget the released recipe")
     ap.add_argument("--init_from", default="", help="delta mode: warm-start LoRA and the pointer head from an existing run "
                                                    "(local directory or hub id) instead of starting from the base model; keeps the "

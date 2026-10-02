@@ -2133,3 +2133,12 @@ def test_mcp_server_tools(monkeypatch):
     assert names == {"d1a_intake", "d1a_judge", "d1a_tier", "d1a_gate", "d1a_route", "d1a_decide"}
     out = mcp_server.d1a_gate("developer", "fix the CI", "gh run view 1 --log-failed")
     assert out["advice"] == {"decision": "allow"} and sent[0][1] is PRESETS["gate"] and "command: gh run view" in sent[0][0]
+
+
+def test_extra_suites_join_the_run(tiny_base, tmp_path, monkeypatch, capsys):
+    """--extra_suites adds a frozen suite's training partition (checked against that suite's own manifest) to the run."""
+    from d1a.suite import load_split
+    n = len(load_split("evals/devtools-v1", "train"))
+    train_tiny(tiny_base, tmp_path / "out", "--lora", "4", "--max_steps", "1", "--extra_suites", "evals/devtools-v1", monkeypatch=monkeypatch)
+    out = capsys.readouterr().out
+    assert f"extra suite devtools-v1: {n} training records" in out and "training requests" in out
