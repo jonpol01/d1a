@@ -45,10 +45,14 @@ jobs:
         with:
           enable-cache: true
       - run: uv sync --extra serve --extra media --extra mlx
-      # MLX itself works on this runner (a virtual machine): fail in two minutes instead of hanging the job
-      - run: timeout 120 uv run python -c "import mlx.core as mx; print('metal', mx.metal.is_available(), mx.default_device()); print(mx.ones(4).sum().item())"
+      # MLX itself works on this runner (a virtual machine): fail in a few minutes instead of hanging the job
+      - name: MLX smoke check
+        timeout-minutes: 3
+        run: uv run python -c "import mlx.core as mx; print('metal', mx.metal.is_available(), mx.default_device()); print(mx.ones(4).sum().item())"
       # the tests that need MLX (they skip on Linux); the full suite runs in the Linux jobs
-      - run: timeout 900 uv run python -m pytest tests/test_mlx_export.py tests/test_unit.py -k "mlx or ple" -v
+      - name: MLX tests
+        timeout-minutes: 15
+        run: uv run python -m pytest tests/test_mlx_export.py tests/test_unit.py -k "mlx or ple" -v
 
   lint:
     runs-on: ubuntu-latest
