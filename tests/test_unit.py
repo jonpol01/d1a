@@ -1723,3 +1723,22 @@ def test_media_model_loads_on_demand_and_never_unloads_while_in_use():
     assert od.reap(now=od.last + 60) and od.model is None
     with od.use(): pass
     assert len(loads) == 2                             # the next request loads it again
+
+
+@pytest.mark.parametrize("bits", [4, None])
+def test_ple_on_flash_matches_the_in_memory_table(tmp_path, bits):
+    # the per-layer embeddings are read from the weight file per request (#71); every looked-up value must equal the
+    # in-memory (Quantized)Embedding's, repeated and out-of-order ids included
+    mx = pytest.importorskip("mlx.core")
+    import mlx.nn as nn
+    import numpy as np
+    from d1a.mlx_model import PLE, FlashEmbedding
+    mx.set_default_device(mx.cpu)
+    emb = nn.Embedding(512, 128)
+    emb.weight = emb.weight.astype(mx.bfloat16)
+    if bits: emb = nn.QuantizedEmbedding.from_embedding(emb, group_size=64, bits=bits)
+    mx.save_safetensors(str(tmp_path / "model.safetensors"), {f"language_model.model.{PLE}.{k}": v for k, v in emb.parameters().items()})
+    ids = mx.array(np.array([[5, 511, 5, 0], [300, 7, 7, 64]], dtype=np.int32))
+    got = FlashEmbedding([tmp_path / "model.safetensors"], emb)(ids)
+    assert got.shape == (2, 4, 128) and got.dtype == mx.bfloat16
+    assert bool(mx.array_equal(got, emb(ids)))

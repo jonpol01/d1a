@@ -1,5 +1,5 @@
 # Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); Gemma 4 bases (sliding-window and KV-shared layers) and quantized MLX exports (export_mlx); model-family details from d1a.backbone.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); Gemma 4 bases (sliding-window and KV-shared layers) and quantized MLX exports (export_mlx); model-family details from d1a.backbone; Gemma 4's per-layer embeddings read from the weight files per request (FlashEmbedding).
 """Apple Silicon backend for the Qwen3.5 and Gemma 4 checkpoints: mlx-lm's Metal implementation of the backbone under
 D1A's own encoder and pointer head.
 
@@ -36,6 +36,8 @@ from .backbone import for_mlx
 from .checkpoint import weight_shards
 from .model import PointerHead, encode, probs_one, rows_of, rows_per_pass
 
+PLE = "embed_tokens_per_layer"   # Gemma 4's per-layer embedding table
+SAFETENSORS_NP = {"U32": np.uint32, "BF16": np.uint16, "F16": np.float16, "F32": np.float32}   # bf16 is read as its bits
 CACHE_LIMIT = 1 << 30   # MLX's buffer cache keeps a buffer per new request shape; Kev-4B on an M5, 50 requests: 1.0 GB cached vs 3.7 GB unbounded, same latency
 
 
@@ -73,14 +75,68 @@ def merge_lora(lm, adapter_dir, scale=1.0):
 UNUSED_SHARED_KV = re.compile(r"language_model\.model\.layers\.(\d+)\.self_attn\.(k_proj|v_proj|k_norm)\.weight")
 
 
-def load_mlx_lm(path):
+def safetensors_tensor(path, name):
+    """A tensor of a safetensors file as a read-only numpy memmap (bf16 as uint16 bits) and its dtype tag, or None."""
+    with open(path, "rb") as f:
+        n = int.from_bytes(f.read(8), "little"); header = json.loads(f.read(n))
+    t = header.get(name)
+    if t is None: return None
+    start, end = t["data_offsets"]
+    return np.memmap(path, dtype=SAFETENSORS_NP[t["dtype"]], mode="r", offset=8 + n + start, shape=tuple(t["shape"])), t["dtype"]
+
+
+class FlashEmbedding:
+    """Gemma 4's per-layer embedding table read from its safetensors file instead of held in memory (#71).
+
+    Every token looks up one row of it (num_layers x 256 values) and a request needs only its own tokens' rows, yet it is
+    the largest tensor of the model: 1.3 GB of E2B's 3.5 GB 8-bit export, 4.7 GB of the bf16 base. The file is memory-
+    mapped, so the OS reads the rows a request touches and can evict them again. The values are the in-memory
+    (Quantized)Embedding's: the rows are gathered first and dequantized with the same group size, bits and mode."""
+
+    def __init__(self, files, module):
+        self.group_size, self.bits, self.mode = getattr(module, "group_size", None), getattr(module, "bits", None), getattr(module, "mode", "affine")
+        self.parts = {}
+        for part in ("weight", "scales", "biases"):
+            for f in files:
+                for prefix in ("language_model.model.", "model.language_model."):   # export (mlx-lm) and base (transformers) names
+                    found = safetensors_tensor(f, f"{prefix}{PLE}.{part}")
+                    if found: self.parts[part] = found; break
+                if part in self.parts: break
+        if "weight" not in self.parts: raise ValueError(f"no {PLE}.weight in {[str(f) for f in files]}")
+        if ("scales" in self.parts) != (self.bits is not None): raise ValueError(f"{PLE}: the file and the module disagree on quantization")
+
+    def _rows(self, part, idx):
+        table, dtype = self.parts[part]
+        rows = mx.array(np.ascontiguousarray(table[idx]))
+        return rows.view(mx.bfloat16) if dtype == "BF16" else rows
+
+    def __call__(self, ids):
+        uniq, inv = np.unique(np.asarray(ids).reshape(-1), return_inverse=True)
+        rows = self._rows("weight", uniq)
+        if self.bits is not None:
+            biases = self._rows("biases", uniq) if "biases" in self.parts else None
+            rows = mx.dequantize(rows, scales=self._rows("scales", uniq), biases=biases, group_size=self.group_size, bits=self.bits, mode=self.mode)
+        return rows[mx.array(inv.astype(np.int32))].reshape(*ids.shape, -1)
+
+
+def ple_on_flash(lm, files):
+    """Swap a Gemma 4 model's in-memory per-layer embedding table for a FlashEmbedding over `files`. Call it on a lazily
+    loaded model, before its parameters are evaluated, so the table is never read into memory. -> whether it swapped."""
+    text = getattr(getattr(lm, "language_model", None), "model", None)
+    if text is None or getattr(text, PLE, None) is None or isinstance(getattr(text, PLE), FlashEmbedding): return False
+    module = text.pop(PLE)                      # an mlx Module is a dict of its children: this drops the arrays too
+    object.__setattr__(text, PLE, FlashEmbedding(files, module))
+    return True
+
+
+def load_mlx_lm(path, lazy=False):
     """mlx-lm's load_model, strict except for one known gap: Gemma 4 checkpoints store key/value projections for the
     KV-shared layers, which read an earlier layer's keys and never use their own (transformers does not build them, so no
     adapter targets them either); mlx-lm does not build them and its strict load refuses the file. So the load is
     non-strict and this checks what strict would: every parameter is in the file, and the only file tensors left over are
     those projections of layers the model shares. -> (model, config)"""
     path = Path(path)
-    lm, config = load_model(path, strict=False)
+    lm, config = load_model(path, lazy=lazy, strict=False)
     stored = {}
     for f in weight_shards(path): stored.update(mx.load(str(f)))
     stored = set(lm.sanitize(stored) if hasattr(lm, "sanitize") else stored)
@@ -114,12 +170,16 @@ def replicate(cache, n):
 class MLXDecisionModel:
     """Prefill-only scorer: hidden states from mlx-lm, logits from the shared torch PointerHead."""
     backend, device, option_isolation = "mlx", "mlx", False
+    ple_flash = False       # set by __init__ when Gemma 4's per-layer embeddings are read from the weight files
     prefix_min_tokens = 0   # d1a.serve caches the state prefix for every request: on Metal the branch-only pass is always the cheaper one
 
-    def __init__(self, base_dir, pad_id, head_dim=256):
+    def __init__(self, base_dir, pad_id, head_dim=256, ple_flash=True):
         """base_dir: an mlx-lm loadable directory: the base snapshot (weights as stored, bf16) or an export_mlx folder
-        (merged, optionally quantized; the `quantization` block of its config.json)."""
-        lm, config = load_mlx_lm(base_dir)
+        (merged, optionally quantized; the `quantization` block of its config.json). ple_flash: read Gemma 4's per-layer
+        embeddings from the weight files per request instead of holding them in memory (FlashEmbedding)."""
+        lm, config = load_mlx_lm(base_dir, lazy=True)
+        self.ple_flash = bool(ple_flash) and ple_on_flash(lm, weight_shards(base_dir))
+        mx.eval(lm.parameters())
         self._init(lm, pad_id, head_dim, config.get("quantization"))
 
     @classmethod
