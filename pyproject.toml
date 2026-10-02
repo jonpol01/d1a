@@ -47,6 +47,11 @@ serve = [
 mlx = [
     "mlx-lm>=0.31.3,<0.32; sys_platform == 'darwin' and platform_machine == 'arm64'",
 ]
+media = [
+    "pillow>=10",
+    "soundfile>=0.12",
+    "torchvision",   # Gemma 4's image processor
+]
 mcp = [
     "mcp>=2.2,<3",   # d1a.mcp_server: the agent-factory presets as MCP tools
 ]
