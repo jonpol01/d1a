@@ -886,3 +886,32 @@ def test_jsonl_round_trips_unicode_line_separators(tmp_path):
     recs = [{"state": "line one\u2028line two"}, {"state": "next\x85record\u2029end"}, {"state": "plain"}]
     write_jsonl(tmp_path / "x.jsonl", recs)
     assert read_jsonl(tmp_path / "x.jsonl") == recs
+
+
+@pytest.mark.parametrize("context", ["training", "serving"])
+def test_data_scoring_context_and_skip_warning(tmp_path, monkeypatch, capsys, context):
+    # --data scored under the training limits used to drop long records without a word; --context serving scores them
+    import json as _json, sys
+    import d1a.benchmark as bm
+    from d1a.model import ContextOverflow
+    from d1a.suite import CONTEXT, SERVING_CONTEXT
+    data = tmp_path / "data.jsonl"
+    data.write_text("".join(_json.dumps({k: v for k, v in frozen_request(i).items() if k != "_meta"}) + "\n" for i in range(3)), encoding="utf-8")
+    seen = {}
+
+    class Fake:
+        temperature = 1.0
+        def __init__(self, run, device, opts, context): seen["context"] = context
+        def __call__(self, record):
+            if record["_meta"]["id"].endswith("1") and seen["context"] is CONTEXT: raise ContextOverflow("state exceeds 384 tokens")
+            keys = list(record["questions"]["reason"]["criteria"])
+            return {"probabilities": {"reason": {k: 1.0 / len(keys) for k in keys}}, "latency_ms": 1.0}
+    monkeypatch.setattr(bm, "LocalPredictor", Fake)
+    monkeypatch.setattr(sys, "argv", ["benchmark", "--run", "x", "--data", str(data), "--out", str(tmp_path / "out"), "--device", "cpu", "--context", context])
+    bm.main()
+    report = _json.loads((tmp_path / "out" / "report.json").read_text(encoding="utf-8"))
+    if context == "serving":
+        assert seen["context"] is SERVING_CONTEXT and report["coverage"]["rejected_records"] == 0
+    else:
+        assert seen["context"] is CONTEXT and report["coverage"]["rejected_records"] == 1
+        assert "skipped 1 of 3 records" in capsys.readouterr().out

@@ -22,6 +22,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- `d1a.benchmark --data` scored your own records under the training length limit (384-token states) and skipped longer
+  ones without saying so, so a file of long documents (pull requests, reports) was scored on its short ones only. It
+  now prints how many it skipped, and `--context serving` scores them all, up to what `d1a.serve` accepts.
 - Multi-process full fine-tuning on the CPU (FSDP2 over gloo) failed on torch 2.13, which reduces gradients with
   PREMUL_SUM once a divide factor is set; D1A now asks for plain sums, the same result for its factor of 1.
 
