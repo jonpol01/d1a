@@ -1,5 +1,5 @@
 # Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); --remote-model defaults to d1a-latest.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); --remote-model defaults to d1a-latest; --context serving for --data, and a warning when --data records are skipped as too long.
 """Score a predictor on a frozen suite partition (or your own labelled JSONL).
 
     uv run python -m d1a.benchmark --run runs/<run>/checkpoint --suite evals/<v>/decision-<v> --out runs/<name>
@@ -26,7 +26,7 @@ from d1a.device import default_device
 from d1a.metrics import EPSILON, grouped_metrics, metrics, unknowable_report
 from d1a.model import ROW_PASS_TOKENS, ContextOverflow
 from d1a.predictors import LocalPredictor, RemotePredictor, RotationAveraged
-from d1a.suite import CONTEXT, ENCODING, digest, load_split, read_manifest, record_digest, write_json
+from d1a.suite import CONTEXT, ENCODING, SERVING_CONTEXT, digest, load_split, read_manifest, record_digest, write_json
 
 
 def labels(q):
@@ -178,6 +178,9 @@ def main():
     ap.add_argument("--remote-concurrency", type=int, default=1, help="requests kept in flight against --remote (1 = sequential); rows and their order do not depend on it")
     ap.add_argument("--suite", help="frozen suite directory (scores its development partition)")
     ap.add_argument("--data", help="your own labelled requests, one JSON object per line (d1a.data.load_records); an alternative to --suite")
+    ap.add_argument("--context", choices=["training", "serving"], default="training",
+                    help="--data only: the length limits records are scored under. training: a checkpoint's training limits (384-token "
+                         "states by default); longer records are skipped and counted. serving: what d1a.serve accepts (up to 64k tokens)")
     ap.add_argument("--out", required=True)
     ap.add_argument("--device", choices=["cpu", "mps", "cuda"], default=default_device())
     ap.add_argument("--allow-test", action="store_true")
@@ -192,7 +195,7 @@ def main():
     if bool(a.suite) == bool(a.data): ap.error("give exactly one of --suite or --data")
     if a.data:
         records, heldout, split, source_hash = load_records(a.data), [], "custom", digest(Path(a.data))
-        context, skip_overlong = CONTEXT, True
+        context, skip_overlong = (SERVING_CONTEXT if a.context == "serving" else CONTEXT), True
     else:
         split = "test" if a.allow_test else a.split
         records = load_split(a.suite, split, allow_test=a.allow_test)
@@ -208,6 +211,10 @@ def main():
                   calibration_applied=predictor.temperature != 1.0 if not a.remote else None,
                   remote={"base_url": a.remote, "requested_model": a.remote_model, "served_model": predictor.served_model, "concurrency": a.remote_concurrency} if a.remote else None)
     write_json(Path(a.out) / "report.json", report)
+    skipped = report["coverage"]["rejected_records"]
+    if a.data and skipped:   # a silently smaller set would read as the whole file's score
+        print(f"!!! skipped {skipped} of {report['coverage']['requested_records']} records longer than the {a.context} context "
+              f"(listed in {Path(a.out) / 'rejected.json'})" + ("; --context serving scores them" if a.context == "training" else ""), flush=True)
     print(json.dumps({"objective": report["objective"], "clean": report["clean"], "coverage": report["coverage"]}, indent=2))
 
 
