@@ -152,7 +152,7 @@ print(answer["answers"]["team"]["probabilities"])
 
 ### Photos and Voice
 
-`d1a.media` answers questions about an image or a short voice clip with the same request shape, plus a `media` field. It loads the full Gemma 4 model (bf16, about 10 GB for E2B), so it runs as its own process next to the text server:
+`d1a.media` answers questions about an image or a short voice clip with the same request shape, plus a `media` field. It loads the full Gemma 4 model (bf16, about 10 GB for E2B), so it runs as its own process next to the text server. The model loads on the first request (about 15-30 s) and is dropped again after 10 idle minutes (`--idle-unload`, 0 keeps it loaded):
 
 ```bash
 uv run --extra serve --extra media python -m d1a.media --run JohnP1/d1a-e2b --port 8010
