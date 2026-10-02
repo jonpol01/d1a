@@ -1,5 +1,5 @@
 # Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables).
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); the test of the removed v3 study builder left.
 """The programmatic data generators: contrastive policy pairs (d1a.contrastive), compositional rule records (d1a.composition)
 and the v3 suite builder's grouping (d1a.study_v3). No weights, no network.
 Run: uv run python -m pytest tests/test_generators.py -q
@@ -70,13 +70,6 @@ def test_compositional_pairs_validate_and_keep_invariance():
     records[0]["state"]["case"] = "The facts were changed."
     with pytest.raises(ValueError, match="rendered facts"):
         check_group(records[:4])
-
-def test_calibration_covers_every_family_without_splitting_groups():
-    from d1a.study_v3 import grouped_split, legacy
-    train, calibration = grouped_split(legacy(10, "split-test"), 2)
-    assert {r["_meta"]["family"] for r in train} == {r["_meta"]["family"] for r in calibration}
-    assert not {r["_meta"]["group_id"] for r in train} & {r["_meta"]["group_id"] for r in calibration}
-    assert len(calibration) == 16
 
 def test_date_and_entity_atoms():
     from d1a.composition import atom_value

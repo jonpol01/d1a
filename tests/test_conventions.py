@@ -1,5 +1,5 @@
 # Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); dropped the published-claims check and the removed space/ app.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); dropped the published-claims check and the removed space/ app; modal_app.py left the scanned sources.
 """Source conventions: facts that have one canonical home must not be re-derived elsewhere.
 
 Each rule is (what it guards, regex, files allowed to match). A failure means a second copy of a rule that already has
@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-SCANNED = ("d1a", "scripts", "tests", "modal_app.py")
+SCANNED = ("d1a", "scripts", "tests")
 
 RULES = [
     ("head.pt is read and written through d1a.checkpoint (Meta, read_meta, write_meta)",

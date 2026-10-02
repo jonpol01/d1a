@@ -191,7 +191,7 @@ uv run python -m pytest tests/test_unit.py tests/test_research.py tests/test_gen
 python scripts/check_license.py          # license and provenance rules (see CONTRIBUTING.md)
 ```
 
-These suites need no model weights (the tokenizer, about 10 MB, is downloaded from the Hub). `tests/test_model.py`, `tests/test_mlx.py` and `tests/test_api.py` need weights or a running server. `modal_app.py` runs training and benchmarks on [Modal](https://modal.com) under your own workspace (app and volume names are `d1a-*`, set `D1A_APP_NAME` to change the app).
+These suites need no model weights (the tokenizer, about 10 MB, is downloaded from the Hub). `tests/test_model.py`, `tests/test_mlx.py` and `tests/test_api.py` need weights or a running server.
 
 ## License
 

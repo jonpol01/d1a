@@ -1,5 +1,5 @@
 # Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); dropped two checks bound to the removed experiments/ registrations.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); dropped two checks bound to the removed experiments/ registrations; the tests of the removed Modal app and report scripts left.
 import copy
 import pathlib
 import random
@@ -550,131 +550,6 @@ def test_cross_validated_temperature_rejects_too_few_groups():
         cross_validated_temperature(rows, folds=5)
 
 
-def test_modal_compute_bound_includes_requested_memory_and_cpu():
-    from modal_app import TRIAL_CPU, TRIAL_MEMORY, compute_bound
-    expected = 3.95 + TRIAL_CPU * 0.04730 + TRIAL_MEMORY[1] / 1024 * 0.008
-    assert compute_bound("H100", 3600, 1) == pytest.approx(expected)
-    with pytest.raises(ValueError):
-        compute_bound("unknown", 3600, 1)
-
-
-def test_modal_worker_preserves_object_dependency_environment():
-    from modal_app import worker_environment
-    env = worker_environment("d1a-calibration-audit", "H100", "named-secret")
-    assert env["D1A_APP_NAME"] == "d1a-calibration-audit"
-    assert env["D1A_GPU"] == "H100" and env["D1A_HF_SECRET"] == "named-secret"
-    assert "HF_TOKEN" not in env
-    assert "D1A_HF_SECRET" not in worker_environment("d1a-research", "H100")
-
-
-def test_repeat_pull_refetches_trial_dirs_copied_mid_run(monkeypatch, tmp_path, capsys):
-    """A trial dir without result.json was copied while the trial ran: the next pull deletes and re-fetches it,
-    keeps finished dirs untouched, adds new ones, and names what is still running."""
-    import modal_app
-    study = tmp_path / "runs" / "s"
-    (study / "00-trial-0").mkdir(parents=True); (study / "00-trial-0/result.json").write_text("{}", encoding="utf-8")
-    (study / "00-trial-0/keep").write_text("local", encoding="utf-8")
-    (study / "01-trial-1/checkpoint").mkdir(parents=True); (study / "01-trial-1/checkpoint/half.bin").write_text("partial", encoding="utf-8")
-    (study / "results.jsonl").write_text("stale", encoding="utf-8")
-    volume = {"00-trial-0": True, "01-trial-1": True, "02-trial-2": True, "03-trial-3": False}   # name -> finished on the volume
-    fetched, aggregated = [], []
-
-    def pull_volume(remote, local_parent, weights=True):
-        assert weights is False   # a study pull leaves full-weight shards on the volume by default
-        name = remote.rsplit("/", 1)[1]
-        fetched.append(name)
-        (local_parent / name).mkdir()
-        if volume[name]: (local_parent / name / "result.json").write_text("{}", encoding="utf-8")
-
-    monkeypatch.setattr(modal_app, "ROOT", tmp_path)
-    monkeypatch.setattr(modal_app, "pull_volume", pull_volume)
-    monkeypatch.setattr(modal_app, "volume_names", lambda path: (set(volume), set()))
-    monkeypatch.setattr(modal_app.subprocess, "run", lambda cmd, **kw: aggregated.append(cmd))
-    assert modal_app.pull_study("s") == study
-    assert fetched == ["01-trial-1", "02-trial-2", "03-trial-3"]
-    assert (study / "00-trial-0/keep").exists() and (study / "01-trial-1/result.json").exists()
-    assert not (study / "01-trial-1/checkpoint").exists() and not (study / "results.jsonl").exists()
-    assert "no result.json): ['03-trial-3']" in capsys.readouterr().out
-    assert aggregated and "--aggregate" in aggregated[0]
-
-
-def test_locked_test_passes_timeout_and_memory_through(monkeypatch, tmp_path):
-    import modal_app
-    calls = {}
-
-    class Fn:
-        def with_options(self, **kw): calls.update(kw); return self
-        def remote(self, *args): return {"suites": {"decision": {"clean": {"acc": 0.9, "brier": 0.1}}}}
-
-    monkeypatch.setattr(modal_app, "ROOT", tmp_path)
-    monkeypatch.setattr(modal_app.modal.Function, "from_name", lambda app, name: Fn())
-    monkeypatch.setattr(modal_app, "local_git_commit", lambda: "0" * 40)
-    monkeypatch.setattr(modal_app, "pull_volume", lambda remote, local_parent: None)
-    locked_test = modal_app.locked_test.info.raw_f
-    locked_test("s/00-trial-0", "cand")
-    assert calls == {"gpu": modal_app.GPU, "timeout": 3600, "memory": (32768, 49152)}   # run_locked_test's own defaults
-    locked_test("s/00-trial-0", "cand", gpu="H200", timeout=14400, memory_mb=131072)
-    assert calls == {"gpu": "H200", "timeout": 14400, "memory": (32768, 131072)}
-
-
-class FakeServed:
-    """encode/probs_batch (the served path) over materialized records. Alone, a question prefers its last option;
-    `leak(others)` (the other questions' instructions in the same request) is added to option 0's logit, i.e. broken
-    isolation."""
-    def __init__(self, leak=lambda others: 0.0):
-        self.leak = leak
-
-    def encode(self, tok, rec):
-        return rec
-
-    def probs_batch(self, recs, prefixes, keep):
-        out = []
-        for rec in recs:
-            probs = []
-            for i, q in enumerate(rec["questions"]):
-                logits = torch.arange(len(q["options"]), dtype=torch.float)
-                logits[0] += self.leak([o["instr"] for j, o in enumerate(rec["questions"]) if j != i])
-                probs.append(torch.softmax(logits, 0))
-            out.append(probs)
-        return out, [None] * len(recs)
-
-
-def test_served_isolation_compares_alone_with_packed_and_sibling():
-    from scripts.serving_bench import isolation
-    noul = {"type": "noul", "instructions": "Is it late?", "label": True, "src": "fixture"}
-    raw = [{"state": "s", "questions": {"a": choice_request()["questions"]["reason"], "b": noul}}, {"state": "t", "questions": {"b": noul}}]
-    exact = isolation(FakeServed(), None, raw)
-    assert exact == {k: {"questions": 3, "max_dp": 0.0, "mean_dp": 0.0, "argmax_flips": 0} for k in ("packed", "sibling")}
-    # reads its siblings: the two-question record moves when packed, every question moves next to the probe
-    crowded = isolation(FakeServed(lambda others: 5.0 * len(others)), None, raw)
-    assert crowded["packed"]["argmax_flips"] == 2 and crowded["sibling"]["argmax_flips"] == 3
-    assert crowded["packed"]["max_dp"] > 0.5 and 0 < crowded["packed"]["mean_dp"] < crowded["packed"]["max_dp"]
-    # reads only the probe's text: packed stays exact, so the sibling read is scored at the question's index after the probe
-    secret = isolation(FakeServed(lambda others: 5.0 * any("CRANE" in o for o in others)), None, raw)
-    assert secret["packed"] == exact["packed"] and secret["sibling"]["argmax_flips"] == 3
-
-
-def test_screen_requires_beating_continuation_control_not_just_parent():
-    from scripts.review_calibration_screen import screen_checks
-    def result(cov):
-        return {"micro": {"coverage_at_5pct_error": cov, "acc": 0.8, "aurc": 0.05}, "sources": {"x": {"acc": 0.8}}}
-    rule = {"coverage_delta_vs_ce_control_min": 0.05, "coverage_delta_vs_recalibrated_parent_min": 0.05,
-            "accuracy_delta_vs_each_min": -0.01, "aurc_delta_vs_each_max": 0, "per_source_accuracy_delta_min": -0.05}
-    checks = screen_checks(result(0.6), {"parent": result(0.5), "ce-control": result(0.59)}, rule)
-    assert checks["coverage_vs_parent"] and not checks["coverage_vs_ce-control"]
-
-
-def test_tempered_replay_records_effective_temperature():
-    from scripts.calibration_audit import tempered
-    from d1a.metrics import fit_temperature
-    raw = {"variant": "clean", "source": "fixture", "task": "fixture", "p": [0.9, 0.1],
-           "logits": [2.197224577, 0.0], "label": 0, "inference_temperature": 1.0}
-    rows = tempered([raw], 2.0)
-    assert raw["inference_temperature"] == 1.0 and rows[0]["inference_temperature"] == 2.0
-    with pytest.raises(ValueError, match="raw logits"):
-        fit_temperature(rows)
-
-
 def test_selective_metrics_include_confidence_ties():
     from d1a.metrics import metrics
     rows = [{"p": [0.99, 0.01], "label": y, "type": "noul"} for y in [0, 1]]
@@ -903,18 +778,6 @@ def test_semif_external_rows_convert_to_typed_requests():
     assert rec["questions"]["decision"] == {"type": "noul", "instructions": "Angry?", "criteria": {"true": "yes", "false": "no"}, "label": False, "src": "typesafe_customer_service"}
     assert rec["_meta"]["target"] == {"true": 0.1, "false": 0.9} and rec["_meta"]["published"]["typesafe"]["p"] == {"true": 0.2, "false": 0.8}
     assert rec["_meta"]["row_sha256"] == record_digest({"state": rec["state"], "questions": rec["questions"]})
-
-
-def test_typesafe_equal_case_agreement_and_tvd():
-    """Rows average within a case, cases average equally; a row the model never answered scores agreement 0 / TVD 1."""
-    from scripts.compare_typesafe import case_means, score
-    assert score({"true": 0.7, "false": 0.3}, {"true": 1.0, "false": 0.0}) == (1.0, pytest.approx(0.3))
-    records = [{"_meta": {"id": f"r{i}", "group_id": g}} for i, g in enumerate(["a", "a", "b"])]
-    scores = {"r0": (1.0, 0.0), "r1": (0.0, 0.5)}  # case b unanswered
-    out = case_means(scores, records)
-    assert out["rows"] == 3 and out["cases"] == 2
-    assert out["equal_case_modal_agreement"] == pytest.approx((0.5 + 0.0) / 2)
-    assert out["equal_case_total_variation"] == pytest.approx((0.25 + 1.0) / 2)
 
 
 @pytest.mark.parametrize("suite, rows, tasks", [("wanli-v1", 256, {"wanli_nli"}),
