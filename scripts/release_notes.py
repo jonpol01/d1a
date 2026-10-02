@@ -1,9 +1,10 @@
 """Release notes for a version, from CHANGELOG.md, and the checks the release workflow runs.
 
-    python scripts/release_notes.py 0.2.0             # print that version's section (the GitHub release text)
+    python scripts/release_notes.py 0.2.0             # print that version's section as the GitHub release text
     python scripts/release_notes.py --check v0.2.0    # the tag, pyproject.toml and CHANGELOG.md agree
 
-A section starts at `## [X.Y.Z] - YYYY-MM-DD` and ends at the next `## ` heading.
+A section starts at `## [X.Y.Z] - YYYY-MM-DD` and ends at the next `## ` heading. CHANGELOG.md is wrapped for reading
+as a file; GitHub renders every line break of a release text, so the release text joins wrapped lines back together.
 """
 import re
 import sys
@@ -29,6 +30,24 @@ def section(version, text=None):
     return None
 
 
+STARTS_BLOCK = re.compile(r"^(#|\||```|[-*] |\d+\. )")   # a line that starts its own block, never joined to the one above
+
+
+def unwrap(text):
+    """Join hard-wrapped lines back into their paragraph or list item; headings, table rows, code fences and blank lines
+    are left as they are."""
+    out = []
+    for line in text.split("\n"):
+        prev = out[-1] if out else ""
+        joinable = (line.strip() and prev.strip() and not STARTS_BLOCK.match(line.lstrip())
+                    and not prev.lstrip().startswith(("#", "|", "```")))
+        if joinable:
+            out[-1] = prev.rstrip() + " " + line.strip()
+        else:
+            out.append(line)
+    return "\n".join(out)
+
+
 def check(tag):
     """Errors that should stop a release of `tag` (vX.Y.Z)."""
     errors, version = [], tag.removeprefix("v")
@@ -46,4 +65,4 @@ if __name__ == "__main__":
         sys.exit(1 if problems else 0)
     notes = section(sys.argv[1].removeprefix("v"))
     if notes is None: sys.exit(f"no CHANGELOG.md section for {sys.argv[1]}")
-    print(notes)
+    print(unwrap(notes))

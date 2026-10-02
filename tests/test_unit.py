@@ -1755,3 +1755,6 @@ def test_the_package_version_has_release_notes():
     assert rn.check("v99.0.0") and rn.check("version-2")
     body = rn.section("1.2.0", "## [Unreleased]\n\n## [1.2.0] - 2026-01-02\n\n- a\n\n## 1.0.0 - x\n\n- b\n\n[1.2.0]: https://x\n")
     assert body == "- a"
+    # GitHub renders every line break of a release text, so wrapped lines are joined; blocks stay as they are
+    assert rn.unwrap("para\nwraps\n\n- item\n  continues\n- next\n\n| a |\n|---|\n\n### H\ntext") == \
+        "para wraps\n\n- item continues\n- next\n\n| a |\n|---|\n\n### H\ntext"
