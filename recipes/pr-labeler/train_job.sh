@@ -10,7 +10,7 @@
 #   INIT               starting checkpoint, repo[@revision][:subfolder] [JohnP1/d1a-e4b@v0.3]
 #   DATA               dataset repo with train*.jsonl, development*.jsonl, test*.jsonl, real17.jsonl [JohnP1/d1a-pr-labels]
 #   EN                 English PRs from train.jsonl: every rare-label PR (blast, P0, P1, P4) plus a sample of the rest; 0 = all [0]
-#   EN_SKIP            skip PRs a previous round used (its EN sample, same seed) so a continuation sees new ones: 0/1 [0]
+#   EN_SKIP            1 = continue a previous round (same EN, same seed): its unsampled PRs plus its rare-label PRs again [0]
 #   EXTRA              more training files in DATA, space-separated, e.g. "train_ja.jsonl train_blast.jsonl" [train_ja.jsonl]
 #   REPLAY_DV7, REPLAY_JA, REPLAY_ROUTING   replay of decision-v7, Japanese JGLUE, routing [1500, 500, 300]
 #   LR, MAX_STATE, CKPT  learning rate, longest PR document in tokens, resume-point directory [5e-5, 1536, /ckpt]
@@ -43,8 +43,8 @@ en = lines("/data/pr/train.jsonl"); n = int(os.environ["EN"])
 if n:
     keep = [l for l in en if rare(l)]; rest = [l for l in en if not rare(l)]; rng.shuffle(rest)
     used = keep + rest[:max(0, n - len(keep))]
-    if os.environ["EN_SKIP"] == "1":   # the previous round's sample (same seed): train on the PRs it left out
-        en = rest[max(0, n - len(keep)):]
+    if os.environ["EN_SKIP"] == "1":   # the PRs the previous round (same seed) left out, plus its rare-label PRs again:
+        en = keep + rest[max(0, n - len(keep)):]   # every P0/P1/P4 PR is rare-label, so without them those labels fade
     else:
         en = used
 extra = [l for f in os.environ["EXTRA"].split() for l in lines(f"/data/pr/{f}")]
