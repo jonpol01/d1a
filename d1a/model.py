@@ -1,12 +1,13 @@
 # Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: Gemma 4 support (reserved delimiter tokens, sliding-window masks, text-only loading; from jonpol01/kev); package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables).
+# Changes for D1A Copyright 2026 John Soliva: Gemma 4 support (reserved delimiter tokens, sliding-window masks, text-only loading; model-family details behind d1a.backbone; from jonpol01/kev); package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables).
 """Decision model: causal LM backbone + block-causal branch mask + pointer readout."""
 import copy, functools, math, os, re
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from transformers import AutoModel, AutoModelForCausalLM, AutoTokenizer, DynamicCache
+from transformers import AutoModel, AutoModelForCausalLM, AutoTokenizer
 from transformers.cache_utils import LinearAttentionCacheLayerMixin
+from .backbone import Attention, for_config
 
 # Reuse existing rarely-used Qwen special tokens as delimiters (state, q, opt, /opt, decide) so no
 # embedding rows need to be added/trained; LoRA adapts their meaning.
@@ -91,15 +92,13 @@ def pad_id(tok):
 
 
 def is_hybrid(config):
-    """Whether a (text) config has Gated DeltaNet layers (Qwen3.5). Such backbones cannot honour the block-causal mask and
-    run the row form; on Apple Silicon they are what the MLX backend is for."""
-    return "linear_attention" in set(getattr(config, "layer_types", None) or [])
+    """Whether a (text) config's backbone has recurrent layers (Qwen3.5's Gated DeltaNet) and runs the row form."""
+    return for_config(config).hybrid
 
 
 def sliding_window(config):
-    """The local-attention window of a (text) config with sliding layers (Gemma 4: 512), else None. The packed form then
-    needs a second mask for those layers (branch_masks), since one additive mask would give every layer global reach."""
-    return config.sliding_window if "sliding_attention" in set(getattr(config, "layer_types", None) or []) else None
+    """The local-attention window of a (text) config's sliding layers (Gemma 4: 512), else None."""
+    return for_config(config).sliding_window
 
 
 def user_tokens(tok, text):
@@ -285,24 +284,24 @@ class DecisionModel(nn.Module):
         self.lm = AutoModel.from_pretrained(weights, **load) if weights else AutoModelForCausalLM.from_pretrained(name, revision=revision, **load).model
         # multimodal checkpoints (Gemma 4) load as a wrapper around the text model: keep the text model only, so the vision and
         # audio towers are neither held in memory nor matched by the LoRA target names
-        self.lm = getattr(self.lm, "language_model", self.lm)
+        self.lm = Attention.unwrap(self.lm)
+        self.backbone = for_config(self.lm.config)   # d1a.backbone: what this model family needs (form, masks, cache, LoRA names)
         self.pad_id = pad_id(tok)
         # hybrid backbones (Qwen3.5: Gated DeltaNet layers, recurrent) cannot honour the block-causal mask, so every
         # question runs as its own causal row continuing from the state (rows_of). Attention-only backbones keep the
         # packed form; the two agree to fp32 noise (tests/test_model.py::test_rows_match_packed).
-        self.hybrid = is_hybrid(self.lm.config)
+        self.hybrid = self.backbone.hybrid
         if self.hybrid and option_isolation: raise ValueError("option_isolation needs the packed mask; not available on hybrid backbones")
         self.option_isolation = option_isolation
-        self.sliding_window = sliding_window(self.lm.config)   # Gemma 4: the packed form carries a second mask (branch_masks)
+        self.sliding_window = self.backbone.sliding_window   # Gemma 4: the packed form carries a second mask (branch_masks)
         if lora:
             from peft import LoraConfig, get_peft_model
             extra = {"trainable_token_indices": {"embed_tokens": delimiter_ids(tok)}} if special_embeddings else {}
             targets = {"all": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
                        "dense": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],   # "all" minus the DeltaNet projections on hybrids (retention ablation)
                        "attn": ["q_proj", "k_proj", "v_proj", "o_proj"], "qv": ["q_proj", "v_proj"]}[lora_targets]
-            if self.hybrid and lora_targets in ("all", "attn"):
-                # Gated DeltaNet projections (transformers 5 names, verified on Qwen3_5TextModel); the mixer's out_proj too
-                targets = targets + ["in_proj_qkv", "in_proj_z", "in_proj_a", "in_proj_b", "out_proj"]
+            if lora_targets in ("all", "attn"):
+                targets = targets + list(self.backbone.lora_extra)   # e.g. Qwen3.5's Gated DeltaNet projections
             cfg = LoraConfig(task_type="FEATURE_EXTRACTION", r=lora, lora_alpha=2 * lora, lora_dropout=0.05, target_modules=targets, **extra)
             self.lm = get_peft_model(self.lm, cfg)
         self.head = PointerHead(self.lm.config.hidden_size, dp=head_dim)
@@ -317,7 +316,7 @@ class DecisionModel(nn.Module):
         """d1a.serve caches the state prefix from this many state tokens. Attention-only backbones: 384, below which the
         branch-only pass is not faster than one packed pass on MPS (per-op overhead). Hybrid backbones: always, because
         their miss path otherwise recomputes the state once per question (Kev-0.8B bf16 on MPS, 5 questions: 1011 -> 413 ms)."""
-        return 0 if self.hybrid else 384
+        return self.backbone.prefix_min_tokens
 
     @property
     def dtype(self):
@@ -361,7 +360,7 @@ class DecisionModel(nn.Module):
         """An empty KV cache for the state prefix. Hybrid backbones need the config's layer types (recurrent + conv states per
         DeltaNet layer). Sliding-window backbones must NOT get them: a sliding layer's cache keeps only the last window, but
         the packed branch pass hands those layers the full-length mask (branch_masks), so every layer caches the whole state."""
-        return DynamicCache(config=self.lm.config) if self.hybrid else DynamicCache()
+        return self.backbone.new_cache()
 
     def _readout(self, h, enc):
         return [self.head(h[d], h[torch.tensor(oi, device=self.device)]) for d, oi in zip(enc["decide_idx"], enc["opt_idx"])]
