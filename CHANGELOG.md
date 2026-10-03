@@ -37,6 +37,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **PR-length requests are about 30% faster on Apple Silicon, with identical answers.** The state pass (the document,
+  run once before the questions) now stops before Gemma 4's KV-shared layers: those layers keep no cache of their own
+  and nothing reads the state's own outputs, so for the state they were pure waste (18 of D1A-E4B's 42 layers). On an
+  M1 Max, 60 held-out pull requests (median 1,584 state tokens): state pass 3,470 -> 2,137 ms, whole request 4,465 ->
+  3,082 ms (medians), every probability bit-identical; photos, voice and video too (a 16-frame clip's state pass 1,805
+  -> 1,079 ms). Other backbones run the full pass as before.
+
 - Downloading a model from the Hub skips an export's `media/` folder (1 GB) until a photo or voice request needs it.
 
 ### Security

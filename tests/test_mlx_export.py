@@ -88,6 +88,30 @@ def fake_encoding(rng, state, branches):
 
 
 @pytest.mark.skipif(platform.system() != "Darwin" or platform.machine() != "arm64" or not mlx_available(), reason="MLX runs on Apple Silicon only")
+def test_gemma4_state_pass_skips_the_kv_shared_layers():
+    """The state pass never runs Gemma 4's KV-shared layers (they keep no cache and the state's outputs are not read), and
+    the questions answered on that cache equal each question run as its own full row."""
+    import mlx.core as mx
+    from d1a.mlx_model import MLXDecisionModel
+    mx.random.seed(0)
+    m = MLXDecisionModel.from_lm(tiny_gemma4(), pad_id=0, head_dim=16)
+    enc = fake_encoding(np.random.default_rng(1), 20, [(5, 2), (14, 4)])
+    rows = m.forward_rows(enc)
+    shared = [i for i, p in enumerate(m.text.previous_kvs) if p != i]
+    assert shared == [4, 5]
+    saved = {i: m.text.layers[i] for i in shared}
+
+    class Trap:   # keeps the layer type the mask builder reads; fails if the layer is run
+        def __init__(self, layer): self.layer_type = layer.layer_type
+        def __call__(self, *a, **k): raise AssertionError("a KV-shared layer ran during the state pass")
+    for i in shared: m.text.layers[i] = Trap(saved[i])
+    prefix = m.prefix(enc)
+    for i, layer in saved.items(): m.text.layers[i] = layer
+    for z, r in zip(m._branch_logits(enc, prefix[1]), rows):
+        assert torch.allclose(z, r, atol=1e-4), (z - r).abs().max()
+
+
+@pytest.mark.skipif(platform.system() != "Darwin" or platform.machine() != "arm64" or not mlx_available(), reason="MLX runs on Apple Silicon only")
 def test_gemma4_prefix_form_matches_rows_across_the_sliding_window():
     """The serving form (state once into KV + rotating caches, the questions as right-padded rows on replicated copies)
     equals each question run as its own full row, for states shorter and longer than the window, in fp32; reusing the
