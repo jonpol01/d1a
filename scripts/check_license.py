@@ -32,7 +32,7 @@ UPSTREAM_COMMIT = "0fe8fc97c2bcc247fa3efb6e5c32af4e99770e91"
 HEADER = re.compile(r"^\s*(#|//|<!--|/\*|\*)\s*Modified from Kev \(https://github\.com/jaredpalmer/kev\)")
 HEADER_LINES = 15
 SIMILARITY = 0.5
-PATH_MAP = [("d1a/", "kev/"), ("playground/src/lib/d1a.ts", "playground/src/lib/kev.ts")]   # D1A path -> Kev path (renames)
+PATH_MAP = [("d1a/", "kev/")]   # D1A path -> Kev path (renames)
 SECTIONS = {"derived": "Derived files", "derived_noheader": "Derived files without a header", "copies": "Unmodified copies"}
 
 # "kev" is allowed in user-facing files only inside these, each for a reason:
@@ -43,8 +43,7 @@ ALLOWED = [
     (r"JohnP1/kev-gemma4-e2b", "the prototype checkpoint's Hub id, published before the rename"),
     (r"Built on Kev|built on Kev|Modified from Kev|from Kev|by the Kev authors|Kev authors", "credit lines"),
 ]
-USER_FACING = ["playground/src", "tools/review/src", "tools/review/index.html", "playground/package.json",
-               "tools/review/package.json", "clients/js/package.json", "clients/python/pyproject.toml", "pyproject.toml"]
+USER_FACING = ["clients/js/package.json", "clients/python/pyproject.toml", "pyproject.toml"]
 
 
 def git_files():
@@ -202,7 +201,7 @@ def check_branding(files, errors):
                 continue
             if re.search(r"kev", allowed.sub("", line), re.I):
                 errors.append(f"{f}:{n}: user-facing 'kev' outside the allowlist: {line.strip()[:120]} (rule 7)")
-    for name in ("playground/package.json", "tools/review/package.json", "clients/js/package.json"):
+    for name in ("clients/js/package.json",):
         if (ROOT / name).is_file() and "kev" in json.loads((ROOT / name).read_text(encoding="utf-8")).get("name", "").lower():
             errors.append(f"{name}: package name contains 'kev' (rule 7)")
     if (ROOT / "kev").exists():

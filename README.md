@@ -2,7 +2,7 @@
 
 **A small decision model on Gemma 4.** One document and a set of typed questions in, a calibrated probability for every option out, in one forward pass. No text generation.
 
-> **Built on Kev.** D1A is built on [Kev](https://github.com/jaredpalmer/kev) by Jared Palmer, licensed under the [Apache License 2.0](LICENSE). The model code, trainer, benchmark, frozen evaluation suites and playground here started as a copy of Kev (upstream commit `0fe8fc9`); [docs/UPSTREAM.md](docs/UPSTREAM.md) lists every file taken from Kev and what D1A changed. D1A is an independent project. It is not affiliated with, sponsored by or endorsed by Jared Palmer or the Kev authors.
+> **Built on Kev.** D1A is built on [Kev](https://github.com/jaredpalmer/kev) by Jared Palmer, licensed under the [Apache License 2.0](LICENSE). The model code, trainer, benchmark and frozen evaluation suites here started as a copy of Kev (upstream commit `0fe8fc9`); [docs/UPSTREAM.md](docs/UPSTREAM.md) lists every file taken from Kev and what D1A changed. D1A is an independent project. It is not affiliated with, sponsored by or endorsed by Jared Palmer or the Kev authors.
 
 ## See It Running
 
@@ -182,7 +182,7 @@ curl -s localhost:8009/v1/systemone/media -H 'content-type: application/json' -d
 
 ### Playground
 
-`playground/` is a Next.js app for trying questions by hand, comparing packed and separate answers, permuting options and playing chess against the model. Start a server on :8009, then `cd playground && npm install && npm run dev` (set `D1A_API` to point it elsewhere).
+The demos above live in [jonpol01/d1a-playground](https://github.com/jonpol01/d1a-playground), a Next.js app that talks to `d1a.serve`. Kev's in-repo developer playground (packed vs separate answers, option permutation, chess) and its label-review page were removed; [docs/removed-tools.md](docs/removed-tools.md) describes them and how to restore them. The server endpoints they used, `/v1/systemone/separate` and `/v1/systemone/permute`, are still there.
 
 ### Apple Silicon (MLX)
 

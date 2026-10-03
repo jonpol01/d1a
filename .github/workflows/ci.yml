@@ -78,19 +78,3 @@ jobs:
           uv pip install --python /tmp/wheel-check "pydantic>=2.9"
           /tmp/wheel-check/bin/python -c "import d1a, d1a.api, tomllib; v = tomllib.load(open('pyproject.toml', 'rb'))['project']['version']; assert d1a.__version__ == v, (d1a.__version__, v); print('d1a', v)"
           python3 scripts/release_notes.py --check "v$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")"
-
-  playground:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: playground
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: playground/package-lock.json
-      - run: npm ci
-      - run: npm run lint
-      - run: npx next typegen && npx tsc --noEmit -p .
