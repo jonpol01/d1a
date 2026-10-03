@@ -1,5 +1,5 @@
 # Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); serves d1a-latest and keeps kev-latest and jev-latest as compatibility names; model cards name D1A; serves MLX export folders; --device with a GPU usability probe; a startup self-check of the readout and a warning when serving an uncalibrated checkpoint; recent batch latency in /v1/models; a 75 s keep-alive for proxies in front of it.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); serves d1a-latest and keeps kev-latest and jev-latest as compatibility names; model cards name D1A; serves MLX export folders; --device with a GPU usability probe; a startup self-check of the readout and a warning when serving an uncalibrated checkpoint; recent batch latency in /v1/models; a 75 s keep-alive for proxies in front of it; --idle-unload; photos and voice clips through the same model (POST /v1/systemone/media).
 """FastAPI sidecar for the playground: loads one checkpoint, exposes prefill-only decisions.
 
 Run: uv run --extra serve python -m d1a.serve --run runs/d1a --port 8008
@@ -7,11 +7,17 @@ Run: uv run --extra serve python -m d1a.serve --run runs/d1a --port 8008
 TypeSafe-compatible: POST /v1/systemone, GET /v1/models, the `x-typesafe-request-id` response header, and bearer auth
 when D1A_API_KEY is set (unset = open server, the local default). Demo extras: POST /v1/systemone/permute (one Choice
 under several option orders) and POST /v1/systemone/separate (each question in its own pass, for the packed-vs-separate
-comparison). D1A_PREFIX_CACHE / D1A_PREFIX_MIN_TOKENS / D1A_PREFIX_MAX_TOKENS size the state-prefix cache; D1A_DATE_FACTS=1 opts into the
+comparison), POST /v1/systemone/media (a /v1/systemone request plus a photo or voice clip, d1a.media.MediaRequest,
+answered by the same model: an MLX export with its media/ folder, scripts/export_mlx.py --media).
+
+--idle-unload N drops the model (and the media encoders) after N seconds without a request and loads it again on the
+next one; GET /v1/models answers either way without loading it. D1A_PREFIX_CACHE / D1A_PREFIX_MIN_TOKENS / D1A_PREFIX_MAX_TOKENS size the state-prefix cache; D1A_DATE_FACTS=1 opts into the
 date preprocessing (api.with_date_facts). Backend and precision follow LoadOptions (D1A_BACKEND, D1A_DTYPE, ...): on Apple
 Silicon the hybrid Qwen3.5 checkpoints run on MLX by default, elsewhere on torch in bf16.
 """
 import argparse, asyncio, atexit, hmac, math, os, queue, random, subprocess, sys, threading, time, traceback, uuid
+from contextlib import asynccontextmanager, contextmanager
+from pathlib import Path
 from collections import deque
 from concurrent.futures import Future
 import torch
@@ -23,7 +29,8 @@ from pydantic import BaseModel, Field
 from .api import SystemOneRequest, to_record, to_answers, output_tokens, with_date_facts
 from .checkpoint import EXPORT_CONFIG, Checkpoint, LoadOptions, fused_available, is_hub_id
 from .device import default_device, empty_cache, out_of_memory, sync
-from .model import SERVE_MAX_BRANCH, SERVE_MAX_STATE
+from .media import MEDIA_DIR, MediaEncoder, MediaRequest, OnDemand, with_media
+from .model import SERVE_MAX_BRANCH, SERVE_MAX_STATE, layout
 
 PREFIX_CACHE_SIZE = int(os.environ.get("D1A_PREFIX_CACHE", "4"))          # states kept (KV + DeltaNet states; attention-only backbones also the state's hidden states); 0 disables
 PREFIX_MIN_TOKENS = os.environ.get("D1A_PREFIX_MIN_TOKENS")               # states shorter than this are not cached; default = the model's prefix_min_tokens (0 for hybrid backbones and MLX, 384 for attention-only torch models)
@@ -53,7 +60,7 @@ class PrefixCache:
     def plan(self, encs):
         """-> (key per request, None when its state is not cached; its cached prefix or None; whether to keep a new one)."""
         lengths = [enc["seg"].count(0) for enc in encs]
-        keys = [(tuple(enc["ids"][:n]), bool(enc.get("option_isolation"))) if self.size and self.min_tokens <= n <= self.max_tokens else None
+        keys = [(tuple(enc["ids"][:n]), bool(enc.get("option_isolation"))) if self.size and self.min_tokens <= n <= self.max_tokens and enc.get("media") is None else None   # media: same placeholder ids for different photos
                 for enc, n in zip(encs, lengths)]
         survivors, tokens = set(), 0
         for key in dict.fromkeys(k for k in reversed(keys) if k is not None):   # most recent first, as store() keeps them
@@ -104,21 +111,27 @@ class Server:
         self.thread = threading.Thread(target=self._work, name="d1a-model", daemon=True)
         self.thread.start()
         atexit.register(self.close)   # a daemon thread killed inside a CUDA call at interpreter exit aborts the process
+        self.media, self.media_lock = None, threading.Lock()
 
     def close(self):
         """Stop the model thread after its current batch; requests still queued fail, and so do later ones (submit)."""
         if self.stopping.is_set(): return
+        atexit.unregister(self.close)   # the registration holds the server, and with it the model, alive
         self.stopping.set(); self.thread.join()
+        self.media = None
         while not self.queue.empty():
             self.queue.get_nowait()[1].set_exception(RuntimeError("the server stopped")); self.queue.task_done()
         sys.setswitchinterval(self.switch_interval)
 
-    def submit(self, rec):
+    def submit(self, rec, media=None):
         """Queue one record for the model thread. -> a Future of (probabilities, stats). The state prefix (tokens up to the
         first question) is cached across requests, so a repeated state only pays for its question rows. latency_ms is the
-        model time of the batch the request ran in (not its wait in the queue)."""
+        model time of the batch the request ran in (not its wait in the queue). media: MediaEncoder.encode's output, put
+        right after <state>."""
         if self.stopping.is_set(): raise HTTPException(503, "the server is stopping")
-        try: enc = self.model.encode(self.tok, rec, max_state=SERVE_MAX_STATE, max_branch=SERVE_MAX_BRANCH)
+        try:
+            enc = self.model.encode(self.tok, rec, max_state=SERVE_MAX_STATE, max_branch=SERVE_MAX_BRANCH)
+            if media is not None: enc = with_media(enc, len(layout(self.tok)[0]) + 1, *media)
         except ValueError as e: raise HTTPException(422, str(e))
         done = Future()
         self.queue.put((enc, done))
@@ -186,6 +199,31 @@ class Server:
         rec, meta = to_record(prepare(req))
         return self._body(req, meta, *await asyncio.wrap_future(self.submit(rec)))
 
+    def media_encoder(self):
+        """Gemma 4's vision and audio encoders for this model, loaded on the first photo or voice request: the export's
+        media/ folder, fetched from the Hub then if the run is a Hub id."""
+        if self.model.backend != "mlx":
+            raise HTTPException(501, "photos and voice run on an MLX export here; for a torch checkpoint use python -m d1a.media")
+        with self.media_lock:
+            if self.media is None:
+                folder = Path(self.checkpoint.path) / MEDIA_DIR
+                if not folder.is_dir() and is_hub_id(self.checkpoint.requested):
+                    from huggingface_hub import snapshot_download
+                    repo, _, rev = self.checkpoint.requested.partition("@")
+                    folder = Path(snapshot_download(repo, revision=rev or None, allow_patterns=[f"{MEDIA_DIR}/*"])) / MEDIA_DIR
+                if not folder.is_dir():
+                    raise HTTPException(501, f"{self.checkpoint.requested} has no {MEDIA_DIR}/ folder: export it with scripts/export_mlx.py --media")
+                self.media = MediaEncoder(str(folder), self.device)
+            return self.media
+
+    async def answer_media_async(self, req):
+        """answer_async() for a request with a photo or a voice clip: the encoders run on this request's thread, the
+        language model on the model thread as for any request."""
+        rec, meta = to_record(prepare(req))
+        try: media = await asyncio.to_thread(lambda: self.media_encoder().encode(req.media))
+        except ValueError as e: raise HTTPException(422, str(e))
+        return self._body(req, meta, *await asyncio.wrap_future(self.submit(rec, media)))
+
     def _body(self, req, meta, ps, m):
         answers = to_answers(ps, meta)
         return {"model": req.model, "answers": answers, "usage": {"input_tokens": m["tokens"], "output_tokens": output_tokens(self.tok, answers)}, "latency_ms": m["latency_ms"]}
@@ -220,14 +258,35 @@ async def typesafe(request, call_next):
     return resp
 
 
-def server() -> Server:
-    return app.state.server
+@contextmanager
+def server():
+    """The Server for one request, loaded if it was unloaded (--idle-unload); it is not unloaded while a request holds it."""
+    with app.state.models.use() as s:
+        yield s
+
+
+@asynccontextmanager
+async def server_async():
+    """server() for the event loop: a load (seconds) runs on a worker thread, not on the loop."""
+    s = await asyncio.to_thread(app.state.models.acquire)
+    try:
+        yield s
+    finally:
+        app.state.models.release()
 
 
 @app.post("/v1/systemone")
 async def systemone(req: SystemOneRequest):
     """TypeSafe-compatible endpoint: typed questions in, typed answers out, one prefill pass."""
-    return await server().answer_async(req)
+    async with server_async() as s:
+        return await s.answer_async(req)
+
+
+@app.post("/v1/systemone/media")
+async def systemone_media(req: MediaRequest):
+    """/v1/systemone with a photo or a voice clip (d1a.media.MediaRequest), answered by the same model."""
+    async with server_async() as s:
+        return await s.answer_media_async(req)
 
 
 class PermuteSystemOne(BaseModel):
@@ -243,12 +302,13 @@ def systemone_permute(r: PermuteSystemOne):
     q = r.request.questions.get(r.question)
     if q is None or q.type != "choice": raise HTTPException(422, "question must be an existing choice question")
     rng = random.Random(r.seed); keys = list(q.criteria); runs = []
-    for i in range(r.n_perm):
-        order = list(keys)
-        if i > 0: rng.shuffle(order)
-        one = r.request.model_copy(update={"questions": {r.question: q.model_copy(update={"criteria": {k: q.criteria[k] for k in order}})}})
-        resp = server().answer(one); a = resp["answers"][r.question]
-        runs.append({"order": order, "probabilities": a["probabilities"], "choice": a["choice"], "latency_ms": resp["latency_ms"]})
+    with server() as s:
+        for i in range(r.n_perm):
+            order = list(keys)
+            if i > 0: rng.shuffle(order)
+            one = r.request.model_copy(update={"questions": {r.question: q.model_copy(update={"criteria": {k: q.criteria[k] for k in order}})}})
+            resp = s.answer(one); a = resp["answers"][r.question]
+            runs.append({"order": order, "probabilities": a["probabilities"], "choice": a["choice"], "latency_ms": resp["latency_ms"]})
     spread = {k: max(x["probabilities"][k] for x in runs) - min(x["probabilities"][k] for x in runs) for k in keys}
     return {"runs": runs, "argmax_stable": len({x["choice"] for x in runs}) == 1, "spread": spread}
 
@@ -256,28 +316,38 @@ def systemone_permute(r: PermuteSystemOne):
 @app.post("/v1/systemone/separate")
 def systemone_separate(req: SystemOneRequest):
     """Answer each question in its own request against the same state (N passes). For packed-vs-separate comparison."""
-    parts = [server().answer(req.model_copy(update={"questions": {qid: q}})) for qid, q in req.questions.items()]
-    answers = {qid: a for p in parts for qid, a in p["answers"].items()}
+    with server() as s:
+        parts = [s.answer(req.model_copy(update={"questions": {qid: q}})) for qid, q in req.questions.items()]
+        answers = {qid: a for p in parts for qid, a in p["answers"].items()}
+        out_tokens = output_tokens(s.tok, answers)
     return {"model": req.model, "answers": answers,
-            "usage": {"input_tokens": sum(p["usage"]["input_tokens"] for p in parts), "output_tokens": output_tokens(server().tok, answers)},
+            "usage": {"input_tokens": sum(p["usage"]["input_tokens"] for p in parts), "output_tokens": out_tokens},
             "latency_ms": round(sum(p["latency_ms"] for p in parts), 1)}
 
 
 @app.get("/v1/models")
 def models():
     """One TypeSafe model card (name, description, release_date) per accepted model name, plus the D1A serving details
-    a client may ignore: the run, the base, the device, the backend and precision, the temperature, prefix-cache stats."""
-    s = server()
-    ck, meta = s.checkpoint, s.checkpoint.meta
-    card = {"description": f"D1A pointer head on {meta.base}, serving {ck.requested} at temperature {s.model.head.temperature:.2f}",
-            "release_date": s.release_date,
-            "run": ck.requested, "base": meta.base, "lora": meta.lora, "device": s.device, "backend": s.model.backend, "dtype": s.model.dtype,
-            "temperature": s.model.head.temperature, "calibrated": s.model.head.temperature != 1.0,
-            "cuda_graphs": graphs.stats() if (graphs := getattr(s.model, "graphs", None)) else None,
-            "prefix_cache": {"size": s.prefix_cache.size, "min_state_tokens": s.prefix_cache.min_tokens, "max_tokens": s.prefix_cache.max_tokens, "hits": s.prefix_cache.hits,
-                             "misses": s.prefix_cache.misses, "cached_states": len(s.prefix_cache.entries), "oom_retries": s.prefix_cache.oom_retries},
-            "batches": {"count": s.batches, "requests": s.batched_requests, "queued": s.queue.qsize(), "latency": latency_summary(s.batch_ms)}}
+    a client may ignore: the run, the base, the device, the backend and precision, the temperature, whether the model is
+    in memory (--idle-unload), and while it is, prefix-cache and batch stats. Answers without loading the model, so a
+    client polling it does not keep an idle model in memory."""
+    od = app.state.models
+    s, card = od.model, dict(app.state.card)
+    card["loaded"], card["idle_unload_s"] = s is not None, od.idle_s
+    if s is not None:
+        card.update({"cuda_graphs": graphs.stats() if (graphs := getattr(s.model, "graphs", None)) else None,
+                     "prefix_cache": {"size": s.prefix_cache.size, "min_state_tokens": s.prefix_cache.min_tokens, "max_tokens": s.prefix_cache.max_tokens, "hits": s.prefix_cache.hits,
+                                      "misses": s.prefix_cache.misses, "cached_states": len(s.prefix_cache.entries), "oom_retries": s.prefix_cache.oom_retries},
+                     "batches": {"count": s.batches, "requests": s.batched_requests, "queued": s.queue.qsize(), "latency": latency_summary(s.batch_ms)}})
     return {"models": [{"name": name, **card} for name in MODEL_NAMES]}
+
+
+def card(s):
+    """The parts of the model card that stay the same while the model is unloaded, from a loaded Server."""
+    ck, meta, T = s.checkpoint, s.checkpoint.meta, s.model.head.temperature
+    return {"description": f"D1A pointer head on {meta.base}, serving {ck.requested} at temperature {T:.2f}", "release_date": s.release_date,
+            "run": ck.requested, "base": meta.base, "lora": meta.lora, "device": s.device, "backend": s.model.backend, "dtype": s.model.dtype,
+            "temperature": T, "calibrated": T != 1.0}
 
 
 def usable(device):
@@ -311,6 +381,7 @@ def main():
     ap.add_argument("--host", default="127.0.0.1", help="interface to bind; 0.0.0.0 to serve beyond this machine (a container, a VM behind a proxy)")
     ap.add_argument("--port", type=int, default=8008)
     ap.add_argument("--device", choices=("auto", "cuda", "mps", "cpu"), default="auto", help="accelerator; auto = cuda, then mps, then cpu, skipping one that cannot run a kernel")
+    ap.add_argument("--idle-unload", type=int, default=0, help="seconds without a request before the model is dropped from memory and loaded again on the next one; 0 keeps it loaded")
     a = ap.parse_args()
     run = a.run if is_hub_id(a.run) or os.path.exists(f"{a.run}/head.pt") or os.path.exists(f"{a.run}/{EXPORT_CONFIG}") else a.fallback
     if run != a.run: print(f"{a.run} not found, falling back to {run}")
@@ -326,14 +397,27 @@ def main():
     if fused_default: opts = replace(opts, fused=fused_available())   # serving default: fused Qwen3.5 kernels, ~1/3 less GPU time per batch (d1a.fused_qwen35), when fla is installed; D1A_FUSED=0 to decline, D1A_FUSED=1 to insist
     if opts.backend is None: opts = replace(opts, backend="auto")   # serving default: MLX for the hybrid Qwen3.5 checkpoints on Apple Silicon (LoadOptions.backend); D1A_BACKEND=torch to decline
     ck = Checkpoint(run)
-    tok, model = ck.load(dev, opts)
+
+    def load():
+        t0 = time.time()
+        tok, model = ck.load(dev, opts)
+        s = Server(ck, tok, model, dev)
+        try: self_check(s.probs)
+        except BaseException: s.close(); raise
+        print(f"loaded {ck.requested} in {time.time() - t0:.1f} s", flush=True)
+        return s
+
+    app.state.models = OnDemand(load, a.idle_unload, dev)
+    with app.state.models.use() as s:   # loaded now, so a bad checkpoint fails at startup, not on a user's request
+        model = s.model; app.state.card = card(s)
+    app.state.models.run_reaper()
     if fused_default and not opts.fused and model.hybrid: print("fused Qwen3.5 kernels off: install the flash-linear-attention version d1a/fused_qwen35.py pins (FLA_VERSION) to turn them on")
-    app.state.server = Server(ck, tok, model, dev)
-    self_check(app.state.server.probs)
     if model.head.temperature == 1.0:   # 1.0 = never calibrated: d1a.train and the study harness leave head.pt at 1.0 on purpose
         print("!!! serving an uncalibrated checkpoint (temperature 1.0): probabilities will be overconfident. Fit one with "
               "scripts/calibrate_checkpoint.py before publishing; thresholds on probabilities assume it.", flush=True)
-    print(f"serving {ck.requested} ({ck.path}) on {dev} via {model.backend} ({model.dtype}) {a.host}:{a.port}")   # /v1/models reports the run as given, not the resolved cache path
+    print(f"serving {ck.requested} ({ck.path}) on {dev} via {model.backend} ({model.dtype}) {a.host}:{a.port}"   # /v1/models reports the run as given, not the resolved cache path
+          + (f"; unloads after {a.idle_unload} s idle" if a.idle_unload > 0 else ""), flush=True)
+    del model, s
     import uvicorn
     uvicorn.run(app, host=a.host, port=a.port, timeout_keep_alive=KEEP_ALIVE_S)
 

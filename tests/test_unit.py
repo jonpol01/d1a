@@ -258,11 +258,12 @@ def test_head_temperature_scales_logits_at_eval_only():
 @pytest.mark.parametrize("n_perm, code", [(0, 422), (-1, 422), (65, 422), (1, 200), (64, 200)])
 def test_permute_bounds_n_perm(n_perm, code, monkeypatch):
     """Each option order is a forward pass: 0 divided by nothing and unbounded counts ran forever (#30, @53Abdeali)."""
+    from contextlib import nullcontext
     from types import SimpleNamespace
     from fastapi.testclient import TestClient
     from d1a import serve
     answer = lambda req: {"answers": {"q": {"probabilities": {"a": 0.75, "b": 0.25}, "choice": "a"}}, "latency_ms": 1.0}
-    monkeypatch.setattr(serve, "server", lambda: SimpleNamespace(answer=answer))
+    monkeypatch.setattr(serve, "server", lambda: nullcontext(SimpleNamespace(answer=answer)))
     body = {"request": {"state": "s", "questions": {"q": {"type": "choice", "instructions": "Pick", "criteria": {"a": None, "b": None}}}}, "question": "q", "n_perm": n_perm}
     with TestClient(serve.app) as client:
         r = client.post("/v1/systemone/permute", json=body)
@@ -1723,6 +1724,58 @@ def test_media_model_loads_on_demand_and_never_unloads_while_in_use():
     assert od.reap(now=od.last + 61) and od.model is None   # not +60: (last + 60) - last can round to 59.999...
     with od.use(): pass
     assert len(loads) == 2                             # the next request loads it again
+
+
+def test_idle_server_unloads_and_models_never_loads_it(monkeypatch):
+    # --idle-unload: the playground polls /v1/models, so that must answer without loading (else the model never goes idle);
+    # an unloaded Server is closed and actually freed (its atexit hook held it, and the model with it)
+    import gc, torch, weakref
+    from types import SimpleNamespace
+    from fastapi.testclient import TestClient
+    from d1a import serve
+    from d1a.media import OnDemand
+
+    class Model:
+        prefix_min_tokens, backend, dtype = 0, "torch", "float32"
+        head = SimpleNamespace(temperature=1.5)
+        def encode(self, tok, rec, **kw): return rec
+        def probs_batch(self, encs, cached, keep): return [[torch.tensor([0.5, 0.5])] for _ in encs], [None for _ in encs]
+
+    loaded = []
+    def load():
+        s = serve.Server(SimpleNamespace(release_date=lambda: "2026-01-01"), None, Model(), "cpu")
+        loaded.append(weakref.ref(s)); return s
+    od = OnDemand(load, idle_s=60, device="cpu")
+    monkeypatch.setattr(serve.app.state, "models", od, raising=False)
+    monkeypatch.setattr(serve.app.state, "card", {"run": "r"}, raising=False)
+    with TestClient(serve.app) as client:
+        assert client.get("/v1/models").json()["models"][0]["loaded"] is False and not loaded
+        with serve.server() as s: assert s.probs({"ids": [1, 9], "seg": [0, 1]})[0] == [[0.5, 0.5]]
+        assert len(loaded) == 1 and client.get("/v1/models").json()["models"][0]["batches"]["count"] == 1
+    del s
+    assert od.reap(now=od.last + 61)
+    gc.collect()
+    assert loaded[0]() is None   # closed and freed
+
+
+def test_media_span_joins_the_state_and_leaves_every_branch_as_it_was(tok):
+    # with_media: the photo's tokens go after <state>; each question's branch must be the same tokens with the same readout
+    # offsets, its positions shifted by the span, and the prefix cache must not key the request by its token ids (two
+    # photos of one size have the same placeholder ids)
+    import numpy as np
+    from d1a.media import with_media
+    from d1a.model import encode, layout, rows_of
+    from d1a.serve import PrefixCache
+    rec = {"state": "left at the door", "questions": [{"instr": "Damaged?", "options": ["yes", "no"], "label": 0}]}
+    enc = encode(tok, rec)
+    n_head = len(layout(tok)[0]) + 1
+    m = with_media(enc, n_head, [7, 8, 8, 9], [1, 2], np.zeros((2, 4), np.float32))
+    S0, _, r0 = rows_of(enc); S1, P1, r1 = rows_of(m)
+    assert S1 == S0[:n_head] + [7, 8, 8, 9] + S0[n_head:] and P1 == list(range(len(S1)))
+    assert [(r["ids"], r["decide"], r["opts"]) for r in r1] == [(r["ids"], r["decide"], r["opts"]) for r in r0]
+    assert [r["pos"] for r in r1] == [[p + 4 for p in r["pos"]] for r in r0]
+    assert m["media"][0] == [n_head + 1, n_head + 2]
+    assert PrefixCache(size=4, min_tokens=0).plan([m])[0] == [None]
 
 
 @pytest.mark.parametrize("bits", [4, None])

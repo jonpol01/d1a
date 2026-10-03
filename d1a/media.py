@@ -1,21 +1,22 @@
-"""Decisions about a photo or a voice clip: the media server for the playground's Photo check and Voice triage demos.
-
-Run: uv run --extra serve --extra media python -m d1a.media --run JohnP1/d1a-e2b --port 8010
+"""Decisions about a photo or a voice clip, for the playground's Photo check and Voice triage demos.
 
 POST /v1/systemone/media takes a /v1/systemone request plus {"media": {"type": "image" | "audio", "data": <base64>}} and
-answers in the same shape. The checkpoint is the text-trained one: Gemma 4 keeps its vision and audio encoders, the
-adapter is merged into the language model, and the media's soft tokens go between <state> and the state text. Zero-shot
-(issue #78) it read damage and drop-off place off delivery photos and intent off EN/JA voice notes, no speech-to-text.
+answers in the same shape. The checkpoint is the text-trained one: Gemma 4 keeps its vision and audio encoders, and the
+media's soft tokens go between <state> and the state text. Zero-shot (issue #78) it read damage and drop-off place off
+delivery photos and intent off EN/JA voice notes, no speech-to-text.
 
-A separate process from d1a.serve on purpose: the text server stays on its fast backend (MLX on Apple Silicon) and the
-multimodal base (bf16 torch, ~10 GB for E2B) is loaded only where these demos run. The media is encoded once per
-request; each question then runs as its own row on a copy of that prefix cache (rows_of: the same tokens and positions
-the packed form gives a question).
-
-On demand: the process starts without the model, loads it on the first request (about 20-30 s) and drops it again after
---idle-unload seconds without one (default 600; 0 keeps it loaded), so an idle server holds almost no memory.
+Two ways to serve it:
+- d1a.serve, the same model as every other request (MediaEncoder + with_media): the encoders alone (~1 GB for E4B, the
+  media/ folder of an MLX export, export_media) turn the media into soft tokens, and the text model, MLX included, reads
+  them in place of its placeholder tokens. Nothing else is loaded, and --idle-unload frees both.
+- python -m d1a.media, for a PyTorch checkpoint (MediaModel): the full multimodal base (bf16, ~10 GB for E2B) with the
+  adapter merged, in its own process. The media is encoded once per request; each question then runs as its own row on a
+  copy of that prefix cache (rows_of: the same tokens and positions the packed form gives a question).
+    uv run --extra serve --extra media python -m d1a.media --run JohnP1/d1a-e2b --port 8010
+  It starts without the model, loads it on the first request (about 20-30 s) and drops it again after --idle-unload
+  seconds without one (default 600; 0 keeps it loaded), so an idle server holds almost no memory.
 """
-import argparse, base64, copy, gc, io, threading, time
+import argparse, base64, copy, gc, io, sys, threading, time
 from contextlib import contextmanager
 import torch
 from fastapi import FastAPI, HTTPException
@@ -127,32 +128,141 @@ class MediaModel:
                 "latency_ms": round((time.perf_counter() - t0) * 1000, 1)}
 
 
+TOWERS = ("vision_tower", "audio_tower", "embed_vision", "embed_audio")   # Gemma 4's encoders and their projections into the text model
+MEDIA_DIR = "media"   # the encoders inside an MLX export folder (export_media)
+
+
+def export_media(base, revision, out):
+    """Write Gemma 4's vision and audio encoders (~1 GB bf16 for E4B, of a 16 GB base) as `out`/media, a folder that
+    MediaEncoder loads without the base: config.json, the processor files and model.safetensors with the encoder weights
+    only. They are the base's own weights: the LoRA adapter only touches the text model."""
+    from huggingface_hub import hf_hub_download
+    from safetensors import safe_open
+    from safetensors.torch import save_file
+    from transformers import AutoProcessor
+    from .checkpoint import weight_shards
+    import os, shutil
+    folder = os.path.dirname(hf_hub_download(base, "config.json", revision=revision))
+    dest = os.path.join(out, MEDIA_DIR); os.makedirs(dest, exist_ok=True)
+    tensors = {}
+    for shard in weight_shards(folder) or [hf_hub_download(base, "model.safetensors", revision=revision)]:
+        with safe_open(shard, "pt") as f:
+            for k in f.keys():
+                name = k.removeprefix("model.")
+                if name.startswith(TOWERS): tensors[name] = f.get_tensor(k).to(torch.bfloat16)
+    if not tensors: raise SystemExit(f"{base} has no vision or audio encoders")
+    save_file(tensors, os.path.join(dest, "model.safetensors"))
+    shutil.copy(os.path.join(folder, "config.json"), dest)
+    AutoProcessor.from_pretrained(base, revision=revision).save_pretrained(dest)
+    return dest
+
+
+class MediaEncoder:
+    """Gemma 4's vision and audio encoders on their own (torch): media -> the soft tokens the text model reads in place of
+    its image or audio placeholder tokens. With these the text model itself, MLX included, answers about a photo or a
+    voice clip, so no second copy of the model is needed. Loaded from an export's media folder (export_media)."""
+
+    def __init__(self, folder, device):
+        from safetensors.torch import load_file
+        from transformers import AutoConfig, AutoModel, AutoProcessor
+        from transformers.initialization import no_init_weights
+        from transformers.models.gemma4.modeling_gemma4 import Gemma4Model, Gemma4MultimodalEmbedder
+        cfg = AutoConfig.from_pretrained(folder)
+        self.proc = AutoProcessor.from_pretrained(folder)
+        self.tok, self.device = self.proc.tokenizer, device
+        with no_init_weights():   # every weight comes from the file
+            towers = torch.nn.Module()
+            towers.vision_tower, towers.audio_tower = AutoModel.from_config(cfg.vision_config), AutoModel.from_config(cfg.audio_config)
+            towers.embed_vision = Gemma4MultimodalEmbedder(cfg.vision_config, cfg.text_config)
+            towers.embed_audio = Gemma4MultimodalEmbedder(cfg.audio_config, cfg.text_config)
+        towers.load_state_dict(load_file(f"{folder}/model.safetensors"), strict=True)
+        towers.config = cfg
+        self.towers = towers.to(device, torch.bfloat16).eval()
+        # transformers' own feature code (pooling, padding removal, projection) on the towers alone, not a copy of it
+        self._image = lambda **kw: Gemma4Model.get_image_features.__wrapped__(self.towers, **kw)
+        self._audio = lambda **kw: Gemma4Model.get_audio_features.__wrapped__(self.towers, **kw)
+        self.placeholders = {cfg.image_token_id, cfg.audio_token_id}
+        self.lock = threading.Lock()   # one encoder pass at a time on the device
+
+    @torch.no_grad()
+    def encode(self, media: Media):
+        """-> (token ids of the media span, the indices within it that are placeholders, their soft tokens [n, d] fp32)."""
+        raw = base64.b64decode(media.data, validate=True)
+        if len(raw) > MAX_MEDIA_BYTES: raise ValueError(f"media larger than {MAX_MEDIA_BYTES // 2**20} MB")
+        if media.type == "image":
+            mm = self.proc(text=self.proc.image_token, images=decode_image(raw), return_tensors="pt")
+        else:
+            mm = self.proc(text=self.proc.audio_token, audio=decode_audio(raw), sampling_rate=SAMPLE_RATE, return_tensors="pt")
+        leading = layout(self.tok)[0]
+        ids = mm["input_ids"][0].tolist()
+        if ids[:len(leading)] == leading: ids = ids[len(leading):]
+        at = [i for i, t in enumerate(ids) if t in self.placeholders]
+        dev = lambda k: mm[k].to(self.device)
+        with self.lock:
+            if media.type == "image":
+                out = self._image(pixel_values=dev("pixel_values").to(torch.bfloat16), image_position_ids=dev("image_position_ids"))
+                feats = torch.cat(out.pooler_output, dim=0)
+            else:
+                out = self._audio(input_features=dev("input_features").to(torch.bfloat16), input_features_mask=dev("input_features_mask"))
+                feats = out.pooler_output[out.attention_mask]
+        if feats.shape[0] != len(at): raise ValueError(f"{len(at)} media placeholders but {feats.shape[0]} soft tokens")
+        return ids, at, feats.float().cpu().numpy()
+
+
+def with_media(enc, n_head, ids, at, embeds):
+    """An encoding (d1a.model.encode) with a media span inserted at state index n_head (after <state>): the span's ids
+    join the state and every later position and index shifts by its length. enc["media"] = (absolute placeholder
+    indices, their soft tokens) for the backend's state pass."""
+    n = len(ids)
+    out = dict(enc)
+    out["ids"] = enc["ids"][:n_head] + ids + enc["ids"][n_head:]
+    out["seg"] = enc["seg"][:n_head] + [0] * n + enc["seg"][n_head:]
+    out["opt"] = enc["opt"][:n_head] + [enc["opt"][0]] * n + enc["opt"][n_head:]
+    out["pos"] = enc["pos"][:n_head] + list(range(n_head, n_head + n)) + [p + n for p in enc["pos"][n_head:]]
+    out["decide_idx"] = [d + n for d in enc["decide_idx"]]
+    out["opt_idx"] = [[o + n for o in oi] for oi in enc["opt_idx"]]
+    out["media"] = ([n_head + i for i in at], embeds)
+    return out
+
+
 class OnDemand:
-    """Builds a model on first use and drops it after `idle_s` seconds unused; never while a request holds it."""
+    """Builds a model on first use and drops it after `idle_s` seconds unused; never while a request holds it. A model
+    with a close() method is closed when dropped."""
 
     def __init__(self, load, idle_s, device):
         self.load, self.idle_s, self.device = load, idle_s, device
         self.model, self.busy, self.last = None, 0, 0.0
         self.lock = threading.Lock()   # held while loading, so concurrent first requests wait for one load
 
-    @contextmanager
-    def use(self):
+    def acquire(self):
+        """-> the model, loading it if needed; pair with release(). use() is the context-manager form."""
         with self.lock:
             if self.model is None: self.model = self.load()
             self.busy += 1
+            return self.model
+
+    def release(self):
+        with self.lock:
+            self.busy -= 1; self.last = time.monotonic()
+
+    @contextmanager
+    def use(self):
+        model = self.acquire()
         try:
-            yield self.model
+            yield model
         finally:
-            with self.lock:
-                self.busy -= 1; self.last = time.monotonic()
+            self.release()
 
     def reap(self, now=None):
         """Drop the model when it has been idle for idle_s. Returns whether it did."""
         with self.lock:
             idle = (time.monotonic() if now is None else now) - self.last
             if self.model is None or self.busy or self.idle_s <= 0 or idle < self.idle_s: return False
-            self.model = None
+            model, self.model = self.model, None
+        if hasattr(model, "close"): model.close()
+        del model
         gc.collect(); empty_cache(self.device)
+        if "mlx.core" in sys.modules: sys.modules["mlx.core"].clear_cache()   # MLX keeps freed buffers for reuse until told otherwise
         return True
 
     def run_reaper(self):

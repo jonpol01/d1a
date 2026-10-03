@@ -16,9 +16,23 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **One model for text, photos and voice.** `d1a.serve` answers `POST /v1/systemone/media` (a request plus a photo or
+  voice clip) with the model it already serves: Gemma 4's vision and audio encoders turn the media into soft tokens,
+  and the same MLX language model reads them. The encoders (~1 GB for E4B) ship in an export's `media/` folder
+  (`scripts/export_mlx.py --media`, or `--media-only` for an existing export), and are fetched and loaded on the first
+  photo or voice request. On the playground's 10 samples D1A-E4B v0.3 matches its own PyTorch path (0 of 20 answers
+  change, max |Δp| 0.065). `python -m d1a.media` stays for PyTorch checkpoints.
+- `d1a.serve --idle-unload SECONDS` drops the model (and the media encoders) after that long without a request and
+  loads it again on the next one: 2.0 s for D1A-E4B on an M1 Max, which goes from 6.4 GB in use (encoders
+  loaded) to 1.3 GB. `GET /v1/models` answers without
+  loading the model and reports `loaded` and `idle_unload_s`. Default 0 (always loaded), as before.
 - `recipes/pr-labeler`: how D1A-E4B v0.3 learned to label pull requests, as scripts: fetch labeled PRs from GitHub,
   build records with the labeling job's own questions, translate them into other languages (on MLX or any
   OpenAI-compatible server), train and score on one GPU (Hugging Face Jobs or your own), and read the results.
+
+### Changed
+
+- Downloading a model from the Hub skips an export's `media/` folder (1 GB) until a photo or voice request needs it.
 
 ### Security
 
