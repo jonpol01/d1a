@@ -7,7 +7,7 @@ All notable changes to D1A's code (the `d1a` package, its server and its tools) 
 - **Releases** are cut by pushing a `vX.Y.Z` tag. CI then checks that the tag, `pyproject.toml` and this file agree,
   runs the tests, builds the package and publishes a GitHub release whose text is that version's section below.
 - **Model checkpoints are versioned separately**: one Hugging Face repository per size and format, one tag per model
-  version (for example `JohnP1/d1a-e4b@v0.3`). Each release lists the checkpoints it was tested with; the table under
+  version (for example `JohnP1/d1a-e4b@v0.4`). Each release lists the checkpoints it was tested with; the table under
   *Model versions* at the end of this file lists them all.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
@@ -160,6 +160,7 @@ Checkpoints on Hugging Face, newest first. Each version continues training the p
 
 | Model | Tag | What it adds | Older tag name |
 |---|---|---|---|
+| JohnP1/d1a-e4b | `v0.4` | pull-request labeling round 2: severity, Japanese, a blast-radius answer no longer biased to "broad"; earlier skills 1–3 points lower than v0.3 | |
 | JohnP1/d1a-e4b | `v0.3` | pull-request labeling (type, blast radius, severity), English and Japanese | |
 | JohnP1/d1a-e4b | `v0.2` | Kev's later stages (dates, missing evidence, hard, tool-use and long-document decisions), Japanese (JGLUE), agent routing | `v0.2-hybrid` |
 | JohnP1/d1a-e4b | `v0.1` | general decisions (decision-v7, 2 epochs, calibrated) | `v0.1.1-2epoch-calibrated` |
