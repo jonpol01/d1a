@@ -68,12 +68,12 @@ def main():
     a = ap.parse_args()
     out = Path(a.out); out.mkdir(parents=True, exist_ok=True)
     path = out / "rows.jsonl"
-    rows = [json.loads(l) for l in open(path)] if path.exists() else []
+    rows = [json.loads(l) for l in open(path, encoding="utf-8")] if path.exists() else []
     done = {(r["file"], r["id"]) for r in rows if "error" not in r}   # failed requests are retried
-    with open(path, "a") as f:
+    with open(path, "a", encoding="utf-8") as f:
         for spec in a.data:
             name, _, file = spec.partition("=")
-            recs = [json.loads(l) for l in open(file) if l.strip()]
+            recs = [json.loads(l) for l in open(file, encoding="utf-8") if l.strip()]
             recs = recs[:a.limit] if a.limit else recs
             t0, n = time.time(), 0
             for i, rec in enumerate(recs):
@@ -92,9 +92,9 @@ def main():
                 if n % 50 == 0: print(f"{name}: {i + 1}/{len(recs)} ({time.time() - t0:.0f} s)", flush=True)
             print(f"{name}: done", flush=True)
     rows = [r for r in rows if "error" not in r]
-    errors = sum(1 for l in open(path) if '"error"' in l)
+    errors = sum(1 for l in open(path, encoding="utf-8") if '"error"' in l)
     summary = {"endpoint": a.endpoint, "model": a.model, "errors": errors, "sets": summarize(rows)}
-    (out / "summary.json").write_text(json.dumps(summary, indent=1))
+    (out / "summary.json").write_text(json.dumps(summary, indent=1), encoding="utf-8")
     print(json.dumps(summary, indent=1))
 
 
