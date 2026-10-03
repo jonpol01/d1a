@@ -69,7 +69,7 @@ If a third party takes legal action against you for research done under this pol
 
 **In scope:**
 - **The code in this repository:**
-  - the model server (`d1a.serve`, `d1a.media`) and its API, including the optional bearer-token auth (`D1A_API_KEY`);
+  - the model servers (`d1a.serve`, `d1a.media`) and their APIs, including `d1a.serve`'s optional bearer-token auth (`D1A_API_KEY`);
   - the MCP server;
   - checkpoint and export loading (`d1a.checkpoint`, `d1a.mlx_model`);
   - training and evaluation scripts;
@@ -89,7 +89,9 @@ What D1A assumes, so you can tell a vulnerability from a configuration choice:
 
 - **The server is local by default.**
   - `d1a.serve` and `d1a.media` bind to `127.0.0.1` and need no credentials.
-  - Binding to another interface (`--host 0.0.0.0`) exposes them to that network. Set `D1A_API_KEY` to require a bearer token, and put TLS in front (a reverse proxy).
+  - Binding to another interface (`--host 0.0.0.0`) exposes them to that network.
+  - For `d1a.serve`, set `D1A_API_KEY` to require a bearer token. `d1a.media` has no auth of its own: keep it on 127.0.0.1, or put an authenticating reverse proxy in front.
+  - Put TLS in front (a reverse proxy) for either one.
   - Request size and length are bounded: states are truncated to the serving limit; media is limited to 12 MB and 30 s of audio.
 - **Checkpoints are code you choose to run.**
   - Load checkpoints only from sources you trust. D1A reads `head.pt` with PyTorch's `torch.load`, which defaults to weights-only loading in the supported PyTorch versions (2.6 and later), and it reads weights from safetensors.
