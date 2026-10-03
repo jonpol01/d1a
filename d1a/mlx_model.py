@@ -1,5 +1,5 @@
 # Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); Gemma 4 bases (sliding-window and KV-shared layers) and quantized MLX exports (export_mlx); model-family details from d1a.backbone; Gemma 4's per-layer embeddings read from the weight files per request (FlashEmbedding); photo and voice soft tokens in the state pass (d1a.media).
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); Gemma 4 bases (sliding-window and KV-shared layers) and quantized MLX exports (export_mlx); model-family details from d1a.backbone; Gemma 4's per-layer embeddings read from the weight files per request (FlashEmbedding); photo and voice soft tokens in the state pass (d1a.media); the state pass skips Gemma 4's KV-shared layers.
 """Apple Silicon backend for the Qwen3.5 and Gemma 4 checkpoints: mlx-lm's Metal implementation of the backbone under
 D1A's own encoder and pointer head.
 
@@ -248,9 +248,37 @@ class MLXDecisionModel:
     def prefix(self, enc):
         Ls = enc["seg"].count(0)
         cache = make_prompt_cache(self.lm)
-        if enc.get("media") is None: self._hidden([enc["ids"][:Ls]], cache)
+        if enc.get("media") is None: self._state(mx.array([enc["ids"][:Ls]], dtype=mx.int32), cache)
         else: self._media_state(enc["ids"][:Ls], *enc["media"], cache)
         return Ls, cache
+
+    def _state(self, x, cache, input_embeddings=None, per_layer_inputs=None):
+        """Run the state into `cache`, computing only what the question rows read from it. Gemma 4's last
+        num_kv_shared_layers layers keep no cache of their own (they read an earlier layer's), and nothing reads the
+        state's own outputs (the head reads question tokens only), so for the state those layers are skipped: the same
+        caches, 18 of E4B's 42 layers less work. A backbone without shared layers runs the whole pass."""
+        text = self.text
+        shared = [i for i, p in enumerate(getattr(text, "previous_kvs", ())) if p != i]
+        if not shared:
+            extra = {} if input_embeddings is None else {"input_embeddings": input_embeddings, "per_layer_inputs": per_layer_inputs}
+            mx.eval(text(x, cache=cache, **extra))   # Qwen3.5 takes token ids only
+            return
+        depth = shared[0]                              # the first layer that reuses another's cache; every later one does too
+        emb = text.embed_tokens(x) if input_embeddings is None else input_embeddings
+        h = emb * text.embed_scale
+        layer_inputs = [None] * depth
+        if text.hidden_size_per_layer_input:
+            ple = text._get_per_layer_inputs(x) if per_layer_inputs is None else per_layer_inputs
+            ple = text._project_per_layer_inputs(h, ple)
+            layer_inputs = [ple[:, :, i, :] for i in range(depth)]
+        caches = cache + [None] * (len(text.layers) - len(cache))
+        masks = text._make_masks(h, caches)
+        kept = [(None, None)] * depth
+        for i in range(depth):
+            kvs, offset = kept[text.previous_kvs[i]]
+            h, kvs, offset = text.layers[i](h, masks[i], caches[i], per_layer_input=layer_inputs[i], shared_kv=kvs, offset=offset)
+            kept[i] = (kvs, offset)
+        mx.eval(h, [c.state for c in cache])
 
     def _media_state(self, ids, at, embeds, cache):
         """The state pass with media soft tokens (d1a.media.with_media) in place of its placeholder tokens, as transformers'
@@ -264,7 +292,7 @@ class MLXDecisionModel:
         idx = mx.array(at, dtype=mx.int32)
         emb[0, idx] = (mx.array(embeds) / self.text.embed_scale).astype(emb.dtype)
         ple = self.text._get_per_layer_inputs(x) if self.text.hidden_size_per_layer_input else None
-        mx.eval(self.text(x, cache=cache, input_embeddings=emb, per_layer_inputs=ple))
+        self._state(x, cache, input_embeddings=emb, per_layer_inputs=ple)
 
     def _branch_logits(self, enc, cache):
         """Branches as rows on a replicated copy of the state cache, rows_per_pass rows (and cache copies) at a time."""
