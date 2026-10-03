@@ -92,7 +92,7 @@ What D1A assumes, so you can tell a vulnerability from a configuration choice:
   - Binding to another interface (`--host 0.0.0.0`) exposes them to that network.
   - For `d1a.serve`, set `D1A_API_KEY` to require a bearer token. `d1a.media` has no auth of its own: keep it on 127.0.0.1, or put an authenticating reverse proxy in front.
   - Put TLS in front (a reverse proxy) for either one.
-  - Request size and length are bounded: states are truncated to the serving limit; media is limited to 12 MB and 30 s of audio.
+  - Request size and length are bounded: states are truncated to the serving limit; media is limited to 12 MB (photos, audio up to 30 s) and 32 MB for video, of which 16 frames are read.
 - **Checkpoints are code you choose to run.**
   - Load checkpoints only from sources you trust. D1A reads `head.pt` with PyTorch's `torch.load`, which defaults to weights-only loading in the supported PyTorch versions (2.6 and later), and it reads weights from safetensors.
   - Report any way a crafted checkpoint, export folder or Hub repo runs code or reads files outside its own folder.

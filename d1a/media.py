@@ -1,6 +1,6 @@
-"""Decisions about a photo or a voice clip, for the playground's Photo check and Voice triage demos.
+"""Decisions about a photo, a voice clip or a video, for the playground's Photo check and Voice triage demos.
 
-POST /v1/systemone/media takes a /v1/systemone request plus {"media": {"type": "image" | "audio", "data": <base64>}} and
+POST /v1/systemone/media takes a /v1/systemone request plus {"media": {"type": "image" | "audio" | "video", "data": <base64>}} and
 answers in the same shape. The checkpoint is the text-trained one: Gemma 4 keeps its vision and audio encoders, and the
 media's soft tokens go between <state> and the state text. Zero-shot (issue #78) it read damage and drop-off place off
 delivery photos and intent off EN/JA voice notes, no speech-to-text.
@@ -31,11 +31,13 @@ from .model import PointerHead, encode, layout, rows_of
 SAMPLE_RATE = 16_000             # what Gemma 4's audio feature extractor expects
 MAX_AUDIO_S = 30                 # Gemma 4's audio encoder limit
 MAX_MEDIA_BYTES = 12 * 1024 * 1024
+MAX_VIDEO_BYTES = 32 * 1024 * 1024
+MAX_VIDEO_FRAMES = 16            # sampled evenly over a clip, ~63 tokens each (Gemma 4's processor default is 32)
 
 
 class Media(BaseModel):
-    type: Literal["image", "audio"]
-    data: str = Field(description="base64 of the file: an image PIL reads (JPEG, PNG, WebP) or a WAV/FLAC/OGG clip")
+    type: Literal["image", "audio", "video"]
+    data: str = Field(description="base64 of the file: an image PIL reads (JPEG, PNG, WebP), a WAV/FLAC/OGG clip, or a video PyAV reads (MP4, MOV, WebM)")
 
 
 class MediaRequest(SystemOneRequest):
@@ -54,6 +56,33 @@ def decode_audio(raw):
         wav = np.interp(np.linspace(0, len(wav) - 1, n), np.arange(len(wav)), wav).astype("float32")
     if len(wav) > MAX_AUDIO_S * SAMPLE_RATE: raise ValueError(f"audio longer than {MAX_AUDIO_S} s")
     return wav
+
+
+def decode_video(raw, num_frames=MAX_VIDEO_FRAMES):
+    """-> (frames [n, H, W, 3] uint8, transformers VideoMetadata), at most num_frames sampled evenly over the clip. The
+    frames only: Gemma 4 reads a video as timestamped images, and a clip's sound track is not used."""
+    import tempfile
+    import numpy as np
+    from transformers.video_utils import load_video
+    pick = lambda metadata, **kw: np.linspace(0, metadata.total_num_frames - 1, min(num_frames, metadata.total_num_frames), dtype=int)
+    with tempfile.NamedTemporaryFile(suffix=".video") as f:   # PyAV opens files, not bytes
+        f.write(raw); f.flush()
+        try: return load_video(f.name, backend="pyav", sample_indices_fn=pick)
+        except Exception as e: raise ValueError(f"cannot decode the video: {e}") from e
+
+
+def processor_inputs(proc, media):
+    """The processor's output for one photo, voice clip or video: its token ids (a placeholder per soft token, Gemma 4's
+    timestamps between a video's frames) and the encoder inputs."""
+    raw = base64.b64decode(media.data, validate=True)
+    limit = MAX_VIDEO_BYTES if media.type == "video" else MAX_MEDIA_BYTES
+    if len(raw) > limit: raise ValueError(f"{media.type} larger than {limit // 2**20} MB")
+    if media.type == "image":
+        return proc(text=proc.image_token, images=decode_image(raw), return_tensors="pt")
+    if media.type == "audio":
+        return proc(text=proc.audio_token, audio=decode_audio(raw), sampling_rate=SAMPLE_RATE, return_tensors="pt")
+    frames, meta = decode_video(raw)
+    return proc(text=proc.video_token, videos=[frames], video_metadata=[meta], do_sample_frames=False, return_tensors="pt")
 
 
 def decode_image(raw):
@@ -88,12 +117,7 @@ class MediaModel:
 
     def media_inputs(self, media: Media):
         """-> (media token ids, mm_token_type_ids for them, the encoder inputs)."""
-        raw = base64.b64decode(media.data, validate=True)
-        if len(raw) > MAX_MEDIA_BYTES: raise ValueError(f"media larger than {MAX_MEDIA_BYTES // 2**20} MB")
-        if media.type == "image":
-            mm = self.proc(text=self.proc.image_token, images=decode_image(raw), return_tensors="pt")
-        else:
-            mm = self.proc(text=self.proc.audio_token, audio=decode_audio(raw), sampling_rate=SAMPLE_RATE, return_tensors="pt")
+        mm = processor_inputs(self.proc, media)
         leading = layout(self.tok)[0]
         ids, types = mm["input_ids"][0].tolist(), mm["mm_token_type_ids"][0].tolist()
         if ids[:len(leading)] == leading: ids, types = ids[len(leading):], types[len(leading):]
@@ -181,18 +205,14 @@ class MediaEncoder:
         # transformers' own feature code (pooling, padding removal, projection) on the towers alone, not a copy of it
         self._image = lambda **kw: Gemma4Model.get_image_features.__wrapped__(self.towers, **kw)
         self._audio = lambda **kw: Gemma4Model.get_audio_features.__wrapped__(self.towers, **kw)
-        self.placeholders = {cfg.image_token_id, cfg.audio_token_id}
+        self._video = lambda **kw: Gemma4Model.get_video_features.__wrapped__(self.towers, **kw)
+        self.placeholders = {cfg.image_token_id, cfg.audio_token_id, cfg.video_token_id}
         self.lock = threading.Lock()   # one encoder pass at a time on the device
 
     @torch.no_grad()
     def encode(self, media: Media):
         """-> (token ids of the media span, the indices within it that are placeholders, their soft tokens [n, d] fp32)."""
-        raw = base64.b64decode(media.data, validate=True)
-        if len(raw) > MAX_MEDIA_BYTES: raise ValueError(f"media larger than {MAX_MEDIA_BYTES // 2**20} MB")
-        if media.type == "image":
-            mm = self.proc(text=self.proc.image_token, images=decode_image(raw), return_tensors="pt")
-        else:
-            mm = self.proc(text=self.proc.audio_token, audio=decode_audio(raw), sampling_rate=SAMPLE_RATE, return_tensors="pt")
+        mm = processor_inputs(self.proc, media)
         leading = layout(self.tok)[0]
         ids = mm["input_ids"][0].tolist()
         if ids[:len(leading)] == leading: ids = ids[len(leading):]
@@ -201,6 +221,9 @@ class MediaEncoder:
         with self.lock:
             if media.type == "image":
                 out = self._image(pixel_values=dev("pixel_values").to(torch.bfloat16), image_position_ids=dev("image_position_ids"))
+                feats = torch.cat(out.pooler_output, dim=0)
+            elif media.type == "video":
+                out = self._video(pixel_values_videos=dev("pixel_values_videos").to(torch.bfloat16), video_position_ids=dev("video_position_ids"))
                 feats = torch.cat(out.pooler_output, dim=0)
             else:
                 out = self._audio(input_features=dev("input_features").to(torch.bfloat16), input_features_mask=dev("input_features_mask"))

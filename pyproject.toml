@@ -51,6 +51,7 @@ media = [
     "pillow>=10",
     "soundfile>=0.12",
     "torchvision",   # Gemma 4's image processor
+    "av>=14",        # video clips: frames sampled by Gemma 4's video processor (PyAV wheels bundle ffmpeg)
 ]
 mcp = [
     "mcp>=2.2,<3",   # d1a.mcp_server: the agent-factory presets as MCP tools
