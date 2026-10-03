@@ -14,4 +14,4 @@ SHA=$(git rev-parse origin/main)   # the job clones this commit, so it must be p
 ENV=(-e D1A_SHA="$SHA" -e REPO="$REPO" -e PREFIX="$PREFIX")
 for kv in "$@"; do ENV+=(-e "$kv"); done
 hf jobs run -d --flavor "$FLAVOR" --timeout "$TIMEOUT" --secrets HF_TOKEN "${ENV[@]}" -v "$BUCKET:/ckpt" \
-  ghcr.io/astral-sh/uv:python3.13-bookworm bash -c "$(cat "$(dirname "$0")/train_job.sh")"
+  ghcr.io/astral-sh/uv:python3.13-bookworm bash -c "apt-get -qq update >/dev/null && apt-get -qq install -y git >/dev/null; $(cat "$(dirname "$0")/train_job.sh")"   # the image has no git

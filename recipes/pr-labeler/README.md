@@ -51,14 +51,14 @@ checkpoint, and scores the start and the result at full length (`--context servi
 header lists every setting. On Hugging Face Jobs:
 
 ```bash
-./launch_hf_job.sh pr-labeler-v2 5h EN=3500 EN_SKIP=1     # continue v0.3 on the English PRs it has not seen
+./launch_hf_job.sh pr-labeler-v2 6h EN=3500 EN_SKIP=1 EXTRA="train_ja.jsonl train_blast.jsonl"   # round 2: continue v0.3
 ```
 
 On your own NVIDIA machine, run it in the same image (it works in absolute paths such as `/data` and `/runs`):
 
 ```bash
 docker run --gpus all -e HF_TOKEN -e D1A_SHA=$(git rev-parse origin/main) -e REPO=you/runs -e PREFIX=try1 \
-  -v $PWD/ckpt:/ckpt ghcr.io/astral-sh/uv:python3.13-bookworm bash -c "$(cat train_job.sh)"
+  -v $PWD/ckpt:/ckpt ghcr.io/astral-sh/uv:python3.13-bookworm bash -c "apt-get -qq update && apt-get -qq install -y git; $(cat train_job.sh)"
 ```
 
 Budget about 1.26 s per PR record on an L4 (PR documents average ~680 tokens) plus about an hour of scoring. v0.3
