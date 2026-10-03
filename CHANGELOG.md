@@ -16,6 +16,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Video.** `POST /v1/systemone/media` takes `{"type": "video"}`: an MP4, MOV or WebM clip up to 32 MB, of which 16
+  frames are sampled evenly and read through Gemma 4's own video path (timestamped frames, the same vision encoder), by
+  the same model on MLX and in `d1a.media`. The sound track is not used. Zero-shot: on single-scene clips D1A-E4B v0.3
+  answers as it does for the still photo; questions about the order of events are not reliable yet. New dependency in
+  the `media` extra: `av` (PyAV).
 - **One model for text, photos and voice.** `d1a.serve` answers `POST /v1/systemone/media` (a request plus a photo or
   voice clip) with the model it already serves: Gemma 4's vision and audio encoders turn the media into soft tokens,
   and the same MLX language model reads them. The encoders (~1 GB for E4B) ship in an export's `media/` folder

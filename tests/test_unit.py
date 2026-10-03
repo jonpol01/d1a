@@ -1711,6 +1711,32 @@ def test_media_audio_is_mono_16k_and_bounded():
         decode_audio(wav(MAX_AUDIO_S + 1, 8_000, 1))
 
 
+def test_video_frames_are_sampled_evenly_and_never_repeated():
+    # a clip becomes at most MAX_VIDEO_FRAMES frames spread over its whole length (a long clip must not be read from its
+    # start only), a short one keeps each frame once, and bytes PyAV cannot read are a 422, not a crash
+    av = pytest.importorskip("av")
+    import io
+    import numpy as np
+    from d1a.media import MAX_VIDEO_FRAMES, decode_video
+
+    def clip(n):
+        buf = io.BytesIO()
+        with av.open(buf, "w", format="mp4") as out:
+            s = out.add_stream("mpeg4", rate=8); s.width = s.height = 32; s.pix_fmt = "yuv420p"
+            for i in range(n):
+                for packet in s.encode(av.VideoFrame.from_ndarray(np.full((32, 32, 3), i * 5, np.uint8), format="rgb24")): out.mux(packet)
+            for packet in s.encode(): out.mux(packet)
+        return buf.getvalue()
+
+    frames, meta = decode_video(clip(40))
+    idx = list(meta.frames_indices)
+    assert len(frames) == MAX_VIDEO_FRAMES and idx[0] == 0 and idx[-1] == 39 and idx == sorted(set(idx))
+    frames, meta = decode_video(clip(5))
+    assert len(frames) == 5 and list(meta.frames_indices) == [0, 1, 2, 3, 4]
+    with pytest.raises(ValueError):
+        decode_video(b"not a video")
+
+
 def test_media_model_loads_on_demand_and_never_unloads_while_in_use():
     # an idle media server must give its ~10 GB back, but a request in flight keeps the model it is using
     from d1a.media import OnDemand

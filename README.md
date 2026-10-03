@@ -6,7 +6,7 @@
 
 ## See It Running
 
-Twelve use cases, each answered by D1A in one forward pass (recorded live from the [playground](https://github.com/jonpol01/d1a-playground): 1–9 on an M4 Mac mini with MLX 8-bit, 10–11 through [`d1a.media`](#photos-and-voice) on an M1 Max, 12 on the Mac mini's D1A-E4B v0.2):
+Twelve use cases, each answered by D1A in one forward pass (recorded live from the [playground](https://github.com/jonpol01/d1a-playground): 1–9 on an M4 Mac mini with MLX 8-bit, 10–11 through [`d1a.media`](#photos-voice-and-video) on an M1 Max, 12 on the Mac mini's D1A-E4B v0.2):
 
 <table>
 <tr><td align="center" width="33%"><img src="https://raw.githubusercontent.com/jonpol01/d1a-playground/129a15d464f6731dcbeaf390d0cf54f3126cd643/docs/gifs/en/routing.gif" alt="Model routing demo running on D1A" width="100%"><br><b>1. Model routing</b></td><td align="center" width="33%"><img src="https://raw.githubusercontent.com/jonpol01/d1a-playground/129a15d464f6731dcbeaf390d0cf54f3126cd643/docs/gifs/en/guardrails.gif" alt="Guardrails demo running on D1A" width="100%"><br><b>2. Guardrails</b></td><td align="center" width="33%"><img src="https://raw.githubusercontent.com/jonpol01/d1a-playground/129a15d464f6731dcbeaf390d0cf54f3126cd643/docs/gifs/en/tools.gif" alt="Tool-call gating demo running on D1A" width="100%"><br><b>3. Tool-call gating</b></td></tr>
@@ -44,7 +44,7 @@ A causal LM backbone with a LoRA adapter runs one prefill pass over the document
   <img src="docs/arch/forms-light.svg" alt="Packed form with a block-causal mask, and rows over a cached document" width="100%">
 </picture>
 
-**4. Where it runs.** `d1a.serve` speaks the System One API, on MLX on Apple Silicon and on PyTorch elsewhere. The same server and the same model answer about a photo or a voice note: Gemma 4's own vision and audio encoders turn the media into tokens the model reads, so there is no captioning or speech-to-text step, and `--idle-unload` frees the memory when nobody is asking ([Photos and Voice](#photos-and-voice)).
+**4. Where it runs.** `d1a.serve` speaks the System One API, on MLX on Apple Silicon and on PyTorch elsewhere. The same server and the same model answer about a photo, a voice note or a video: Gemma 4's own vision and audio encoders turn the media into tokens the model reads, so there is no captioning or speech-to-text step, and `--idle-unload` frees the memory when nobody is asking ([Photos, Voice and Video](#photos-voice-and-video)).
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/arch/serving-dark.svg">
@@ -161,9 +161,9 @@ answer = client.decide("Shoes arrived late and I was charged twice.",
 print(answer["answers"]["team"]["probabilities"])
 ```
 
-### Photos and Voice
+### Photos, Voice and Video
 
-The model server answers questions about an image or a short voice clip with the same model, the same request shape plus a `media` field. On Apple Silicon, serve an MLX build that carries Gemma 4's vision and audio encoders (`media/`, about 1 GB, fetched on the first such request; `JohnP1/d1a-e4b-mlx-q8@v0.3` has them, and `scripts/export_mlx.py --media` adds them to your own export):
+The model server answers questions about an image, a short voice clip or a video with the same model, the same request shape plus a `media` field. On Apple Silicon, serve an MLX build that carries Gemma 4's vision and audio encoders (`media/`, about 1 GB, fetched on the first such request; `JohnP1/d1a-e4b-mlx-q8@v0.3` has them, and `scripts/export_mlx.py --media` adds them to your own export):
 
 ```bash
 uv run --extra serve --extra media python -m d1a.serve --run JohnP1/d1a-e4b-mlx-q8@v0.3 --port 8009 --idle-unload 600
@@ -178,7 +178,7 @@ curl -s localhost:8009/v1/systemone/media -H 'content-type: application/json' -d
 
 `--idle-unload 600` drops the model, encoders included, after 10 minutes without a request and loads it again on the next one (2 s for D1A-E4B on an M1 Max); `GET /v1/models` answers either way and says whether it is `loaded`. With a PyTorch checkpoint (NVIDIA, CPU) run `python -m d1a.media --run JohnP1/d1a-e2b --port 8010` instead: it loads the full Gemma 4 model (bf16, about 10 GB for E2B) as its own process, on the first request, and drops it after 10 idle minutes.
 
-`type` is `image` (JPEG, PNG, WebP) or `audio` (WAV, FLAC or OGG, up to 30 s; any sample rate). An optional `state` adds text next to the media. The checkpoints are trained on text only, so this is zero-shot: on a first test ([#78](https://github.com/jonpol01/d1a/issues/78)) D1A-E2B read damage on 6 of 6 delivery photos, the drop-off place on 5 of 6, and the request in 4 of 4 English and Japanese voice notes; on the playground's 10 samples D1A-E4B v0.3 gets damage 5 of 6, place 6 of 6 and the request 4 of 4. Treat it as a demo, not a measured result.
+`type` is `image` (JPEG, PNG, WebP), `audio` (WAV, FLAC or OGG, up to 30 s; any sample rate) or `video` (MP4, MOV or WebM, up to 32 MB: 16 frames sampled evenly, each read as a timestamped image; the sound track is not used). An optional `state` adds text next to the media. The checkpoints are trained on text only, so this is zero-shot: on a first test ([#78](https://github.com/jonpol01/d1a/issues/78)) D1A-E2B read damage on 6 of 6 delivery photos, the drop-off place on 5 of 6, and the request in 4 of 4 English and Japanese voice notes; on the playground's 10 samples D1A-E4B v0.3 gets damage 5 of 6, place 6 of 6 and the request 4 of 4. Treat it as a demo, not a measured result. Video is read the same way: on single-scene clips made from the sample photos, D1A-E4B v0.3 gives the same answers as for the photo; questions about the order of events ("where is it at the end?") are not reliable yet.
 
 ### Playground
 

@@ -7,7 +7,7 @@ Run: uv run --extra serve python -m d1a.serve --run runs/d1a --port 8008
 TypeSafe-compatible: POST /v1/systemone, GET /v1/models, the `x-typesafe-request-id` response header, and bearer auth
 when D1A_API_KEY is set (unset = open server, the local default). Demo extras: POST /v1/systemone/permute (one Choice
 under several option orders) and POST /v1/systemone/separate (each question in its own pass, for the packed-vs-separate
-comparison), POST /v1/systemone/media (a /v1/systemone request plus a photo or voice clip, d1a.media.MediaRequest,
+comparison), POST /v1/systemone/media (a /v1/systemone request plus a photo, voice clip or video, d1a.media.MediaRequest,
 answered by the same model: an MLX export with its media/ folder, scripts/export_mlx.py --media).
 
 --idle-unload N drops the model (and the media encoders) after N seconds without a request and loads it again on the
@@ -284,7 +284,7 @@ async def systemone(req: SystemOneRequest):
 
 @app.post("/v1/systemone/media")
 async def systemone_media(req: MediaRequest):
-    """/v1/systemone with a photo or a voice clip (d1a.media.MediaRequest), answered by the same model."""
+    """/v1/systemone with a photo, a voice clip or a video (d1a.media.MediaRequest), answered by the same model."""
     async with server_async() as s:
         return await s.answer_media_async(req)
 
