@@ -2,11 +2,12 @@
 
 d1a.model asks the backbone instead of branching on model details. A new base family is one subclass here (plus its
 golden vectors): how it is detected, whether it can run the packed block-causal mask or needs one causal row per
-question, its local-attention window, the state cache it needs, and any extra LoRA target names.
+question, its local-attention window, the state cache it needs, any extra LoRA target names, whether the MLX backend
+runs it, and its own CUDA serving kernels (Qwen3.5's, loaded only through Qwen35).
 
     from d1a.backbone import for_config
     bb = for_config(lm.config)      # Gemma4 (sliding layers), Qwen35 (Gated DeltaNet), or Attention (plain)
-    bb.hybrid, bb.sliding_window, bb.new_cache(), bb.lora_extra, bb.prefix_min_tokens
+    bb.hybrid, bb.sliding_window, bb.new_cache(), bb.lora_extra, bb.prefix_min_tokens, bb.mlx, bb.serve_cuda(m, opts, merged)
 
 Delimiters are not here: they follow the tokenizer (d1a.model.layout picks the first delimiter set its vocabulary holds),
 so code that only has a tokenizer (encode) needs no backbone.
@@ -24,6 +25,7 @@ class Attention:
     hybrid = False      # recurrent layers that cannot honour the packed mask: run one causal row per question instead
     lora_extra = ()     # LoRA target names beyond the attention and MLP projections, for the "all" and "attn" presets
     mlx_cache_copy = "replicate"   # d1a.mlx_model: plain and rotating KV caches are copied with their scalar offset
+    mlx = False         # d1a.checkpoint: whether the MLX backend runs this family (backend="auto" picks it on Apple Silicon)
 
     def __init__(self, config):
         self.config = config
@@ -56,6 +58,9 @@ class Attention:
         are neither held in memory nor matched by LoRA target names; other models unchanged."""
         return getattr(lm, "language_model", lm)
 
+    def serve_cuda(self, m, opts, merged):
+        """Swap in this family's CUDA serving kernels (d1a.checkpoint, serving on CUDA). Plain attention has none."""
+
 
 class Gemma4(Attention):
     """Gemma 4: attention-only with sliding layers (a 512-token window), KV-shared layers, reserved <unused0-4> delimiter
@@ -70,6 +75,11 @@ class Gemma4(Attention):
     def sliding_window(self):
         return self.config.sliding_window
 
+    @property
+    def mlx(self):
+        """Gemma 4 only: d1a.mlx_model reads its per-layer embeddings and KV-shared layers, which another sliding family lacks."""
+        return self.config.model_type == "gemma4_text"
+
 
 class Qwen35(Attention):
     """Qwen3.5 (Kev's bases): Gated DeltaNet layers, recurrent, so every question runs as its own causal row continuing
@@ -79,6 +89,7 @@ class Qwen35(Attention):
     # Gated DeltaNet projections (transformers 5 names, verified on Qwen3_5TextModel); the mixer's out_proj too
     lora_extra = ("in_proj_qkv", "in_proj_z", "in_proj_a", "in_proj_b", "out_proj")
     mlx_cache_copy = "merge"       # DeltaNet conv + recurrent states: copied by mlx-lm's batch merge
+    mlx = True
 
     @classmethod
     def matches(cls, config):
@@ -92,6 +103,15 @@ class Qwen35(Attention):
 
     def new_cache(self):
         return DynamicCache(config=self.config)
+
+    def serve_cuda(self, m, opts, merged):
+        """Fused Triton kernels (d1a.fused_qwen35; they need plain, merged weights) and CUDA graphs (d1a.cuda_graphs)."""
+        if opts.fused and merged:
+            from .fused_qwen35 import fuse
+            fuse(m.lm)
+        if opts.cuda_graphs:
+            from .cuda_graphs import CudaGraphs
+            m.graphs = CudaGraphs(m.lm, m.pad_id)
 
 
 REGISTRY = (Qwen35, Gemma4)   # first match wins; Attention is the fallback

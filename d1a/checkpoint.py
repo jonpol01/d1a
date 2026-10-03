@@ -1,5 +1,5 @@
 # Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); the MLX backend for Gemma 4 bases and MLX export folders (d1a_config.json); the ple_flash load option (D1A_PLE_FLASH).
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); the MLX backend for Gemma 4 bases and MLX export folders (d1a_config.json); the ple_flash load option (D1A_PLE_FLASH); model-family decisions (MLX support, Qwen3.5's CUDA kernels) from d1a.backbone.
 """Trained checkpoints: a run directory or a Hub repo holding a LoRA adapter (or, for a full-weight run, the whole bf16
 backbone), `head.pt` and the tokenizer; or an MLX export of one (d1a_config.json).
 
@@ -31,12 +31,12 @@ from pathlib import Path
 
 import torch
 
-from .model import DecisionModel, is_hybrid, load_tokenizer, pad_id
+from .backbone import for_config
+from .model import DecisionModel, load_tokenizer, pad_id
 
 HUB_ID = re.compile(r"[\w.-]+/[\w.-]+(@[\w.-]+)?")
 EXPORT_CONFIG, EXPORT_HEAD = "d1a_config.json", "head.safetensors"   # an MLX export folder (loader rule in the module docstring)
 EXPORT_FORMAT, EXPORT_VERSION = "d1a-mlx", 1
-MLX_ATTENTION_BASES = ("gemma4_text",)   # attention-only text configs the MLX backend runs, besides the hybrid ones
 
 
 def is_hub_id(run):
@@ -269,13 +269,11 @@ class Checkpoint:
 
     def hybrid_base(self):
         """Whether the base has Gated DeltaNet layers (Qwen3.5)."""
-        return is_hybrid(self.text_config())
+        return for_config(self.text_config()).hybrid
 
     def mlx_base(self):
-        """Whether the MLX backend runs this base: the hybrid Qwen3.5 bases and the attention-only MLX_ATTENTION_BASES
-        (Gemma 4)."""
-        cfg = self.text_config()
-        return is_hybrid(cfg) or cfg.model_type in MLX_ATTENTION_BASES
+        """Whether the MLX backend runs this base (d1a.backbone: Gemma 4 and the hybrid Qwen3.5 bases)."""
+        return for_config(self.text_config()).mlx
 
     def backend(self, device, opts=LoadOptions()):
         """The backend `load` will use: LoadOptions.backend resolved ("auto" -> mlx only where it pays and is installed)."""
@@ -325,13 +323,7 @@ class Checkpoint:
 
     def _load_torch(self, tok, device, opts):
         m, merged = self._full_torch(tok, device, opts) if self.full else self._adapted_torch(tok, device, opts)
-        serving = str(device).startswith("cuda") and m.hybrid
-        if opts.fused and serving and merged:   # fused projections need plain (merged or full) weights
-            from .fused_qwen35 import fuse
-            fuse(m.lm)
-        if opts.cuda_graphs and serving:
-            from .cuda_graphs import CudaGraphs
-            m.graphs = CudaGraphs(m.lm, m.pad_id)
+        if str(device).startswith("cuda"): m.backbone.serve_cuda(m, opts, merged)   # Qwen3.5: fused kernels and CUDA graphs
         return m
 
     SAVED_DTYPES = {"bf16": "bfloat16", "fp32": "float32"}   # head.pt weights_dtype -> the dtype save_pretrained writes to config.json

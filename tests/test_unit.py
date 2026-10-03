@@ -1419,23 +1419,35 @@ def test_extra_suites_join_the_run(tiny_base, tmp_path, monkeypatch, capsys):
     assert f"extra suite devtools-v1: {n} training records" in out and "training requests" in out
 
 
-def test_backbone_families():
+def test_backbone_families(monkeypatch):
     """d1a.backbone picks the family from the config: Qwen3.5 (DeltaNet) runs rows with its cache and extra LoRA names,
-    Gemma 4 (sliding layers) the packed form with a second mask, a plain model neither; d1a.model's helpers agree."""
+    Gemma 4 (sliding layers) the packed form with a second mask, a plain model neither. MLX runs Gemma 4 and Qwen3.5
+    only, and Qwen3.5's CUDA kernels load through Qwen35 alone (fused only on merged weights)."""
+    import sys
     from types import SimpleNamespace
     from transformers import DynamicCache
     from d1a.backbone import Attention, Gemma4, Qwen35, for_config
-    from d1a.model import is_hybrid, sliding_window
     qwen = SimpleNamespace(layer_types=["linear_attention", "full_attention"])
-    gemma = SimpleNamespace(layer_types=["sliding_attention"] * 4 + ["full_attention"], sliding_window=512)
+    gemma = SimpleNamespace(layer_types=["sliding_attention"] * 4 + ["full_attention"], sliding_window=512, model_type="gemma4_text")
+    sliding = SimpleNamespace(layer_types=["sliding_attention", "full_attention"], sliding_window=1024, model_type="gemma3_text")
     plain = SimpleNamespace(layer_types=None)
-    bq, bg, bp = for_config(qwen), for_config(gemma), for_config(plain)
-    assert (type(bq), type(bg), type(bp)) == (Qwen35, Gemma4, Attention)
-    assert (bq.hybrid, bg.hybrid, bp.hybrid) == (True, False, False) and (is_hybrid(qwen), is_hybrid(gemma)) == (True, False)
-    assert (bq.sliding_window, bg.sliding_window, bp.sliding_window) == (None, 512, None) == (sliding_window(qwen), sliding_window(gemma), sliding_window(plain))
+    bq, bg, bs, bp = for_config(qwen), for_config(gemma), for_config(sliding), for_config(plain)
+    assert (type(bq), type(bg), type(bs), type(bp)) == (Qwen35, Gemma4, Gemma4, Attention)
+    assert (bq.hybrid, bg.hybrid, bp.hybrid) == (True, False, False)
+    assert (bq.sliding_window, bg.sliding_window, bp.sliding_window) == (None, 512, None)
+    assert (bq.mlx, bg.mlx, bs.mlx, bp.mlx) == (True, True, False, False)
     assert "in_proj_qkv" in bq.lora_extra and bg.lora_extra == () and (bq.prefix_min_tokens, bg.prefix_min_tokens) == (0, 384)
     assert isinstance(bg.new_cache(), DynamicCache)
     assert Attention.unwrap(SimpleNamespace(language_model="text")) == "text"
+    fused = []
+    monkeypatch.setitem(sys.modules, "d1a.fused_qwen35", SimpleNamespace(fuse=fused.append))
+    monkeypatch.setitem(sys.modules, "d1a.cuda_graphs", SimpleNamespace(CudaGraphs=lambda lm, pad: ("graphs", lm, pad)))
+    on = SimpleNamespace(fused=True, cuda_graphs=True)
+    for bb, merged in ((bg, True), (bq, False), (bq, True)):
+        m = SimpleNamespace(lm="lm", pad_id=0, graphs=None)
+        bb.serve_cuda(m, on, merged)
+        assert m.graphs == (None if bb is bg else ("graphs", "lm", 0))
+    assert fused == ["lm"]
 
 
 def test_backbone_mlx_cache_copy():

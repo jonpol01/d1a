@@ -91,16 +91,6 @@ def pad_id(tok):
     return tok.pad_token_id if tok.pad_token_id is not None else 0
 
 
-def is_hybrid(config):
-    """Whether a (text) config's backbone has recurrent layers (Qwen3.5's Gated DeltaNet) and runs the row form."""
-    return for_config(config).hybrid
-
-
-def sliding_window(config):
-    """The local-attention window of a (text) config's sliding layers (Gemma 4: 512), else None."""
-    return for_config(config).sliding_window
-
-
 def user_tokens(tok, text):
     """Tokenize caller-supplied text so it can never produce delimiter/control tokens (option boundaries are unforgeable).
     The fast tokenizer ignores split_special_tokens, so `<|name|>` is rewritten to `<¦name¦>` before tokenizing, and any

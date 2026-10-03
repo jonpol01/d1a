@@ -37,6 +37,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **Model families behind one interface.** `d1a.backbone` now also decides whether the MLX backend runs a base (Gemma 4
+  and Qwen3.5; it was a `model_type` list in `d1a.checkpoint`) and loads Qwen3.5's CUDA serving kernels
+  (`d1a.fused_qwen35`, `d1a.cuda_graphs`) through `Qwen35.serve_cuda`, so Gemma 4 is the main path and Qwen3.5 a
+  plug-in. `d1a.model.is_hybrid` and `d1a.model.sliding_window` are gone: use `d1a.backbone.for_config(config)`.
+  Answers and latency are unchanged.
 - **PR-length requests are about 30% faster on Apple Silicon, with identical answers.** The state pass (the document,
   run once before the questions) now stops before Gemma 4's KV-shared layers: those layers keep no cache of their own
   and nothing reads the state's own outputs, so for the state they were pure waste (18 of D1A-E4B's 42 layers). On an
