@@ -208,8 +208,8 @@ def length_buckets(edges=LENGTH_EDGES):
 def calibration_by_length(rows, lengths=None, edges=LENGTH_EDGES):
     """{bucket: {"n", acc, ece, brier, confident_error_rate}} of rows (scored as given, at T=1: pass them served) split by
     state-token count: the row's own `state_tokens` when it records one, else lengths[row id] ({record id: tokens}); a count
-    is the encoded state segment, the <state> token included (d1a.model.encode; d1a.rounds.state_lengths computes it). An
-    empty bucket has n 0 and None values. The one home of per-length calibration (d1a.rounds panels with `by_length`)."""
+    is the encoded state segment, the <state> token included (d1a.model.encode). An empty bucket has n 0 and None values.
+    The one home of per-length calibration."""
     def tokens(row):
         if row.get("state_tokens") is not None: return row["state_tokens"]
         if lengths is None or row["id"] not in lengths: raise KeyError(f"no state-token count for record {row['id']!r}")
@@ -268,9 +268,8 @@ def scored_rows(rows):
     return [row for row in rows if row["variant"] == "clean" and row["source"] != "unknowable"]
 
 
-# how every released temperature was fitted (scripts/calibrate_checkpoint.py) and how d1a.calibrate fits a workload's:
-# min mean NLL over a 121-point log grid on 0.25..4, every question weighted equally. Research trials (d1a.experiment) and
-# the kev-finetune skill keep the default 81-point grid: their temperatures are screening reports, not shipped values.
+# how every released temperature is fitted (d1a.calibrate): min mean NLL over a 121-point log grid on 0.25..4, every
+# question weighted equally. fit_temperature's default 81-point grid is for quick reports, never a shipped value.
 TEMPERATURE_FIT = {"aggregation": "micro", "points": 121}
 TEMPERATURE_FIT_METHOD = f"min {TEMPERATURE_FIT['aggregation']} mean NLL over a {TEMPERATURE_FIT['points']}-point log grid 0.25..4"
 

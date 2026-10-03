@@ -7,7 +7,6 @@ import random
 import pytest
 import torch
 
-from d1a import evaluate
 from d1a.data import materialize
 from d1a.suite import record_digest
 from d1a.train import question_loss
@@ -19,35 +18,6 @@ def choice_request():
         "criteria": {"size": "Wrong size", "damage": "Damaged", "color": "Wrong color"},
         "label": "size", "src": "fixture",
     }}}
-
-
-def test_clean_evaluation_does_not_add_options(monkeypatch):
-    observed = []
-
-    def predict(tok, model, req):
-        observed.append(copy.deepcopy(req))
-        rec = materialize(req)
-        return rec, [torch.ones(len(q["options"])) / len(q["options"]) for q in rec["questions"]]
-
-    monkeypatch.setattr(evaluate, "_probs", predict)
-    evaluate.test_accuracy(None, None, [choice_request() for _ in range(100)], random.Random(1))
-    assert all(set(r["questions"]["reason"]["criteria"]) == {"size", "damage", "color"} for r in observed)
-
-
-def test_none_removed_relabels_and_counts_complete_pairs(monkeypatch):
-    observed = []
-
-    def predict(tok, model, req):
-        rec = materialize(req)
-        observed.append(copy.deepcopy(req))
-        return rec, [torch.nn.functional.one_hot(torch.tensor(q["label"]), len(q["options"])).float() for q in rec["questions"]]
-
-    monkeypatch.setattr(evaluate, "_probs", predict)
-    report = evaluate.test_none_of_the_above(None, None, [choice_request()], random.Random(1))
-    assert report["n"] == 1
-    assert report["true_option_present"]["acc"] == 1
-    assert report["true_option_removed"]["picks_none_rate"] == 1
-    assert observed[1]["questions"]["reason"]["label"] != "size"
 
 
 def test_score_loss_is_proper_at_true_distribution():
@@ -193,15 +163,6 @@ def test_task_macro_and_record_bootstrap():
         paired_bootstrap(rows, [])
 
 
-def test_trial_config_cannot_change_evaluator_or_read_test():
-    from d1a.experiment import validated_trial
-    manifest = {"base_revisions": {"model": "pinned"}}
-    assert validated_trial({"base": "model"}, manifest)["ord_w"] == 0
-    for extra in ({"test": True}, {"command": "echo x"}, {"lr": -1}, {"epochs": 2.5}):
-        with pytest.raises(ValueError):
-            validated_trial({"base": "model", **extra}, manifest)
-
-
 def test_batched_mask_matches_single_and_pads_are_invisible():
     from d1a.model import branch_mask, branch_mask_batch
     a, b = [0, 0, 1, 1, 2], [0, 1, 1]
@@ -213,21 +174,6 @@ def test_batched_mask_matches_single_and_pads_are_invisible():
     assert not allowed[:3, 3:].any()          # real tokens never attend to padding
     assert allowed[3, 3] and allowed[4, 4]    # padded rows keep the diagonal, so softmax is finite
     assert not allowed[3, 1:3].any()          # pads belong to no question segment (state stays visible; rows are discarded)
-
-
-def test_eval_only_sources_cannot_be_trained(tmp_path):
-    import json
-    from d1a.data import EVAL_ONLY, TRAINABLE, ALL_SOURCES
-    from d1a.suite import digest, write_json, write_jsonl
-    from d1a.experiment import load_plan
-    assert "mmlu" in EVAL_ONLY and not set(TRAINABLE) & set(EVAL_ONLY) and set(TRAINABLE) | set(EVAL_ONLY) == set(ALL_SOURCES)
-    r = frozen_request(); r["_meta"]["source"] = "mmlu"
-    for name in ("train", "calibration", "development"):
-        write_jsonl(tmp_path / f"{name}.jsonl", [r])
-    write_json(tmp_path / "manifest.json", {"base_revisions": {"m": "x"}, "files": {f"{n}.jsonl": {"sha256": digest(tmp_path / f"{n}.jsonl"), "records": 1} for n in ("train", "calibration", "development")}})
-    write_json(tmp_path / "plan.json", [{"base": "m"}])
-    with pytest.raises(ValueError, match="eval-only"):
-        load_plan(tmp_path, tmp_path / "plan.json")
 
 
 def test_contrastive_pairs_are_checked_and_labelled_by_code():
@@ -444,15 +390,6 @@ def test_loss_options_fail_before_training(bad):
         question_loss(torch.zeros(3), {"label": 0, "qtype": "choice"}, "cpu", 0, **bad)
 
 
-def test_trial_accepts_one_registered_loss_change():
-    from d1a.experiment import validated_trial
-    manifest = {"base_revisions": {"model": "pinned"}}
-    for flag, value in (("label_smoothing", 0.05), ("brier_w", 0.5), ("focal_gamma", 1.0)):
-        assert validated_trial({"base": "model", flag: value}, manifest)[flag] == value
-    with pytest.raises(ValueError):
-        validated_trial({"base": "model", "brier_w": 0.5, "focal_gamma": 1.0}, manifest)
-
-
 def test_temperature_fit_requires_raw_rows_and_uses_true_logit_nll():
     from d1a.metrics import fit_temperature, nll_at_temperature
     row = {"variant": "clean", "source": "fixture", "task": "fixture", "p": [1.0, 0.0],
@@ -508,40 +445,6 @@ def test_raw_row_inverts_the_served_temperature():
     assert twice["inference_temperature"] == pytest.approx(2.3 * 1.5) and np.allclose(raw_row(twice)["p"], raw["p"])
 
 
-def test_workload_report_refuses_rows_without_logits():
-    from d1a.calibrate import workload_report
-    rows = [{"id": str(i), "source": "jev", "group": f"g{i}", "task": "t", "type": "choice", "variant": "clean",
-             "question": "q", "keys": ["x", "y"], "label": 0, "p": [0.7, 0.3]} for i in range(10)]
-    with pytest.raises(ValueError, match="logits"):
-        workload_report(rows, folds=2, samples=10)
-
-
-def test_workload_report_recovers_a_shared_temperature_and_keeps_accuracy():
-    import numpy as np
-    from d1a.calibrate import format_report, workload_report
-    from d1a.metrics import tempered_row
-    rng = np.random.default_rng(0)
-    rows = []
-    for source in ("a", "b"):
-        for group in range(12):
-            for k in range(2):
-                i = len(rows)
-                label = int(rng.integers(0, 3))
-                z = rng.normal(0, 1, 3); z[label] += 1.5          # informative, over-confident at T=1
-                p = np.exp(z - z.max()); p /= p.sum()
-                raw = {"id": str(i), "source": source, "group": f"g{group}", "task": "t", "type": "choice", "variant": "clean",
-                       "question": "q", "keys": ["x", "y", "z"], "label": label, "logits": z.tolist(), "p": p.tolist(), "inference_temperature": 1.0}
-                rows.append(tempered_row(raw, 1.7))                # served at the checkpoint's temperature
-    report = workload_report(rows, folds=4, seed=0, samples=50)
-    arms = report["arms"]
-    assert report["shipped_temperature"] == [1.7] and len(report["fold_temperatures"]) == 4
-    assert len({round(arms[a]["acc"], 12) for a in arms}) == 1                      # temperature never moves accuracy
-    assert arms["workload"]["nll"] <= arms["raw"]["nll"] and arms["workload"]["nll"] <= arms["shipped"]["nll"]   # in-sample fit is optimal on the grid
-    assert set(report["oof_vs_shipped"]) == {"ece", "brier", "coverage_at_5pct_error", "aurc"}
-    assert all(b["ci95"][0] <= b["ci95"][1] for b in report["oof_vs_shipped"].values())
-    assert "workload_oof" in format_report(report)
-
-
 def test_cross_validated_temperature_rejects_too_few_groups():
     from d1a.metrics import cross_validated_temperature
     rows = [{"id": str(i), "source": "a", "group": f"g{i}", "task": "t", "type": "choice", "variant": "clean",
@@ -557,16 +460,6 @@ def test_selective_metrics_include_confidence_ties():
     assert report["confident_error_rate"] == .5
     assert report["selective"]["0.5"] == {"coverage": 1.0, "accuracy": .5, "confidence_cutoff": .99}
 
-def test_gate_rejects_confident_transfer_failure():
-    from d1a.experiment import gate_report
-    coverage = {"requested_records": 2, "evaluated_records": 2, "requested_questions": 2,
-                "evaluated_questions": 2, "rejected_records": 0, "truncated_records": 0}
-    report = {"coverage": coverage, "transfer": {"coverage": coverage,
-              "clean": {"confident_error_rate": .5}, "paired_flip": {"pairs": 1, "both_correct_rate": 0}}}
-    result = gate_report(report, {"passed": True})
-    assert not result["passed"]
-    assert not result["checks"]["heldout_pairs_at_least_70pct"]
-    assert not result["checks"]["transfer_confident_errors_below_10pct"]
 
 def test_uneven_microbatches_have_equal_record_weight():
     from d1a.train import accumulation_records
@@ -588,16 +481,6 @@ def test_v3_training_refuses_heldout_structure():
     with pytest.raises(ValueError, match="held-out"):
         validate_training([r], {"trainable_sources": ["compositional"]})
 
-def test_unpinned_base_requires_full_sha_in_trial():
-    from d1a.experiment import validated_trial
-    manifest = {"base_revisions": {"pinned": "a" * 40}, "trainable_sources": []}
-    with pytest.raises(ValueError, match="base_revision"):
-        validated_trial({"base": "other"}, manifest)
-    with pytest.raises(ValueError, match="base_revision"):
-        validated_trial({"base": "other", "base_revision": "main"}, manifest)
-    assert validated_trial({"base": "other", "base_revision": "b" * 40}, manifest)["base_revision"] == "b" * 40
-    with pytest.raises(ValueError, match="conflicts"):
-        validated_trial({"base": "pinned", "base_revision": "b" * 40}, manifest)
 
 def test_none_pair_is_minimal_and_relabelled():
     from d1a.data import none_pair, materialize
@@ -729,15 +612,6 @@ def test_anchor_loss_aligns_by_key_and_skips_changed_option_sets():
     peaked = torch.tensor([10.0, -10.0])                                                       # student already matches teacher's argmax key 'b'? keys=[b,a]: p(b)=1
     assert anchor_loss(peaked, q, {"b": 1.0, "a": 0.0}, "cpu").item() < 1e-3
 
-def test_anchor_trial_validation():
-    from d1a.experiment import validated_trial
-    m = {"base_revisions": {"m": "x"}, "trainable_sources": ["arc", "boolq"]}
-    with pytest.raises(ValueError, match="anchor"):
-        validated_trial({"base": "m", "anchor_w": 0.5}, m)
-    with pytest.raises(ValueError, match="anchor_sources"):
-        validated_trial({"base": "m", "anchor": "runs/anchors/x.json", "anchor_w": 0.5, "anchor_sources": "mmlu"}, m)
-    assert validated_trial({"base": "m", "anchor": "runs/anchors/x.json", "anchor_w": 0.5, "anchor_sources": "arc"}, m)["anchor_w"] == 0.5
-
 
 def test_frozen_suites_load_under_any_locale(tmp_path):
     """Issue #12: frozen partitions contain non-ASCII text and are sha256-checked byte for byte, so they must be read as
@@ -828,26 +702,6 @@ def test_rotation_averaging_cancels_a_position_bias():
     assert one["probabilities"]["n"] == pytest.approx(biased(record)["probabilities"]["n"])   # noul untouched
     with pytest.raises(ValueError):
         RotationAveraged(biased, 1)
-
-
-def test_max_state_lifts_row_and_packed_limits_together():
-    from d1a.experiment import validated_trial
-    from d1a.model import MAX_BRANCH, MAX_PACKED, MAX_STATE, MAX_TRAIN_STATE, SERVE_MAX_BRANCH, SERVE_MAX_STATE, training_context
-    from d1a.suite import CONTEXT
-    assert training_context() == {k: v for k, v in CONTEXT.items() if k != "truncate"} == {"max_state": MAX_STATE, "max_branch": MAX_BRANCH, "max_packed": MAX_PACKED}
-    long = 12 * MAX_STATE                                                              # the 4.12 delta's state limit
-    lifted = training_context(long)
-    assert lifted["max_branch"] - MAX_BRANCH == lifted["max_packed"] - MAX_PACKED == long - MAX_STATE
-    assert MAX_TRAIN_STATE == SERVE_MAX_STATE == 65536                                   # 64k states train and serve
-    assert training_context(MAX_TRAIN_STATE)["max_branch"] <= SERVE_MAX_BRANCH          # the served row limit still fits a training branch
-    with pytest.raises(ValueError):
-        training_context(MAX_TRAIN_STATE + 1)
-    manifest = {"base_revisions": {"model": "pinned"}}
-    assert validated_trial({"base": "model", "max_state": long}, manifest)["max_state"] == long
-    assert "max_state" not in validated_trial({"base": "model"}, manifest)          # optional: existing recipe digests are unchanged
-    for bad in (MAX_STATE - 1, MAX_TRAIN_STATE + 1, float(long), True):
-        with pytest.raises(ValueError, match="max_state"):
-            validated_trial({"base": "model", "max_state": bad}, manifest)
 
 
 def test_none_pair_leaves_soft_target_questions_alone():

@@ -79,7 +79,7 @@ cp /runs/train.log /runs/new/; upload /runs/new checkpoint || { echo "FAILED che
 echo "== calibrate (pooled: decision-v7 calibration + PR development)"
 uv run --frozen python -m d1a.benchmark --run /runs/new --suite evals/v7/decision-v7 --split calibration --device cuda --out /runs/cal 2>&1 | tail -1
 uv run --frozen python -m d1a.benchmark --run /runs/new --data /data/pr/development.jsonl --context serving --device cuda --out /runs/calpr 2>&1 | tail -1
-uv run --frozen python scripts/calibrate_checkpoint.py --run /runs/new --rows /runs/cal/rows.json --rows /runs/calpr/rows.json --allow-in-distribution 2>&1 | tail -2
+uv run --frozen python -m d1a.calibrate --run /runs/new --rows /runs/cal/rows.json --rows /runs/calpr/rows.json --allow-in-distribution 2>&1 | tail -2
 upload /runs/new checkpoint || { echo "FAILED calibrated checkpoint upload"; exit 1; }
 echo "== scoring at full length (each result uploaded as it lands)"
 mkdir -p /runs/eval

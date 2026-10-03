@@ -414,7 +414,7 @@ def main():
     if fused_default and not opts.fused and model.hybrid: print("fused Qwen3.5 kernels off: install the flash-linear-attention version d1a/fused_qwen35.py pins (FLA_VERSION) to turn them on")
     if model.head.temperature == 1.0:   # 1.0 = never calibrated: d1a.train and the study harness leave head.pt at 1.0 on purpose
         print("!!! serving an uncalibrated checkpoint (temperature 1.0): probabilities will be overconfident. Fit one with "
-              "scripts/calibrate_checkpoint.py before publishing; thresholds on probabilities assume it.", flush=True)
+              "python -m d1a.calibrate before publishing; thresholds on probabilities assume it.", flush=True)
     print(f"serving {ck.requested} ({ck.path}) on {dev} via {model.backend} ({model.dtype}) {a.host}:{a.port}"   # /v1/models reports the run as given, not the resolved cache path
           + (f"; unloads after {a.idle_unload} s idle" if a.idle_unload > 0 else ""), flush=True)
     del model, s
