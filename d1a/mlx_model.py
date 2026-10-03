@@ -1,5 +1,5 @@
 # Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); Gemma 4 bases (sliding-window and KV-shared layers) and quantized MLX exports (export_mlx); model-family details from d1a.backbone; Gemma 4's per-layer embeddings read from the weight files per request (FlashEmbedding).
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); Gemma 4 bases (sliding-window and KV-shared layers) and quantized MLX exports (export_mlx); model-family details from d1a.backbone; Gemma 4's per-layer embeddings read from the weight files per request (FlashEmbedding); photo and voice soft tokens in the state pass (d1a.media).
 """Apple Silicon backend for the Qwen3.5 and Gemma 4 checkpoints: mlx-lm's Metal implementation of the backbone under
 D1A's own encoder and pointer head.
 
@@ -248,8 +248,23 @@ class MLXDecisionModel:
     def prefix(self, enc):
         Ls = enc["seg"].count(0)
         cache = make_prompt_cache(self.lm)
-        self._hidden([enc["ids"][:Ls]], cache)
+        if enc.get("media") is None: self._hidden([enc["ids"][:Ls]], cache)
+        else: self._media_state(enc["ids"][:Ls], *enc["media"], cache)
         return Ls, cache
+
+    def _media_state(self, ids, at, embeds, cache):
+        """The state pass with media soft tokens (d1a.media.with_media) in place of its placeholder tokens, as transformers'
+        Gemma 4 does it: placeholders become the pad token for the embedding and per-layer-embedding lookups, then their
+        rows of the (scaled) embedding take the soft tokens. mlx-lm scales whatever embeddings it is given, so the soft
+        tokens go in divided by that scale."""
+        ids = list(ids)
+        for i in at: ids[i] = self.pad_id
+        x = mx.array([ids], dtype=mx.int32)
+        emb = self.text.embed_tokens(x)
+        idx = mx.array(at, dtype=mx.int32)
+        emb[0, idx] = (mx.array(embeds) / self.text.embed_scale).astype(emb.dtype)
+        ple = self.text._get_per_layer_inputs(x) if self.text.hidden_size_per_layer_input else None
+        mx.eval(self.text(x, cache=cache, input_embeddings=emb, per_layer_inputs=ple))
 
     def _branch_logits(self, enc, cache):
         """Branches as rows on a replicated copy of the state cache, rows_per_pass rows (and cache copies) at a time."""

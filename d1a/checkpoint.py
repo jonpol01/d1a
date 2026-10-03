@@ -50,7 +50,8 @@ def resolve_run(run):
         return str(run)
     from huggingface_hub import snapshot_download
     repo, _, revision = str(run).partition("@")
-    return snapshot_download(repo, revision=revision or None, allow_patterns=["*.json", "*.safetensors", "*.pt", "*.txt", "*.jinja"])
+    return snapshot_download(repo, revision=revision or None, allow_patterns=["*.json", "*.safetensors", "*.pt", "*.txt", "*.jinja"],
+                             ignore_patterns=["media/*"])   # an MLX export's photo and voice encoders (1 GB): d1a.serve fetches them on the first such request
 
 
 @dataclass

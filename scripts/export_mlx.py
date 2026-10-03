@@ -8,6 +8,9 @@ d1a.checkpoint / d1a.serve from the folder (or its Hub copy) without the base or
 --no-quantize-embeddings keeps embed_tokens and the per-layer embeddings in bf16 (on Gemma 4 E2B they are ~60% of the
 weights). The folder holds mlx-lm's config.json + model*.safetensors, head.safetensors (the fp32 pointer head), the
 tokenizer files and d1a_config.json (d1a.checkpoint.export_config).
+
+--media adds media/: Gemma 4's vision and audio encoders from the base (~1 GB for E4B), so d1a.serve answers about
+photos and voice clips with this same model (POST /v1/systemone/media). Run it alone on an existing folder with --media-only.
 """
 import argparse, json, time
 
@@ -23,11 +26,18 @@ def main():
     ap.add_argument("--q-group-size", type=int, default=64)
     ap.add_argument("--q-per-layer-bits", type=int, default=0, help="bits for Gemma 4's per-layer embeddings; 0 = the same as --q-bits")
     ap.add_argument("--no-quantize-embeddings", action="store_true")
+    ap.add_argument("--media", action="store_true", help="also write media/: the base's vision and audio encoders (Gemma 4)")
+    ap.add_argument("--media-only", action="store_true", help="only add media/ to an existing export folder --out")
     a = ap.parse_args()
     t = time.time()
-    cfg = export_mlx(Checkpoint(a.run), a.out, bits=a.q_bits or None, group_size=a.q_group_size, embeddings=not a.no_quantize_embeddings,
-                     per_layer_bits=a.q_per_layer_bits or None)
-    print(json.dumps(cfg, indent=2))
+    if not a.media_only:
+        cfg = export_mlx(Checkpoint(a.run), a.out, bits=a.q_bits or None, group_size=a.q_group_size, embeddings=not a.no_quantize_embeddings,
+                         per_layer_bits=a.q_per_layer_bits or None)
+        print(json.dumps(cfg, indent=2))
+    if a.media or a.media_only:
+        from d1a.media import export_media
+        meta = Checkpoint(a.run).meta
+        print("wrote", export_media(meta.base, meta.base_revision, a.out))
     print(f"exported {a.run} to {a.out} in {time.time() - t:.0f} s")
 
 

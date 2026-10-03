@@ -141,7 +141,7 @@ def forms(t):
 
 
 def serving(t):
-    """4. Where D1A runs: clients, the text server and its backends, the media server for photos and voice."""
+    """4. Where D1A runs: clients, the server and its backends; photos and voice through the same model's encoders."""
     def box(x, y, w, title, sub, color):
         return (f'<rect x="{x}" y="{y}" width="{w}" height="62" rx="14" fill="{t["card"]}" stroke="{color}"/>'
                 f'<rect x="{x}" y="{y}" width="{w}" height="62" rx="14" fill="{color}" fill-opacity=".1"/>'
@@ -158,10 +158,12 @@ def serving(t):
          box(540, 20, 254, "MLX (Apple Silicon) · PyTorch", "8-bit on a Mac · bf16 on CUDA / MPS", C["lora"]),
          box(8, 120, 170, "Photo · voice note", "JPEG / PNG · WAV, ≤ 30 s", C["amber"]),
          arrow(178, 308, 151, "/v1/systemone/media"),
-         box(310, 120, 190, "d1a.media", "same answers, media in the state", C["decide"]),
-         arrow(500, 538, 151, ""),
-         box(540, 120, 254, "Gemma 4 + vision & audio encoders", "adapter merged · no speech-to-text", C["head"])]
-    return 802, 200, "".join(b), "Where D1A runs: the text server and the media server"
+         box(310, 120, 190, "d1a.serve · encoders", "vision & audio → soft tokens", C["decide"]),
+         f'<path d="M 500 151 C 600 151, 667 140, 667 86" fill="none" stroke="{t["muted"]}" stroke-width="1.5" marker-end="url(#arr)" class="flow"/>',
+         '<text x="676" y="128" font-size="9" class="mono muted">same model</text>',
+         '<text x="676" y="142" font-size="9" class="muted">--idle-unload frees</text>',
+         '<text x="676" y="156" font-size="9" class="muted">both when idle</text>']
+    return 802, 200, "".join(b), "Where D1A runs: one server and one model for text, photos and voice"
 
 
 for name, fn in (("layout", layout), ("model", model), ("forms", forms), ("serving", serving)):
