@@ -46,6 +46,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Downloading a model from the Hub skips an export's `media/` folder (1 GB) until a photo or voice request needs it.
 
+### Removed
+
+- Kev's in-repo `playground/` (Next.js: request editor, packed vs separate, option permutation, chess) and the
+  `tools/review` label-review page, about 14,000 lines, and `JevPredictor` in `d1a/predictors.py`, which ran the
+  playground's Jev script. The demo app is [jonpol01/d1a-playground](https://github.com/jonpol01/d1a-playground);
+  [docs/removed-tools.md](docs/removed-tools.md) records what both tools did and how to restore them. The
+  `/v1/systemone/separate` and `/v1/systemone/permute` endpoints stay.
+
 ### Security
 
 - torch 2.13.0 (from 2.8.0), which fixes three memory-corruption advisories: GHSA-vgrw-7cvw-pwgx (`unpack_sequence`,

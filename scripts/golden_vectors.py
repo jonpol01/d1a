@@ -8,7 +8,7 @@ backend (the MLX exports) against them.
     python scripts/golden_vectors.py compare --golden golden.json --run runs/exports/d1a-e2b-mlx-4bit --out report.json
 
 The record set: every 6th record of each variant of the decision-v7 development split (~200), the five playground
-presets (scripts/golden_presets.json: those of playground/src/lib/d1a.ts, from Kev's playground) and three long records
+presets (scripts/golden_presets.json: those of Kev's playground, removed since) and three long records
 whose states (~1k tokens, development states joined) pass Gemma 4's 512-token sliding window. Records are encoded as
 d1a.serve encodes them (serving context), and each record stores its input, its token ids and the probabilities, so the
 file is a self-contained test vector: an implementation must reproduce the ids exactly and the probabilities to its

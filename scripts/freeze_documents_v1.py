@@ -122,7 +122,7 @@ def combine(work):
 
 
 def spot_check_sample(test):
-    """The protocol's human sample: SPOT_CHECK_SIZE test questions drawn with a fixed seed, in the tools/review input format."""
+    """The protocol's human sample: SPOT_CHECK_SIZE test questions drawn with a fixed seed, in the tools/review input format (docs/removed-tools.md)."""
     items = [(r, qid) for r in test for qid in r["questions"]]
     spot = random.Random(SPOT_CHECK_SEED).sample(items, SPOT_CHECK_SIZE)
     return [{"id": f"{r['_meta']['id']}#{qid}", "document": r["state"], "source": f"cfpb · {r['_meta']['length_bucket']} · {r['_meta']['chars']} chars",

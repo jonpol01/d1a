@@ -1,19 +1,15 @@
 # Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); the remote model name defaults to d1a-latest.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); the remote model name defaults to d1a-latest; the Jev AI-SDK predictor removed with Kev's playground (docs/removed-tools.md).
 """Predictors: callables record -> {"probabilities": {qid: {key: p}}, "latency_ms", "input_tokens", ...} for d1a.benchmark.
 
-LocalPredictor scores a checkpoint in-process; RemotePredictor any TypeSafe System One-compatible endpoint; JevPredictor
-Jev itself through the AI SDK worker in playground/scripts (budget-capped).
+LocalPredictor scores a checkpoint in-process; RemotePredictor any TypeSafe System One-compatible endpoint (scripts/
+compare_systemone.py compares servers, Jev included, request by request).
 """
 import contextlib
 import json
 import math
-import os
-import subprocess
 import time
 import urllib.request
-from datetime import datetime, timezone
-from pathlib import Path
 
 import torch
 from torch.nn.attention import SDPBackend, sdpa_kernel
@@ -119,7 +115,6 @@ class RemotePredictor:
         return {"probabilities": probs, "latency_ms": latency, "input_tokens": (body.get("usage") or {}).get("input_tokens")}
 
 
-PRICE_PER_MILLION = 0.042   # Jev list price per million input tokens, for the budget cap
 
 
 class RotationAveraged:
@@ -161,94 +156,3 @@ class RotationAveraged:
             out["probabilities"][qid] = {k: v / s for k, v in e.items()}
             if field == "logits": out["logits"][qid] = z
         return out
-
-
-class JevRefused(ContextOverflow):
-    """Jev declined a request because of the input itself (REFUSAL_STATUSES, or a hosted-side error on an oversize request;
-    see JevPredictor). With count_refusals, d1a.benchmark counts such a record as rejected (rejected.json) instead of stopping."""
-
-
-REFUSAL_STATUSES = (400, 413, 422)
-# Jev's context in tokens (documented ~32k). Past it the AI Gateway answers with HTTP 400 *or* a 503 GatewayInternalServerError
-# (evals/longdoc-v1: 212 x 400 and 28 x 503 on the 240 requests of ~57k-61k tokens; every request of <= ~31k tokens answered),
-# so a hosted-side error on a request estimated past OVERSIZE x JEV_CONTEXT_TOKENS is the size, not an outage. The estimate is
-# characters / 4 of the request JSON; the 1.5 margin keeps a ~30k-token legal text (~144k characters) out of it.
-JEV_CONTEXT_TOKENS = 32768
-OVERSIZE = 1.5
-
-
-def oversize(request):
-    """Whether a Jev request is well past Jev's context (estimated tokens = characters / 4)."""
-    return len(json.dumps(request, ensure_ascii=False)) / 4 > OVERSIZE * JEV_CONTEXT_TOKENS
-
-
-class JevPredictor:
-    """Jev through the AI SDK worker (playground/scripts/jev-evaluate.mjs); every call is counted against a token budget.
-    count_refusals: a request answered with a REFUSAL_STATUSES error, or with a hosted-side error (5xx, no status) while
-    oversize(), raises JevRefused at once (counted in accounting()["refusals"], not fatal, not retried); any other client error
-    (401, 403, 429, ...) still stops the read. attempts: tries per request on hosted-side failures of requests that are not
-    oversize, backing off 1, 2, 4, ... seconds up to 30 between them."""
-    def __init__(self, key, budget=0.1, max_calls=700, count_refusals=False, attempts=4):
-        self.budget, self.max_calls, self.count_refusals, self.attempts = budget, max_calls, count_refusals, attempts
-        self.calls, self.input_tokens, self.output_tokens, self.retries = 0, 0, 0, 0
-        self.refusals = {}   # HTTP status -> count
-        self.started_at = datetime.now(timezone.utc).isoformat()
-        worker = Path(__file__).resolve().parents[1] / "playground/scripts/jev-evaluate.mjs"
-        self.process = subprocess.Popen(["node", str(worker)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                        stderr=subprocess.DEVNULL, text=True, bufsize=1,
-                                        env={**os.environ, "AI_GATEWAY_API_KEY": key})
-
-    def close(self):
-        self.process.stdin.close()
-        try:
-            self.process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            self.process.terminate()
-            self.process.wait(timeout=5)
-
-    def __call__(self, record):
-        if self.calls >= self.max_calls or (self.input_tokens + 65536) * PRICE_PER_MILLION / 1e6 > self.budget:
-            raise RuntimeError("Jev evaluation reached the request/token cost cap")
-        request = api_request(record)
-        for attempt in range(self.attempts):
-            self.process.stdin.write(json.dumps(request) + "\n")
-            self.process.stdin.flush()
-            line = self.process.stdout.readline()
-            if not line:
-                raise RuntimeError("Jev SDK worker exited without a response")
-            result = json.loads(line)
-            self.calls += 1
-            if "error" not in result:
-                break
-            status = result["error"]["status"]
-            # bounded retry for hosted-side failures only; client errors (4xx) are real and must surface
-            hosted = status is None or status >= 500
-            if self.count_refusals and (status in REFUSAL_STATUSES or hosted and oversize(request)):
-                kind = str(status) if status in REFUSAL_STATUSES else f"{status} (oversize)"
-                self.refusals[kind] = self.refusals.get(kind, 0) + 1
-                raise JevRefused(f"Jev refused the request: {result['error']['name']} (HTTP {kind})")
-            if attempt == self.attempts - 1 or (status is not None and status < 500):
-                raise RuntimeError(f"Jev request failed: {result['error']['name']} (HTTP {status})")
-            self.retries += 1
-            time.sleep(min(2 ** attempt, 30))
-        usage = result["usage"]
-        if usage.get("inputTokens") is None:
-            raise RuntimeError("Jev returned no input token usage; cannot account for cost")
-        self.input_tokens += usage["inputTokens"]
-        self.output_tokens += usage.get("outputTokens") or 0
-        probabilities = {}
-        for qid, q in record["questions"].items():
-            answer = result["answers"][qid]
-            if q["type"] == "noul":
-                probabilities[qid] = {"false": 1 - answer["probability"], "true": answer["probability"]}
-            else:
-                probabilities[qid] = answer["probabilities"]
-        return {**result, "probabilities": probabilities}
-
-    def accounting(self):
-        return {"model": "typesafe-ai/jev", "model_revision": "Gateway alias; provider revision not exposed by SDK result",
-                "started_at": self.started_at, "calls": self.calls, "input_tokens": self.input_tokens,
-                "output_tokens": self.output_tokens, "retries_after_5xx": self.retries, "listed_input_usd_per_million": PRICE_PER_MILLION,
-                **({"refusals": dict(sorted(self.refusals.items()))} if self.count_refusals else {}),
-                "estimated_usd": self.input_tokens * PRICE_PER_MILLION / 1e6,
-                "budget_usd": self.budget, "sdk": "ai@7.0.105", "zero_data_retention_requested": True}

@@ -16,8 +16,7 @@ BASE = "0fe8fc9"
 ROOT = Path(__file__).resolve().parents[1]
 CACHE = Path.home() / ".cache" / "d1a" / f"kev-{BASE}"
 TEXT = (".py", ".ts", ".tsx", ".js", ".md", ".toml", ".yml", ".yaml", ".json", ".css", ".txt", ".html", ".sh")
-AREAS = [("d1a/", "model code (d1a/)"), ("tests/", "tests"), ("scripts/", "scripts"), ("evals/", "frozen eval suites"),
-         ("playground/", "playground + tools"), ("tools/", "playground + tools")]
+AREAS = [("d1a/", "model code (d1a/)"), ("tests/", "tests"), ("scripts/", "scripts"), ("evals/", "frozen eval suites")]
 
 
 def kev_tree():

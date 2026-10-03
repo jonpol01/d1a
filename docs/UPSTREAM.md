@@ -30,7 +30,7 @@ the Apache License 2.0. This file records where D1A's code came from and what D1
   Qwen bases, including the hybrid Qwen3.5 code paths, still work unchanged.
 - **Renames**: the Python package `kev` is `d1a` (`python -m d1a.serve|train|benchmark|...`, all imports, pyproject
   name); `KEV_*` environment variables are `D1A_*`; the snapshot mirror defaults
-  to `JohnP1/d1a-snapshots`; the playground and the label-review tool are titled D1A and proxy the API under `/d1a`.
+  to `JohnP1/d1a-snapshots`.
 - **Model names**: the server lists `d1a-latest`, and keeps `kev-latest` (what clients written against Kev send) and
   `jev-latest` (the TypeSafe SDK default) as accepted names; requests, the benchmark's remote mode and the clients
   default to `d1a-latest`.
@@ -52,12 +52,15 @@ the Apache License 2.0. This file records where D1A's code came from and what D1
   `temperature_groups`), with the tests that only exercised them. Then Kev's study harness, `d1a/rounds.py`,
   `experiment.py`, `evaluate.py`, `budget.py` and `mirror.py`, with their tests: calibration became D1A's own
   `d1a/calibrate.py` (same fitted temperature and the same in-distribution refusals as the script it replaces; the
-  full-weight snapshot cap moved to `d1a/full_ft.py`). `transfer_v9.py` stays because two suite builders import it.
+  full-weight snapshot cap moved to `d1a/full_ft.py`). `transfer_v9.py` stays because two suite builders import it. Then Kev's Next.js `playground/` and the `tools/review`
+  label-review page, with `JevPredictor` in `d1a/predictors.py` (it ran the playground's `jev-evaluate.mjs`) and its tests;
+  the demo app is now [jonpol01/d1a-playground](https://github.com/jonpol01/d1a-playground), and
+  [removed-tools.md](removed-tools.md) records what both tools did and how to restore them.
 - **Rewritten from scratch** (no longer derived): `d1a/calibrate.py`, `scripts/calibrate_checkpoint.py` (now a wrapper
   around it).
 - **Rewritten**: `README.md`, `AGENTS.md`, `NOTICE`, `.gitignore`.
 - **Kept as is**: the frozen suites in `evals/` (large partitions still download from Kev's Hub dataset
-  `jaredpalmer/kev-suites`), the suite builders in `scripts/`, the playground and `tools/review` apart from branding.
+  `jaredpalmer/kev-suites`), the suite builders in `scripts/`.
 
 ## Derived files
 
@@ -82,14 +85,6 @@ d1a/shared_prefix.py
 d1a/suite.py
 d1a/train.py
 d1a/transfer_v9.py
-playground/next.config.ts
-playground/src/app/chess/page.tsx
-playground/src/app/layout.tsx
-playground/src/components/answer-card.tsx
-playground/src/components/chess-game.tsx
-playground/src/components/playground.tsx
-playground/src/lib/chess.ts
-playground/src/lib/d1a.ts
 pyproject.toml
 scripts/build_binding_diagnostic.py
 scripts/build_breadth_v1.py
@@ -122,9 +117,6 @@ tests/test_mlx.py
 tests/test_model.py
 tests/test_research.py
 tests/test_unit.py
-tools/review/README.md
-tools/review/index.html
-tools/review/src/App.tsx
 ```
 
 ## Derived files without a header
@@ -132,11 +124,7 @@ tools/review/src/App.tsx
 Files taken from Kev and modified that cannot hold a comment (JSON, generated lockfiles).
 
 ```text
-playground/package-lock.json
-playground/package.json
 scripts/golden_presets.json
-tools/review/package-lock.json
-tools/review/package.json
 uv.lock
 ```
 
@@ -156,43 +144,10 @@ d1a/data.py
 d1a/device.py
 experiments/sft-v1-lengths.json
 experiments/smoke.json
-playground/.gitignore
-playground/AGENTS.md
-playground/CLAUDE.md
-playground/components.json
-playground/eslint.config.mjs
-playground/postcss.config.mjs
-playground/public/file.svg
-playground/public/globe.svg
-playground/public/next.svg
-playground/public/vercel.svg
-playground/public/window.svg
-playground/scripts/jev-evaluate.mjs
-playground/src/app/favicon.ico
-playground/src/app/globals.css
-playground/src/app/page.tsx
-playground/src/components/chess-board.tsx
-playground/src/components/ui/badge.tsx
-playground/src/components/ui/button.tsx
-playground/src/components/ui/card.tsx
-playground/src/components/ui/input.tsx
-playground/src/components/ui/label.tsx
-playground/src/components/ui/separator.tsx
-playground/src/components/ui/switch.tsx
-playground/src/components/ui/tabs.tsx
-playground/src/components/ui/textarea.tsx
-playground/src/lib/utils.ts
-playground/tsconfig.json
 scripts/devtools_v1_licences.json
 scripts/hard_v1_common.py
 scripts/hard_v1_families.py
 scripts/hard_v1_numeric.py
 scripts/hard_v1_policy.py
 scripts/longdoc_v1_synthetic.py
-tools/review/.gitignore
-tools/review/public/sample.jsonl
-tools/review/src/index.css
-tools/review/src/main.tsx
-tools/review/tsconfig.json
-tools/review/vite.config.ts
 ```
