@@ -236,7 +236,7 @@ class PointerHead(nn.Module):
         self.q, self.k = nn.Linear(d, dp), nn.Linear(d, dp)
         self.scale = 1 / math.sqrt(dp)
         # calibration: logits are divided by this at inference (eval mode) only. 1.0 = raw. A checkpoint carries the value fitted on
-        # its in-distribution development rows (scripts/calibrate_checkpoint.py -> head.pt["temperature"]); training always sees T=1 so
+        # its in-distribution development rows (d1a.calibrate -> head.pt["temperature"]); training always sees T=1 so
         # a fitted value stays meaningful, and the argmax is unchanged by construction.
         self.temperature = 1.0
 

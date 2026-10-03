@@ -288,8 +288,8 @@ def row_passes(batch, budget, shared):
 
 def state_token_counts(tok, reqs):
     """{id(record): state tokens} as d1a.model.encode counts them: the <state> token (after the tokenizer's leading ids:
-    Gemma's <bos>, none for Qwen) plus user_tokens of the materialised state (d1a.rounds.state_lengths, `state_tokens` in
-    rows); the length --none_pair_max_state gates on."""
+    Gemma's <bos>, none for Qwen) plus user_tokens of the materialised state (`state_tokens` in rows); the length
+    --none_pair_max_state gates on."""
     head = len(layout(tok)[0]) + 1
     return {id(r): head + len(user_tokens(tok, materialize(r)["state"])) for r in reqs}
 
@@ -494,7 +494,7 @@ def parse_args():
     except ValueError as error: ap.error(str(error))
     if a.snapshot_every_steps < 0 or ((fractions or a.snapshot_every_steps) and not a.full_ft):
         ap.error("snapshots (--snapshot_fractions, --snapshot_every_steps >= 0) are for full-weight runs (--full_ft 1)")
-    # d1a.budget.MAX_SNAPSHOTS; an every-N plan without --max_steps is checked in main, once the run's steps are known
+    # d1a.full_ft.MAX_SNAPSHOTS; an every-N plan without --max_steps is checked in main, once the run's steps are known
     if not (a.snapshot_every_steps and not a.max_steps) and (problem := full_ft.too_many_snapshots(fractions, a.snapshot_every_steps, a.max_steps or None)):
         ap.error(problem)
     if Path(a.out).exists() and not a.resume and os.environ.get("RANK", "0") == "0":   # under torchrun rank 0 creates it; the others would race it

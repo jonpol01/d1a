@@ -39,6 +39,8 @@ from torch.optim.adamw import adamw
 from .device import sync
 from .suite import read_json, write_json
 
+MAX_SNAPSHOTS = 8   # snapshots one full-weight run may plan: every one is kept, ~51 GB each for a 27B next to its 307 GB resume point
+
 MIN_TORCH = (2, 8)   # FSDPModule.set_gradient_divide_factor (shard) and the FSDP2 behaviour measured in PR #122 / #125
 
 
@@ -362,15 +364,14 @@ def snapshot_steps(total, fractions=(), every=0):
 
 
 def too_many_snapshots(fractions=(), every=0, total=None):
-    """Why this snapshot plan exceeds d1a.budget.MAX_SNAPSHOTS (the disk a run's kept snapshots may take), or None.
+    """Why this snapshot plan exceeds MAX_SNAPSHOTS (the disk a run's kept snapshots may take), or None.
     `total`: the run's optimizer steps, or an upper bound on them (a trial's max_steps); None = unknown, which an
     every-N plan cannot be checked against."""
-    from .budget import MAX_SNAPSHOTS
     if every and total is None:
         return "snapshot_every_steps needs the run's step count to be bounded (max_steps), so its snapshot count can be checked"
     count = len(snapshot_steps(total, fractions, every)) if total is not None else len(fractions)
     if count > MAX_SNAPSHOTS:
-        return (f"{count} snapshots planned (fractions {list(fractions)}, every {every} of {total} steps): at most d1a.budget.MAX_SNAPSHOTS = "
+        return (f"{count} snapshots planned (fractions {list(fractions)}, every {every} of {total} steps): at most MAX_SNAPSHOTS = "
                 f"{MAX_SNAPSHOTS} fit the container disk next to the resume points (a full disk fails the trial)")
     return None
 

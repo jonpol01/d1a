@@ -1,5 +1,5 @@
 # Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); dropped the published-claims check and the removed space/ app; modal_app.py left the scanned sources.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); dropped the published-claims check and the removed space/ app; modal_app.py left the scanned sources; the rules of the removed Kev research modules (experiment, rounds) left with them, and calibration's moved to d1a.calibrate.
 """Source conventions: facts that have one canonical home must not be re-derived elsewhere.
 
 Each rule is (what it guards, regex, files allowed to match). A failure means a second copy of a rule that already has
@@ -39,19 +39,13 @@ RULES = [
      r"manifest\.json\"\)\.read_text\(\)", {"d1a/suite.py"}),
     ("device selection, synchronize and empty_cache go through d1a.device (the Space is a CUDA-only one-off)",
      r"is_available\(\) else|torch\.(mps|cuda)\.(synchronize|empty_cache|current_allocated_memory|max_memory_allocated)\(", {"d1a/device.py"}),
-    ("the isolation sibling probe is d1a.experiment.ISOLATION_PROBE (fp32 mechanism check and served isolation read the same question)",
-     r"CRANE-9274", {"d1a/experiment.py"}),
     ("which partitions stay out of git is d1a.suite.GIT_LIMIT",
      r"10 \* 1024 \* 1024", {"d1a/suite.py"}),
     ("the pinned Qwen3.5 tokenizer suite builders admit records under is d1a.suite.ADMISSION_TOKENIZER",
      r"1001bb4d826a52d1f399e183466143f4da7b741b", {"d1a/suite.py", "d1a/transfer_v9.py"}),   # transfer_v9 pins every Qwen3.5 base it scores
-    ("a trial's served temperature (fitted on its own development rows), clean rows served with unknowable records kept, and "
-     "the registered paired read (2,000 resamples, seed 0, micro) are d1a.rounds.temperature / served_clean / paired",
-     r"development/rows\.json\"\), \[\]\)\[0\]|tempered_row\(raw_row\(recorded\(|SAMPLES = 2000|def (boot|knowable)\(|knowable = lambda",
-     {"d1a/rounds.py", "d1a/metrics.py"}),   # d1a.metrics.served_at is the scored-rows form the helpers build on
     ("calibration by state-token length is d1a.metrics.calibration_by_length (LENGTH_EDGES), and whether a temperature fit set "
-     "shares data with a checkpoint's training is d1a.rounds.pool_conflicts (round pools and scripts/calibrate_checkpoint.py alike)",
-     r"\(8192, 16384, 32768, 65536\)|def (pool_conflicts|calibration_by_length)\(|FIT_SPLITS = ", {"d1a/metrics.py", "d1a/rounds.py"}),
+     "shares data with a checkpoint's training is d1a.calibrate.in_distribution",
+     r"\(8192, 16384, 32768, 65536\)|def (in_distribution|calibration_by_length)\(|HELD_OUT_SPLITS = ", {"d1a/metrics.py", "d1a/calibrate.py"}),
     ("a state's normalised-text hash (text_sha256) is d1a.suite.text_digest",
      r"\.casefold\(\)\.split\(\)\)\.encode\(\)", {"d1a/suite.py", "d1a/data.py"}),   # d1a.suite imports d1a.data, so d1a.data keeps its inline copy
 ]

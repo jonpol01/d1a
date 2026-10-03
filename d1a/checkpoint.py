@@ -146,7 +146,7 @@ class LoadOptions:
     attn         attention backend; None = the model default (SDPA on CUDA, eager elsewhere). "sdpa" on MPS measured
                  parity with eager and is a few percent faster.
     lora_scale   WiSE-FT-style interpolation between base (0) and fine-tuned weights (1), at inference.
-    temperature  None = the temperature the checkpoint carries (fitted by scripts/calibrate_checkpoint.py); 1.0 = raw logits.
+    temperature  None = the temperature the checkpoint carries (fitted by d1a.calibrate); 1.0 = raw logits.
     backend      None = torch, the path every reported number uses. "mlx" = d1a.mlx_model (Metal kernels through mlx-lm
                  for the hybrid Qwen3.5 and the Gemma 4 backbones; the pointer head and encoder are shared; refused for
                  other attention-only bases). "auto" = mlx when the device is mps, the base is one of those, mlx-lm is

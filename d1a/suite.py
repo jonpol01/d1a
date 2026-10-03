@@ -46,8 +46,8 @@ ADMISSION_TOKENIZER = ("Qwen/Qwen3.5-4B-Base", "1001bb4d826a52d1f399e183466143f4
 # programmatic policy sources (d1a.study_v3 / d1a.contrastive); the trainer's mix ablations treat them as one group
 SYNTHETIC_SOURCES = ("legacy_policy", "compositional", "contrastive")
 # Suites deleted from the repo because they are unsound as a gate: {suite dir: why, when, the last round that read it}.
-# load_split / read_manifest refuse them with the reason; d1a.rounds.validate lists a read of one as archived for rounds up
-# to `last_round` (their committed rows under runs/ are the record and still reproduce) and refuses it after that.
+# load_split / read_manifest refuse them with the reason (their committed rows under runs/ are the record of the rounds
+# that read them, up to `last_round`).
 REMOVED_SUITES = {
     "evals/external/scienthoon-v1": {
         "removed": "2026-09-27",
@@ -117,7 +117,7 @@ def read_json(path):
 
 def write_json(path, value, atomic=False):
     """atomic: write a sibling temp file and os.replace it over `path`, so a reader (or a restart after a crash mid-write)
-    sees the old file or the new one, never a torn one. For state files rewritten in place (d1a.rounds' watcher)."""
+    sees the old file or the new one, never a torn one. For state files rewritten in place."""
     text = json.dumps(value, indent=2, ensure_ascii=False, allow_nan=False) + "\n"
     if not atomic:
         Path(path).write_text(text, encoding=ENCODING); return
@@ -129,7 +129,7 @@ def write_json(path, value, atomic=False):
 @contextmanager
 def file_lock(path):
     """Hold an exclusive advisory lock on `path` (created if absent) for the block; a second holder waits. Local
-    orchestration only: one pull of a study (modal_app.pull_lock), one launch of an arm's reads (d1a.rounds)."""
+    orchestration only (one writer of a shared run directory at a time)."""
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     with Path(path).open("a", encoding=ENCODING) as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)

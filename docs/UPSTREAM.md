@@ -49,8 +49,12 @@ the Apache License 2.0. This file records where D1A's code came from and what D1
   (`base_mmlu_probe`, `breadth_reads`, `breadth_report`, `calibration_audit`, `chartstyle`, `checkpoint_average`,
   `compare_typesafe`, `longdoc_report`, `longstate_report`, `plot_calibration_audit`, `private_rows`, `reliability_head`,
   `review_calibration_screen`, `screen_longdoc_v1`, `screen_overlap`, `serving_bench`, `sft_probe`,
-  `temperature_groups`), with the tests that only exercised them. `d1a/rounds.py`, `experiment.py`, `budget.py` and
-  `transfer_v9.py` stay because `scripts/calibrate_checkpoint.py`, `d1a/full_ft.py` and two suite builders import them.
+  `temperature_groups`), with the tests that only exercised them. Then Kev's study harness, `d1a/rounds.py`,
+  `experiment.py`, `evaluate.py`, `budget.py` and `mirror.py`, with their tests: calibration became D1A's own
+  `d1a/calibrate.py` (same fitted temperature and the same in-distribution refusals as the script it replaces; the
+  full-weight snapshot cap moved to `d1a/full_ft.py`). `transfer_v9.py` stays because two suite builders import it.
+- **Rewritten from scratch** (no longer derived): `d1a/calibrate.py`, `scripts/calibrate_checkpoint.py` (now a wrapper
+  around it).
 - **Rewritten**: `README.md`, `AGENTS.md`, `NOTICE`, `.gitignore`.
 - **Kept as is**: the frozen suites in `evals/` (large partitions still download from Kev's Hub dataset
   `jaredpalmer/kev-suites`), the suite builders in `scripts/`, the playground and `tools/review` apart from branding.
@@ -65,20 +69,14 @@ changes at the top; `scripts/check_license.py` checks that this list and the hea
 .gitignore
 d1a/api.py
 d1a/benchmark.py
-d1a/budget.py
-d1a/calibrate.py
 d1a/checkpoint.py
 d1a/cuda_graphs.py
-d1a/evaluate.py
-d1a/experiment.py
 d1a/full_ft.py
 d1a/fused_qwen35.py
 d1a/metrics.py
-d1a/mirror.py
 d1a/mlx_model.py
 d1a/model.py
 d1a/predictors.py
-d1a/rounds.py
 d1a/serve.py
 d1a/shared_prefix.py
 d1a/suite.py
@@ -103,7 +101,6 @@ scripts/build_long_states.py
 scripts/build_longdoc_v1.py
 scripts/build_night2_data.py
 scripts/build_soft_targets.py
-scripts/calibrate_checkpoint.py
 scripts/freeze_calibration_audit.py
 scripts/freeze_documents_v1.py
 scripts/freeze_semif.py

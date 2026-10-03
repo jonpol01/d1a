@@ -922,24 +922,6 @@ def test_pass_tokens_max_refuses_an_attention_only_base(tiny_base, tmp_path, mon
     assert (tmp_path / "hybrid" / "head.pt").exists()
 
 
-def test_pass_tokens_max_refusals(monkeypatch, capsys):
-    """The ceiling caps the passes --length_sort plans: refused without it, with --row_budget and with --perm_kl (a
-    permuted copy is a second pass alive at the same time); a study trial the same (d1a.experiment.validated_trial), where
-    it is optional and absent from today's config hashes."""
-    from d1a.experiment import validated_trial
-    for extra in ((), ("--length_sort", "1", "--perm_kl", "0.1"), ("--length_sort", "1", "--row_budget", "8192")):
-        with pytest.raises(SystemExit):
-            _parse_train(monkeypatch, "--pass_tokens_max", "40960", *extra)
-        assert "--pass_tokens_max caps" in capsys.readouterr().err
-    assert _parse_train(monkeypatch, "--pass_tokens_max", "40960", "--length_sort", "1").pass_tokens_max == 40960
-    manifest = {"base_revisions": {"b": "0" * 40}, "trainable_sources": []}
-    assert validated_trial({"base": "b", "length_sort": 1, "pass_tokens_max": 40960}, manifest)["pass_tokens_max"] == 40960
-    assert "pass_tokens_max" not in validated_trial({"base": "b", "length_sort": 1}, manifest)
-    for bad in ({"pass_tokens_max": 40960}, {"length_sort": 1, "pass_tokens_max": 40960, "perm_kl": 0.1}, {"length_sort": 1, "pass_tokens_max": 0}):
-        with pytest.raises(ValueError):
-            validated_trial({"base": "b", **bad}, manifest)
-
-
 @pytest.mark.parametrize("shared", [0, 1])
 def test_row_budget_changes_passes_not_gradients(tiny_base, shared):
     """--row_budget splits a micro-batch into forward/backward passes (here every record by question, each part carrying
@@ -1183,126 +1165,11 @@ def test_snapshots_are_checkpoints_kept_and_completed_on_resume(tiny_base, tmp_p
     assert all(torch.equal(v, read_meta(snapshot_path(whole, 4)).head[k]) for k, v in read_meta(snapshot_path(b, 4)).head.items())
 
 
-def test_snapshot_schedule_and_trial_knobs(monkeypatch, capsys, tmp_path):
-    """Which steps get a snapshot; d1a.train and d1a.experiment refuse snapshots outside full-weight runs and bad lists;
-    a full-weight trial snapshots at experiment.SNAPSHOT_FRACTIONS into <trial>/snapshots unless its plan says otherwise
-    (optional, so config hashes stay; the snapshot schedule is not part of a recipe)."""
-    import d1a.experiment as E
-    from d1a.full_ft import snapshot_fractions, snapshot_steps
-    assert snapshot_steps(8, (0.25, 0.5)) == [2, 4] and snapshot_steps(1553, (0.25, 0.5, 0.75)) == [389, 777, 1165]
-    assert snapshot_steps(10, (0.3,)) == [3] and snapshot_steps(10, (0.99,)) == [] and snapshot_steps(10, (), 4) == [4, 8] and snapshot_steps(10, (0.5,), 5) == [5]
-    assert snapshot_fractions("0.5,0.25") == (0.25, 0.5) and snapshot_fractions("none") == snapshot_fractions("") == ()
-    for bad in ("1", "0", "0.5,x"):
-        with pytest.raises(ValueError): snapshot_fractions(bad)
-    with pytest.raises(SystemExit):
-        _parse_train(monkeypatch, "--snapshot_fractions", "0.5")
-    assert "snapshots (--snapshot_fractions" in capsys.readouterr().err
-    assert _parse_train(monkeypatch, *FULL, "--snapshot_fractions", "0.5").snapshot_fractions == "0.5"
-    manifest = {"base_revisions": {"b": "0" * 40}, "trainable_sources": []}
-    full = {"base": "b", "full_ft": 1, "weights_dtype": "bf16"}
-    assert E.validated_trial({**full, "snapshot_fractions": "none", "snapshot_every_steps": 50, "max_steps": 400}, manifest)["snapshot_every_steps"] == 50
-    assert "snapshot_fractions" not in E.validated_trial(full, manifest)
-    for bad in ({"base": "b", "snapshot_fractions": "0.5"}, {"base": "b", "snapshot_every_steps": 5}, {**full, "snapshot_fractions": "1.5"}, {**full, "snapshot_fractions": [0.5]}):
-        with pytest.raises(ValueError): E.validated_trial(bad, manifest)
-    flag = lambda args, name: [args[i + 1] for i, a in enumerate(args) if a == name]
-    trial = tmp_path / "00-trial-0"
-    default = E.train_args(full, "suite", trial, "cuda")
-    assert flag(default, "--snapshot_fractions") == [E.SNAPSHOT_FRACTIONS] == ["0.25,0.5,0.75"] and flag(default, "--snapshot_dir") == [str(trial / "snapshots")]
-    assert flag(E.train_args({**full, "snapshot_fractions": "none"}, "suite", trial, "cuda"), "--snapshot_fractions") == ["none"]
-    assert not flag(E.train_args({"base": "b", "lora": 16}, "suite", trial, "cuda"), "--snapshot_fractions")
-    hub = {**full, "snapshot_hub_repo": "JohnP1/d1a-snapshots"}
-    assert E.validated_trial(hub, manifest)["snapshot_hub_repo"] == "JohnP1/d1a-snapshots" and not flag(E.train_args(hub, "suite", trial, "cuda"), "--snapshot_hub_repo")
-    for bad in ({"base": "b", "snapshot_hub_repo": "a/b"}, {**full, "snapshot_hub_repo": "no-owner"}):
-        with pytest.raises(ValueError): E.validated_trial(bad, manifest)
-
-
-def test_snapshot_count_is_capped_by_the_disk_budget(monkeypatch, capsys):
-    """d1a.budget.MAX_SNAPSHOTS bounds what a run may plan (every snapshot is kept: ~51 GB each for a 27B on a 1 TiB disk
-    next to two 307 GB resume points); d1a.train (at parse time, and again once the run's steps are known) and
-    d1a.experiment.validated_trial refuse more, and an every-N plan needs a bounded step count."""
-    import d1a.experiment as E
-    from d1a.budget import CHECKPOINT_GB, FULL_FT_DISK, MAX_SNAPSHOTS, RESUME_POINT_GB
-    from d1a.full_ft import too_many_snapshots
-    assert 2 * RESUME_POINT_GB + (1 + MAX_SNAPSHOTS) * CHECKPOINT_GB <= FULL_FT_DISK * 2 ** 20 / 1e9   # the disk arithmetic in d1a/budget.py
-    nine = tuple(round(0.1 * i, 1) for i in range(1, 10))
-    assert too_many_snapshots(nine[:8]) is None and "9 snapshots planned" in too_many_snapshots(nine)
-    assert too_many_snapshots((), 100, 900) is None and "9 snapshots planned" in too_many_snapshots((), 100, 1000)   # steps 100..900
-    assert "needs the run's step count" in too_many_snapshots((), 100) and too_many_snapshots((0.5,), 100, 450) is None   # {100, 200, 225, 300, 400}
-    manifest, full = {"base_revisions": {"b": "0" * 40}, "trainable_sources": []}, {"base": "b", "full_ft": 1, "weights_dtype": "bf16"}
-    for bad in ({**full, "snapshot_every_steps": 10}, {**full, "snapshot_every_steps": 10, "max_steps": 200}, {**full, "snapshot_fractions": ",".join(map(str, nine))}):
-        with pytest.raises(ValueError, match="snapshot"): E.validated_trial(bad, manifest)
-    assert E.validated_trial({**full, "snapshot_every_steps": 50, "max_steps": 200}, manifest)   # 50, 100, 150 + 0.25/0.5/0.75 (same steps)
-    with pytest.raises(SystemExit):
-        _parse_train(monkeypatch, *FULL, "--snapshot_fractions", ",".join(map(str, nine)))
-    with pytest.raises(SystemExit):
-        _parse_train(monkeypatch, *FULL, "--snapshot_every_steps", "10", "--max_steps", "100")
-    assert capsys.readouterr().err.count("MAX_SNAPSHOTS") == 2
-    assert _parse_train(monkeypatch, *FULL, "--snapshot_every_steps", "10").snapshot_every_steps == 10   # unbounded: checked in main
-
-
 def test_every_n_snapshots_over_the_cap_stop_before_training(tiny_base, tmp_path, monkeypatch):
     """Without --max_steps an every-N plan is counted once the run's steps are known, before the first step."""
     with pytest.raises(SystemExit, match="MAX_SNAPSHOTS"):
         train_tiny(tiny_base, tmp_path / "x", *FULL, "--accum", "1", "--epochs", "2", "--snapshot_every_steps", "1", monkeypatch=monkeypatch)   # 16 steps: 15 snapshots
     assert not (tmp_path / "x-snapshots").exists() or not any((tmp_path / "x-snapshots").iterdir())
-
-
-def test_full_ft_plumbing():
-    """Allowlist, admission bound and resources for full-weight trials; each rank's equal share of an epoch."""
-    from d1a.budget import GPU_HOURLY, compute_bound, trial_resources
-    from d1a.experiment import validated_trial
-    from d1a.full_ft import rank_share
-    manifest = {"base_revisions": {"b": "0" * 40}, "trainable_sources": []}
-    trial = validated_trial({"base": "b", "full_ft": 1, "weights_dtype": "bf16", "row_budget": 16384, "max_steps": 20, "accum": 128}, manifest)
-    assert (trial["full_ft"], trial["row_budget"], trial["max_steps"]) == (1, 16384, 20) and "max_steps" not in validated_trial({"base": "b"}, manifest)
-    from d1a.model import MAX_STATE, MAX_TRAIN_STATE
-    gate = MAX_STATE * 8
-    assert validated_trial({"base": "b", "p_none_pair": 0.25, "none_pair_max_state": gate}, manifest)["none_pair_max_state"] == gate
-    assert "none_pair_max_state" not in validated_trial({"base": "b", "p_none_pair": 0.25}, manifest)   # absent: today's recipe and config hash
-    for bad in ({"none_pair_max_state": gate}, {"p_none_pair": 0.25, "none_pair_max_state": 0}, {"p_none_pair": 0.25, "none_pair_max_state": MAX_TRAIN_STATE + 1}):
-        with pytest.raises(ValueError):
-            validated_trial({"base": "b", **bad}, manifest)
-    for bad in ({"full_ft": 1}, {"full_ft": 1, "weights_dtype": "bf16", "row_budget": -1}, {"max_steps": 1.5}):
-        with pytest.raises(ValueError):
-            validated_trial({"base": "b", **bad}, manifest)
-    assert trial_resources("H200", True)[1][0] >= 12 * 25.6e9 / 2 ** 20 and trial_resources("H200:8", True) != trial_resources("H200", True)
-    assert compute_bound("H200:8", 3600, 1) == pytest.approx(compute_bound("H200", 3600, 1) + 7 * GPU_HOURLY["H200"])
-    from d1a.budget import FULL_FT_RETRIES, MAX_BUDGET, MAX_TIMEOUT, hourly_rate
-    assert compute_bound("H200:8", 3600, 2, True) == pytest.approx(hourly_rate("H200:8", True) * 2 * (1 + FULL_FT_RETRIES))   # every attempt counted
-    assert MAX_TIMEOUT[True] == 86400 and compute_bound("H200:8", 28800, 1, True) <= MAX_BUDGET[True]   # an 8 x H200 day: three 8 h attempts
-    assert validated_trial({"base": "b", "full_ft": 1, "weights_dtype": "bf16", "shared_prefix": 0}, manifest)["shared_prefix"] == 0
-    assert [rank_share(list(range(5)), r, 2) for r in (0, 1)] == [[0, 2, 4], [1, 3, 0]] and rank_share([1, 2], 0, 1) == [1, 2]
-    from d1a.train import microbatch_plan
-    reqs = [{"state": "s" * n, "questions": {"q": {"instr": "x"}}} for n in (1, 90, 5, 70, 3, 80, 2, 4, 6, 7)]
-    knobs = lambda sort: SimpleNamespace(batch=2, accum=2, length_sort=sort, shared_prefix=1)
-    plain = [microbatch_plan(reqs, knobs(0), 2, rank) for rank in (0, 1)]
-    assert [len(c) for c, _, _ in plain[0]] == [2, 2, 1] and [(n, ends) for _, n, ends in plain[0]] == [(8, False), (8, True), (2, True)]
-    balanced = [microbatch_plan(reqs, knobs(1), 2, rank) for rank in (0, 1)]
-    assert len(balanced[0]) == len(balanced[1]) == 3 and [ends for _, _, ends in balanced[0]] == [False, True, True]
-    first = sorted(len(r["state"]) for plan in balanced for c, _, _ in plan[:2] for r in c)
-    assert first == sorted(len(r["state"]) for r in reqs[:8])   # the first step holds its own 8 records, once each
-    alone = {len(c[0]["state"]) for plan in balanced for c, _, _ in plan[:2] if len(c) == 1}
-    assert {90, 80, 70} <= alone   # a long record gets a micro-batch to itself; the short ones share one
-
-
-def test_continue_trial_only_continues_the_same_full_weight_run(tmp_path, monkeypatch):
-    """d1a.experiment.continue_trial (the next attempt after a timeout, modal_app.continue_full_trial) retrains with the trial's own
-    config, which d1a.train continues from its resume point, and scores it; it refuses a LoRA trial, a finished one and
-    one whose code changed."""
-    import d1a.experiment as E
-    from d1a.suite import read_json, write_json
-    sources, trial, calls = E.source_hashes(), tmp_path / "00-trial-0", []
-    monkeypatch.setattr(E, "train_checkpoint", lambda config, suite, output, device: calls.append(config) or str(output / "checkpoint"))
-    monkeypatch.setattr(E, "score_trial", lambda run, suite, output, *args, **kwargs: ({"run": run}, []))
-    trial.mkdir()
-    write_json(trial / "provenance.json", {"config": {"full_ft": 1, "weights_dtype": "bf16"}, "source_hashes": sources})
-    assert E.continue_trial("suite", trial, sources, "cuda")[0] == {"run": str(trial / "checkpoint")} and calls == [{"full_ft": 1, "weights_dtype": "bf16"}]
-    assert len(read_json(trial / "provenance.json")["continued"]) == 1
-    with pytest.raises(ValueError):
-        E.continue_trial("suite", trial, {**sources, "d1a/train.py": "0"}, "cuda")
-    write_json(trial / "provenance.json", {"config": {"lora": 16}, "source_hashes": sources})
-    with pytest.raises(ValueError):
-        E.continue_trial("suite", trial, sources, "cuda")
 
 
 def test_resume_writer_keeps_a_later_point_being_written(tmp_path):
@@ -1370,20 +1237,6 @@ def test_grad_norm_in_training_metrics(tiny_base, tmp_path, monkeypatch):
         assert all(0 < e["mean"] <= e["max"] and 0 <= e["clipped_steps"] <= e["steps"] for e in norms)
 
 
-def test_continue_trial_scores_a_finished_checkpoint_without_training(tmp_path, monkeypatch):
-    """An attempt that ran out of time while scoring left a finished checkpoint (head.pt): the next attempt scores it
-    and does not train again (d1a.train --resume 1 would find no resume point and start over)."""
-    import d1a.experiment as E
-    from d1a.suite import write_json
-    sources, trial = E.source_hashes(), tmp_path / "00-trial-0"
-    (trial / "checkpoint").mkdir(parents=True); (trial / "checkpoint" / "head.pt").write_bytes(b"")
-    (trial / "calibration").mkdir(); (trial / "calibration" / "predictions.jsonl").write_bytes(b"")   # the killed attempt's partial read
-    write_json(trial / "provenance.json", {"config": {"full_ft": 1, "weights_dtype": "bf16"}, "source_hashes": sources})
-    monkeypatch.setattr(E, "train_checkpoint", lambda *args: pytest.fail("trained again"))
-    monkeypatch.setattr(E, "score_trial", lambda run, suite, output, *args, **kwargs: ({"run": run, "partial_read_left": (output / "calibration").exists()}, []))
-    assert E.continue_trial("suite", trial, sources, "cuda")[0] == {"run": str(trial / "checkpoint"), "partial_read_left": False}
-
-
 def test_resume_writer_bounds_the_wait_for_peers(tmp_path, monkeypatch):
     """Rank 0 waits PEER_WAIT for the other ranks' files, then fails loudly instead of hanging; latest.json is untouched."""
     import d1a.full_ft as F
@@ -1445,40 +1298,6 @@ def test_a_complete_snapshot_is_never_deleted(tmp_path, capsys):
     old = tmp_path / "step-300" / "checkpoint"; old.mkdir(parents=True); write_json(old / SNAPSHOT_INFO, {"step": 300})
     assert done.parent.name == "step-0000004" and completed_snapshots(tmp_path) == [4, 300] and completed_snapshot_dirs(tmp_path)[300] == old
     assert not SnapshotWriter(tmp_path, [300], background=False).due(300)
-
-
-def test_score_trial_uses_the_suites_admission_context(monkeypatch, tmp_path):
-    """Round 19: in-trial scoring built its predictor with the 384-token default, so a long-state suite (evals/sft-v1, a
-    7,552-token state context) rejected its first long calibration record. The predictor must get the suite's context."""
-    import d1a.experiment as E
-    from d1a.model import MAX_TRAIN_STATE, training_context
-    long_state = training_context(MAX_TRAIN_STATE)
-    seen = {}
-
-    class Stop(Exception): pass
-
-    def predictor(run, device, options, context=None):
-        seen["context"] = context; raise Stop
-
-    monkeypatch.setattr(E, "LocalPredictor", predictor)
-    monkeypatch.setattr(E, "read_manifest", lambda suite: {"context": long_state})
-    with pytest.raises(Stop):
-        E.score_trial("run", "evals/sft-v1", tmp_path, [], "cpu", {"suite_sha256": "x"}, None, 0.0, False)
-    assert seen["context"] == long_state
-    monkeypatch.setattr(E, "read_manifest", lambda suite: {})
-    with pytest.raises(Stop):
-        E.score_trial("run", "evals/v7/decision-v7", tmp_path, [], "cpu", {"suite_sha256": "x"}, None, 0.0, False)
-    assert seen["context"] == E.CONTEXT
-
-
-def test_the_in_trial_temperature_says_it_is_not_shipped():
-    """Round 19: a trial's temperature is fitted on held-out items of its own training sources (in distribution); its record
-    (calibration/temperature.json, result.json calibration_fit) says so, so nobody serves or ships it."""
-    import d1a.experiment as E
-    fit = E.calibration_fit(0.95, [{"variant": "clean"}, {"variant": "permuted"}, {"variant": "clean"}], "rows-sha", "suite-sha")
-    assert fit == {"temperature": 0.95, "aggregation": "micro", "objective": "raw-logit NLL", "split": "calibration", "role": E.IN_TRIAL_TEMPERATURE,
-                   "rows_sha256": "rows-sha", "suite_sha256": "suite-sha", "n": 2}
-    assert E.IN_TRIAL_TEMPERATURE.startswith("in-trial screening") and "not a served or shipped temperature" in E.IN_TRIAL_TEMPERATURE
 
 
 def test_jev_refusals_are_counted_only_when_asked(monkeypatch):
@@ -1709,6 +1528,97 @@ def test_media_audio_is_mono_16k_and_bounded():
     assert out.ndim == 1 and len(out) == int(1.5 * SAMPLE_RATE) and abs(float(out.mean()) - 0.25) < 1e-3
     with pytest.raises(ValueError):
         decode_audio(wav(MAX_AUDIO_S + 1, 8_000, 1))
+
+
+def test_pass_tokens_max_refusals(monkeypatch, capsys):
+    """The ceiling caps the passes --length_sort plans: refused without it, with --row_budget and with --perm_kl (a
+    permuted copy is a second pass alive at the same time)."""
+    for extra in ((), ("--length_sort", "1", "--perm_kl", "0.1"), ("--length_sort", "1", "--row_budget", "8192")):
+        with pytest.raises(SystemExit):
+            _parse_train(monkeypatch, "--pass_tokens_max", "40960", *extra)
+        assert "--pass_tokens_max caps" in capsys.readouterr().err
+    assert _parse_train(monkeypatch, "--pass_tokens_max", "40960", "--length_sort", "1").pass_tokens_max == 40960
+
+
+def test_snapshot_count_is_capped(monkeypatch, capsys):
+    """d1a.full_ft.MAX_SNAPSHOTS bounds what a full-weight run may plan (every snapshot is kept on the run's disk next to
+    its resume points); d1a.train refuses more at parse time and again once the run's steps are known."""
+    from d1a.full_ft import too_many_snapshots
+    nine = tuple(round(0.1 * i, 1) for i in range(1, 10))
+    assert too_many_snapshots(nine[:8]) is None and "9 snapshots planned" in too_many_snapshots(nine)
+    assert too_many_snapshots((), 100, 900) is None and "9 snapshots planned" in too_many_snapshots((), 100, 1000)   # steps 100..900
+    assert "needs the run's step count" in too_many_snapshots((), 100) and too_many_snapshots((0.5,), 100, 450) is None   # {100, 200, 225, 300, 400}
+    with pytest.raises(SystemExit):
+        _parse_train(monkeypatch, *FULL, "--snapshot_fractions", ",".join(map(str, nine)))
+    with pytest.raises(SystemExit):
+        _parse_train(monkeypatch, *FULL, "--snapshot_every_steps", "10", "--max_steps", "100")
+    assert capsys.readouterr().err.count("MAX_SNAPSHOTS") == 2
+    assert _parse_train(monkeypatch, *FULL, "--snapshot_every_steps", "10").snapshot_every_steps == 10   # unbounded: checked in main
+
+
+def test_ranks_share_an_epoch_and_micro_batches_balance_length():
+    """Each rank's equal share of an epoch (d1a.full_ft.rank_share), and --length_sort's micro-batch plan: a long record
+    gets a micro-batch to itself, the short ones share one, and a step holds its own records once each."""
+    from types import SimpleNamespace
+    from d1a.full_ft import rank_share
+    from d1a.train import microbatch_plan
+    assert [rank_share(list(range(5)), r, 2) for r in (0, 1)] == [[0, 2, 4], [1, 3, 0]] and rank_share([1, 2], 0, 1) == [1, 2]
+    reqs = [{"state": "s" * n, "questions": {"q": {"instr": "x"}}} for n in (1, 90, 5, 70, 3, 80, 2, 4, 6, 7)]
+    knobs = lambda sort: SimpleNamespace(batch=2, accum=2, length_sort=sort, shared_prefix=1)
+    plain = [microbatch_plan(reqs, knobs(0), 2, rank) for rank in (0, 1)]
+    assert [len(c) for c, _, _ in plain[0]] == [2, 2, 1] and [(n, ends) for _, n, ends in plain[0]] == [(8, False), (8, True), (2, True)]
+    balanced = [microbatch_plan(reqs, knobs(1), 2, rank) for rank in (0, 1)]
+    assert len(balanced[0]) == len(balanced[1]) == 3 and [ends for _, _, ends in balanced[0]] == [False, True, True]
+    first = sorted(len(r["state"]) for plan in balanced for c, _, _ in plan[:2] for r in c)
+    assert first == sorted(len(r["state"]) for r in reqs[:8])
+    alone = {len(c[0]["state"]) for plan in balanced for c, _, _ in plan[:2] if len(c) == 1}
+    assert {90, 80, 70} <= alone
+
+
+def test_max_state_lifts_row_and_packed_limits_together():
+    from d1a.model import MAX_BRANCH, MAX_PACKED, MAX_STATE, MAX_TRAIN_STATE, SERVE_MAX_BRANCH, SERVE_MAX_STATE, training_context
+    from d1a.suite import CONTEXT
+    assert training_context() == {k: v for k, v in CONTEXT.items() if k != "truncate"} == {"max_state": MAX_STATE, "max_branch": MAX_BRANCH, "max_packed": MAX_PACKED}
+    long = 12 * MAX_STATE
+    lifted = training_context(long)
+    assert lifted["max_branch"] - MAX_BRANCH == lifted["max_packed"] - MAX_PACKED == long - MAX_STATE
+    assert MAX_TRAIN_STATE == SERVE_MAX_STATE == 65536                                   # 64k states train and serve
+    assert training_context(MAX_TRAIN_STATE)["max_branch"] <= SERVE_MAX_BRANCH          # the served row limit still fits a training branch
+    with pytest.raises(ValueError):
+        training_context(MAX_TRAIN_STATE + 1)
+
+
+def test_calibration_refuses_rows_from_the_checkpoints_own_training_unless_told(tmp_path, monkeypatch):
+    # a temperature fitted on held-out items of the checkpoint's own training corpus is in distribution and ships
+    # overconfident; the fit must refuse such rows with the reasons, and an explicit override must be recorded in head.pt
+    import json
+    from d1a import calibrate
+    from d1a.checkpoint import Meta, read_meta, write_meta
+    from d1a.suite import digest
+    suite = "evals/v7/decision-v7"
+    run = tmp_path / "ckpt"; run.mkdir()
+    write_meta(run, Meta(base="b", extra={"suite_sha256": digest(f"{suite}/manifest.json"), "args": {"suite": suite}}))
+    reads = tmp_path / "cal"; reads.mkdir()
+    rows = [{"id": f"r{i}", "source": "agnews", "task": "agnews", "type": "choice", "keys": ["a", "b"], "variant": "clean", "group": i,
+             "question": "q", "label": i % 2, "p": [0.73, 0.27], "logits": [1.0, 0.0], "inference_temperature": 1.0} for i in range(10)]
+    (reads / "rows.json").write_text(json.dumps(rows), encoding="utf-8")
+    (reads / "report.json").write_text(json.dumps({"suite_sha256": digest(f"{suite}/manifest.json"), "split": "calibration"}), encoding="utf-8")
+    monkeypatch.setattr(calibrate, "fit_temperature", lambda rows, **kw: 1.5)
+    monkeypatch.setattr(calibrate, "cross_validated_temperature", lambda rows, **kw: {
+        "temperatures": [1.5], "raw": {"ece": 0.1}, "out_of_fold": {"ece": 0.05}, "separated": True,
+        "ece_ci95": {"raw": [0.0, 0.2], "out_of_fold": [0.0, 0.1], "delta": [-0.1, 0.0]}})
+    with pytest.raises(SystemExit) as refused:
+        calibrate.main(["--run", str(run), "--rows", str(reads / "rows.json")])
+    why = str(refused.value)
+    assert "is training data of the checkpoint" in why and "training source(s)" in why and "calibration partition" in why
+    assert read_meta(run).temperature == 1.0                      # nothing written
+    assert calibrate.main(["--run", str(run), "--rows", str(reads / "rows.json"), "--allow-in-distribution"]) == 1.5
+    meta = read_meta(run)
+    assert meta.temperature == 1.5 and meta.extra["temperature_fit"]["in_distribution"]["problems"]
+    with pytest.raises(SystemExit):                              # a manual value needs a reason
+        calibrate.main(["--run", str(run), "--temperature", "2"])
+    calibrate.main(["--run", str(run), "--temperature", "2", "--reason", "copied from a pool fit"])
+    assert read_meta(run).extra["temperature_fit"] == {"method": "manual", "reason": "copied from a pool fit"}
 
 
 def test_video_frames_are_sampled_evenly_and_never_repeated():
