@@ -2,6 +2,8 @@
 
 **A small decision model on Gemma 4.** One document and a set of typed questions in, a calibrated probability for every option out, in one forward pass. No text generation.
 
+**Try it in your browser:** [huggingface.co/spaces/JohnP1/d1a](https://huggingface.co/spaces/JohnP1/d1a): model routing, guardrails, tool-call gating, the PR labeler and photo and voice checks on D1A-E4B (ZeroGPU; the first request after it wakes waits for a GPU).
+
 > **Built on Kev.** D1A is built on [Kev](https://github.com/jaredpalmer/kev) by Jared Palmer, licensed under the [Apache License 2.0](LICENSE). The model code, trainer, benchmark and frozen evaluation suites here started as a copy of Kev (upstream commit `0fe8fc9`); [docs/UPSTREAM.md](docs/UPSTREAM.md) lists every file taken from Kev and what D1A changed. D1A is an independent project. It is not affiliated with, sponsored by or endorsed by Jared Palmer or the Kev authors.
 
 ## See It Running

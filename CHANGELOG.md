@@ -16,6 +16,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **A Hugging Face Space** (`space/`, published by `space/push.sh` as `JohnP1/d1a`, hosted on ZeroGPU): model routing,
+  guardrails, tool-call gating, the PR labeler (paste a GitHub PR link) and zero-shot photo and voice checks on
+  D1A-E4B v0.4. One `d1a.media.MediaModel` answers all of them: `MediaModel.probs` now also scores a text-only record
+  (media None) on the same weights.
 - **D1A suites** (`d1a/suites.py`, `evals/d1a/`). Our own datasets, pinned: a manifest per dataset holds its Hub commit
   and each partition's sha256, record count and role (train or eval), while the text stays in the private dataset.
   `evals/d1a/<suite>:<partition>` works wherever `--data` does (`d1a.train`, `d1a.benchmark`). The partition is fetched

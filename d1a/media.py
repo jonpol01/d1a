@@ -124,9 +124,10 @@ class MediaModel:
         return ids, types, extra
 
     @torch.no_grad()
-    def probs(self, rec, media: Media):
-        """-> (probabilities per question, input token count) for one record whose state sits after the media."""
-        media_ids, media_types, extra = self.media_inputs(media)
+    def probs(self, rec, media: Media | None = None):
+        """-> (probabilities per question, input token count) for one record whose state sits after the media, or a plain
+        text record (media None) on the same weights, so one loaded model answers both."""
+        media_ids, media_types, extra = self.media_inputs(media) if media is not None else ([], [], {})
         state_ids, _, rows = rows_of(encode(self.tok, rec))
         n_head = len(layout(self.tok)[0]) + 1                  # leading ids + <state>
         prefix = state_ids[:n_head] + media_ids + state_ids[n_head:]
