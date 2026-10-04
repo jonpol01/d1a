@@ -1,0 +1,33 @@
+{
+ "format": "d1a-suite",
+ "version": 1,
+ "dataset": "JohnP1/d1a-evals",
+ "revision": "2dc4d859b6d0b216d6e57c0de99fe80137ea29d2",
+ "partitions": {
+  "semif-v1": {
+   "path": "external/semif-v1/development.jsonl",
+   "role": "eval",
+   "sha256": "b9e0c7939a25a04a7ef7bc12334b5fa45b2027d04904d32021295b5539a97303",
+   "records": 252
+  },
+  "typesafe-v1": {
+   "path": "external/typesafe-v1/development.jsonl",
+   "role": "eval",
+   "sha256": "877ed7cd473e3973d29f0bb0ff2a597192955e477f2127794df358b6ba795879",
+   "records": 102
+  },
+  "wanli-v1": {
+   "path": "external/wanli-v1/development.jsonl",
+   "role": "eval",
+   "sha256": "ab732d761daf51aa859263bb402fcc8e880bd801a21e3b882464a7766e8d1b5d",
+   "records": 256
+  },
+  "wanli-v2": {
+   "path": "external/wanli-v2/development.jsonl",
+   "role": "eval",
+   "sha256": "80216665abca483b8a0a197e073b69683ce3615c30fc5fc95d05848ae44a796e",
+   "records": 1002
+  }
+ },
+ "provenance": "Kev's evals/external/{semif-v1,typesafe-v1,wanli-v1,wanli-v2} development partitions, byte for byte (sha256 equal to Kev's manifests); see their manifests in git history (1bce9a4) for sources and licences"
+}

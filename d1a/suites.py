@@ -69,9 +69,9 @@ def resolve(arg, purpose="eval"):
     return path
 
 
-def freeze(suite, dataset, partitions, revision=None):
+def freeze(suite, dataset, partitions, revision=None, provenance=None):
     """Write `suite`/manifest.json for `partitions` {name: (path in the dataset, role)} of `dataset` at `revision` (default:
-    its current commit), hashing each file as it is there."""
+    its current commit), hashing each file as it is there. `provenance`: where the data came from, kept in the manifest."""
     from huggingface_hub import HfApi, hf_hub_download
     revision = HfApi().dataset_info(dataset, revision=revision).sha
     parts = {}
@@ -80,6 +80,7 @@ def freeze(suite, dataset, partitions, revision=None):
         local = hf_hub_download(dataset, path, repo_type="dataset", revision=revision)
         parts[name] = {"path": path, "role": role, "sha256": sha256(local), "records": records(local)}
     m = {"format": FORMAT, "version": VERSION, "dataset": dataset, "revision": revision, "partitions": parts}
+    if provenance: m["provenance"] = provenance
     Path(suite).mkdir(parents=True, exist_ok=True)
     (Path(suite) / MANIFEST).write_text(json.dumps(m, indent=1) + "\n", encoding="utf-8")
     return m
@@ -91,6 +92,7 @@ def main():
     f = sub.add_parser("freeze", help="pin a dataset's partitions into <suite>/manifest.json")
     f.add_argument("suite"); f.add_argument("--dataset", required=True); f.add_argument("--revision")
     f.add_argument("--partition", action="append", required=True, metavar="NAME=PATH:ROLE")
+    f.add_argument("--provenance", help="where the data came from (kept in the manifest)")
     v = sub.add_parser("verify", help="fetch every partition of a suite and check it against the manifest")
     v.add_argument("suite")
     a = ap.parse_args()
@@ -99,7 +101,7 @@ def main():
         for spec in a.partition:
             name, _, rest = spec.partition("="); path, _, role = rest.rpartition(":")
             partitions[name] = (path, role)
-        m = freeze(a.suite, a.dataset, partitions, a.revision)
+        m = freeze(a.suite, a.dataset, partitions, a.revision, a.provenance)
         print(f"{a.suite}: {a.dataset}@{m['revision'][:10]}, " + ", ".join(f"{n} {p['records']}" for n, p in m["partitions"].items()))
     else:
         for name in manifest(a.suite)["partitions"]:
