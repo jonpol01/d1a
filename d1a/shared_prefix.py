@@ -1,5 +1,5 @@
 # Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); internal method names use d1a.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); internal method names use d1a; FSDP2 hooks removed with full-weight training.
 """Training forward through a shared state prefix, for the hybrid Qwen3.5 backbones (d1a.train --shared_prefix).
 
 The row form (d1a.model.forward_rows_batch) trains a record with q questions as q causal rows, state + one branch each,
@@ -25,7 +25,6 @@ import types
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.distributed.fsdp import FSDPModule, register_fsdp_forward_method
 from torch.utils.checkpoint import checkpoint
 
 
@@ -91,7 +90,7 @@ def branch_hidden(lm, splits, pad_id, device):
     b_ids = torch.full((len(branches), Lb), pad_id, device=device); b_pos = torch.zeros_like(b_ids); b_real = torch.zeros_like(b_ids, dtype=torch.bool)
     for i, r in enumerate(branches):   # right-padded; their positions already continue the state
         b_ids[i, :len(r["ids"])] = torch.tensor(r["ids"], device=device); b_pos[i, :len(r["pos"])] = torch.tensor(r["pos"], device=device); b_real[i, :len(r["ids"])] = True
-    run = _method(base, "d1a_shared_prefix", _forward)   # on an FSDP2 root: embeddings and final norm gathered as for base(...)
+    run = _method(base, "d1a_shared_prefix", _forward)
     h_b = run(s_ids, s_pos, s_real, b_ids, b_pos, b_real, torch.tensor(owner, device=device))
     out = [[] for _ in splits]
     for i, b in enumerate(owner): out[b].append(h_b[i, :len(branches[i]["ids"])])
@@ -126,7 +125,7 @@ def _forward(base, s_ids, s_pos, s_real, b_ids, b_pos, b_real, owner):
 
 def _step(layer, h_s, h_b, ropes, masks, positions, s_real, owner):
     """One decoder layer: the state pass, then the branch pass reading what it left (`Prefix`). A single call on the layer
-    (both passes call its plain `forward`), so an FSDP2 unit is gathered once for both and checkpointing replays both."""
+    (both passes call its plain `forward`), so checkpointing replays both."""
     prefix = Prefix()
     h_s = layer.forward(h_s, position_embeddings=ropes[0], attention_mask=masks[0], position_ids=positions[0], past_key_values=prefix)
     prefix.branch(owner)
@@ -135,9 +134,7 @@ def _step(layer, h_s, h_b, ropes, masks, positions, s_real, owner):
 
 
 def _method(module, name, fn):
-    """`fn` bound to `module` as `name`; on an FSDP2 unit also registered as a forward method, so the unit's parameters
-    are gathered around the call and resharded after it, and backward re-gathers them from its outputs' hooks."""
+    """`fn` bound to `module` as `name` (once)."""
     if not hasattr(module, name):
         setattr(module, name, types.MethodType(fn, module))
-        if isinstance(module, FSDPModule): register_fsdp_forward_method(module, name)
     return getattr(module, name)

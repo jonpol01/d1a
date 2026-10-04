@@ -53,6 +53,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Removed
 
+- **Full-weight training.** `d1a.train --full_ft`, its FSDP2 multi-GPU mode under torchrun and the snapshot options
+  (`--snapshot_fractions`, `--snapshot_every_steps`, `--snapshot_dir`) are gone, with `d1a/full_ft.py`,
+  `scripts/interpolate_checkpoint.py` and `scripts/merge_lora_checkpoint.py`. Training is single-process LoRA, and
+  LoRA training is bit-identical to before. A full-weight checkpoint is refused at load. Resume points moved to D1A's
+  own `d1a/resume.py`, one file per point: a point written before this change cannot be resumed (finish that run on the
+  older version). `--shared_prefix` now defaults to 0 (it was on only with `--full_ft 1`). `training_metrics.json`
+  drops `world_size` and `snapshots`.
 - **Kev's unused training options.** `d1a.train` drops `--label_smoothing`, `--brier_w`, `--focal_gamma`, `--ord_w`,
   `--perm_kl`/`--perm_frac`, `--anchor`/`--anchor_w`/`--anchor_sources`, `--option_isolation` and
   `--special_embeddings`: no D1A checkpoint used any of them. Training with the remaining options is bit-identical

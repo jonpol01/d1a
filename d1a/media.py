@@ -97,8 +97,8 @@ class MediaModel:
         from peft import PeftModel
         from transformers import AutoModelForImageTextToText, AutoProcessor
         self.checkpoint = ck = Checkpoint(run); meta = ck.meta
-        if ck.export is not None or meta.weights != "lora":
-            raise SystemExit(f"{run}: the media server needs a LoRA checkpoint (torch), not an MLX export or full weights")
+        if ck.export is not None:
+            raise SystemExit(f"{run}: the media server needs a LoRA checkpoint (torch), not an MLX export")
         self.device = device
         self.proc = AutoProcessor.from_pretrained(meta.base, revision=meta.base_revision)
         self.tok = self.proc.tokenizer

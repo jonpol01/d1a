@@ -31,7 +31,7 @@ def test_export_config_round_trip(tmp_path):
     head, cfg = write_export(tmp_path)
     assert (cfg["format"], cfg["format_version"], cfg["bos_id"], cfg["source_revision"]) == (EXPORT_FORMAT, EXPORT_VERSION, 2, "71c14b2")
     ck = Checkpoint(tmp_path)
-    assert ck.export == cfg and not ck.full
+    assert ck.export == cfg
     m = ck.meta
     assert (m.base, m.base_revision, m.lora, m.head_dim, m.temperature, m.weights) == ("google/gemma-4-E2B", "d29ff6b", 16, 4, 1.48, "mlx")
     assert all(torch.equal(m.head[k], head[k]) and m.head[k].dtype == torch.float32 for k in head)
