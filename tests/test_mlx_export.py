@@ -131,3 +131,29 @@ def test_gemma4_prefix_form_matches_rows_across_the_sliding_window():
             for z, r in zip(got, rows):
                 assert torch.allclose(z, r, atol=1e-4), (state, (z - r).abs().max())
         assert all(np.array_equal(np.asarray(c.keys), b) for c, b in zip(prefix[1], before))
+
+
+@pytest.mark.skipif(platform.system() != "Darwin" or platform.machine() != "arm64" or not mlx_available(), reason="MLX runs on Apple Silicon only")
+def test_gemma4_branch_pass_runs_shared_layers_on_the_read_positions_only():
+    """Gemma 4's KV-shared layers read keys and values from earlier layers, so the branch pass runs them over the positions
+    the head reads alone (each question's <decide> and options), one length-1 row per position at its own offset, and
+    the answers equal each question run as its own full row, across the sliding window."""
+    import mlx.core as mx
+    from d1a.mlx_model import MLXDecisionModel
+    mx.random.seed(0)
+    m = MLXDecisionModel.from_lm(tiny_gemma4(), pad_id=0, head_dim=16)
+    enc = fake_encoding(np.random.default_rng(2), 20, [(5, 2), (14, 4), (9, 3)])
+    rows = m.forward_rows(enc)
+    shared = [i for i, p in enumerate(m.text.previous_kvs) if p != i]
+    seen, saved = [], {i: m.text.layers[i] for i in shared}
+
+    class Spy:   # records the shape each shared layer runs over
+        def __init__(self, layer): self.layer, self.layer_type = layer, layer.layer_type
+        def __call__(self, h, *a, **k): seen.append(tuple(h.shape[:2])); return self.layer(h, *a, **k)
+    for i in shared: m.text.layers[i] = Spy(saved[i])
+    got = m._branch_logits(enc, m.prefix(enc)[1])
+    for i, layer in saved.items(): m.text.layers[i] = layer
+    picks = sum(1 + len(o) for o in enc["opt_idx"])
+    assert seen == [(picks, 1)] * len(shared)
+    for z, r in zip(got, rows):
+        assert torch.allclose(z, r, atol=1e-4), (z - r).abs().max()
