@@ -6,6 +6,16 @@ tests, so it has to guess when it is done; a calibrated P(resolved) lets it choo
 abstaining. This recipe is the study for the Gemma 4 Developer Agent paper track (Kaggle,
 `gemma-4-developer-agent-paper`, deadline 2026-11-13 08:59 JST).
 
+Framing: **a small, local, post-trained Gemma 4 verifier that makes local coding agents more reliable.** D1A-E4B is
+Gemma 4 E4B with a LoRA adapter and a pointer head, post-trained here for one question, and it runs on a laptop in about
+two seconds per run. The claims it has to support, each with a number:
+- it adds to cheap trajectory signals on unseen repositories (heuristics + D1A vs heuristics alone);
+- it carries over to a Gemma 4 agent (trained on public SWE-agent runs, tested on Gemma-4-31B agent runs);
+- it improves what the agent submits (verifier-guided best-of-k against random, heuristic and oracle picks);
+- it is calibrated enough to act on (ECE, reliability, risk–coverage for submit / keep working / abstain);
+- it runs locally (seconds per run on Apple Silicon).
+A calibrated P(resolved) is also a candidate reward for fine-tuning and RL; that is future work unless measured here.
+
 | Step | Script | Cost |
 |---|---|---|
 | Zero-shot D1A against trajectory heuristics | `zero_shot.py` | $0 (MLX on a Mac) |

@@ -39,6 +39,25 @@ def split_of(repo):
     return "test" if h < 2 else "dev" if h < 3 else "train"
 
 
+ANYTIME = {"resolved": {"type": "noul",
+                        "instr": "A coding agent is part-way through this issue. Will its run end with a patch that correctly fixes the issue, so that the repository's tests for it pass?",
+                        "criteria": {"true": "The run is on track to a correct fix", "false": "The run is stuck, off track, or heading to a wrong or no fix"}}}
+
+
+def cut(r, step):
+    """The run as it stood after its `step`-th agent action: the trajectory up to there, no final patch; None when the
+    run had ended by then (a run that short has nothing left to decide)."""
+    n = 0
+    for i, m in enumerate(r["trajectory"]):
+        if m["role"] == "ai":
+            n += 1
+            if n == step:
+                rest = r["trajectory"][i + 1:]
+                if not any(x["role"] == "ai" for x in rest): return None
+                return {**r, "trajectory": r["trajectory"][: i + 2], "generated_patch": None, "exit_status": "in_progress"}   # the final exit is not known yet
+    return None
+
+
 def issue_of(traj):
     u = next((m.get("text") or "" for m in traj if m["role"] == "user"), "")
     i, j = u.find("ISSUE:"), u.find("INSTRUCTIONS:")
@@ -61,7 +80,8 @@ def state_of(r, issue_chars, patch_chars, tail_chars):
         t = f"[{'agent' if m['role'] == 'ai' else 'environment'}] {(m.get('text') or '').strip()}"[:800]
         if used + len(t) > tail_chars: break
         tail.append(t); used += len(t)
-    return (f"ISSUE:\n{issue_of(r['trajectory'])[:issue_chars]}\n\nPATCH:\n{(r['generated_patch'] or '(no patch)')[:patch_chars]}\n\n"
+    patch = "(the run is still in progress; no patch yet)" if r["generated_patch"] is None else (r["generated_patch"] or "(no patch)")[:patch_chars]
+    return (f"ISSUE:\n{issue_of(r['trajectory'])[:issue_chars]}\n\nPATCH:\n{patch}\n\n"
             f"LAST STEPS OF THE AGENT'S RUN:\n" + "\n".join(reversed(tail)))
 
 
@@ -90,24 +110,39 @@ def main():
     ap.add_argument("--n", type=int, default=600); ap.add_argument("--shards", type=int, default=1); ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--run", default="JohnP1/d1a-e4b-mlx-q8", help="a repo takes its latest version (d1a.versions)"); ap.add_argument("--no-d1a", action="store_true")
     ap.add_argument("--issue-chars", type=int, default=3000); ap.add_argument("--patch-chars", type=int, default=6000); ap.add_argument("--tail-chars", type=int, default=3000)
+    ap.add_argument("--split", choices=["all", "train", "dev", "test"], default="all", help="only runs whose repository is in this split (split_of)")
+    ap.add_argument("--per-issue", type=int, default=0, help="instead of a random sample: up to this many runs of every issue (for best_of_k.py)")
+    ap.add_argument("--cut-step", type=int, default=0, help="anytime mode: score each run as it stood after this many agent actions (runs already over are left out)")
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
     rows = []
     for k in range(a.shards):
         rows += pq.read_table(hf_hub_download(DATASET, f"data/train-{k:05d}-of-00012.parquet", repo_type="dataset"),
                               columns=["instance_id", "model_name", "target", "trajectory", "exit_status", "generated_patch"]).to_pylist()
-    rows = random.Random(a.seed).sample(rows, min(a.n, len(rows)))
+    rows = [r for r in rows if a.split == "all" or split_of(r["instance_id"].rsplit("-", 1)[0]) == a.split]
+    rng = random.Random(a.seed)
+    if a.per_issue:
+        by_issue = {}
+        for r in rows: by_issue.setdefault(r["instance_id"], []).append(r)
+        rows = [r for iid in sorted(by_issue) for r in rng.sample(by_issue[iid], min(a.per_issue, len(by_issue[iid])))]
+    else:
+        rows = rng.sample(rows, min(a.n, len(rows)))
+    for r in rows:   # one id per recorded run, the same in full and --cut-step outputs (budget_sim.py joins on it)
+        r["run_key"] = hashlib.sha1(json.dumps([r["instance_id"], r["exit_status"], r["generated_patch"], len(r["trajectory"])]).encode()).hexdigest()[:16]
+    if a.cut_step:
+        rows = [c for c in (cut(r, a.cut_step) for r in rows) if c is not None]
+    question = ANYTIME if a.cut_step else QUESTION
     model = None
     if not a.no_d1a:
         from d1a import D1A
         from d1a.versions import latest
-        a.run = latest(a.run)
+        a.run = a.run if Path(a.run).exists() else latest(a.run)   # a local run directory is used as is
         model = D1A.load(a.run)
     out = []
     for i, r in enumerate(rows):
-        rec = {"instance_id": r["instance_id"], "repo": r["instance_id"].rsplit("-", 1)[0], "model": r["model_name"], "y": bool(r["target"]), **heuristics(r)}
+        rec = {"run_key": r["run_key"], "instance_id": r["instance_id"], "repo": r["instance_id"].rsplit("-", 1)[0], "model": r["model_name"], "y": bool(r["target"]), **heuristics(r)}
         if model:
-            t0 = time.time(); ans = model.decide(state_of(r, a.issue_chars, a.patch_chars, a.tail_chars), QUESTION)["resolved"]
+            t0 = time.time(); ans = model.decide(state_of(r, a.issue_chars, a.patch_chars, a.tail_chars), question)["resolved"]
             rec["p_d1a"] = float(ans["noul"]); rec["run"] = a.run; rec["seconds"] = round(time.time() - t0, 2)
         out.append(rec)
         if i % 50 == 0: print(i, rec.get("p_d1a"), rec["y"], flush=True)
