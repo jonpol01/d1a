@@ -54,6 +54,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **Served PR requests about 20% faster on Apple Silicon** (MLX). The question rows ran through all of Gemma 4's
+  layers; its 18 KV-shared layers now run only at the positions the pointer head reads, each as a length-1 row at its
+  own rope offset with an explicit causal (and sliding-window) mask over the shared keys
+  (`MLXDecisionModel._picked_hidden`). D1A-E4B 8-bit on an M1 Max, 30 PR requests: 2,503 -> 1,955 ms per request
+  (p50; the question rows 1,689 -> 1,013 ms). Exact in fp32 (D1A-E2B, 90 questions: max |dp| 2.3e-6); at 8 bits it
+  moves answers less than running the rows one at a time instead of batched already does (max |dp| 0.015 vs 0.019).
 - **Gemma 4 trains and scores about a third faster on torch** (the path HF Jobs uses). Its last 18 of 42 layers
   (E4B; KV-shared) take keys and values from earlier layers, so in the packed forward they now run only over the
   positions the pointer head reads (each question's `<decide>` and option ends, about 10-20 per record) instead of the

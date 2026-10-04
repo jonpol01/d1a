@@ -1,5 +1,5 @@
 # Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); Gemma 4 bases (sliding-window and KV-shared layers) and quantized MLX exports (export_mlx); model-family details from d1a.backbone; Gemma 4's per-layer embeddings read from the weight files per request (FlashEmbedding); photo and voice soft tokens in the state pass (d1a.media); the state pass skips Gemma 4's KV-shared layers; option isolation removed.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); Gemma 4 bases (sliding-window and KV-shared layers) and quantized MLX exports (export_mlx); model-family details from d1a.backbone; Gemma 4's per-layer embeddings read from the weight files per request (FlashEmbedding); photo and voice soft tokens in the state pass (d1a.media); the state pass skips Gemma 4's KV-shared layers; option isolation removed; the branch pass runs Gemma 4's KV-shared layers only at the positions the head reads.
 """Apple Silicon backend for the Qwen3.5 and Gemma 4 checkpoints: mlx-lm's Metal implementation of the backbone under
 D1A's own encoder and pointer head.
 
@@ -298,13 +298,61 @@ class MLXDecisionModel:
         """Branches as rows on a replicated copy of the state cache, rows_per_pass rows (and cache copies) at a time."""
         _, _, rows = rows_of(enc)
         chunk, out = rows_per_pass([r["ids"] for r in rows], enc["seg"].count(0)), []
+        shared = [i for i, p in enumerate(getattr(self.text, "previous_kvs", ())) if p != i]
         for start in range(0, len(rows), chunk):
             part = rows[start:start + chunk]
             merge = self.backbone.mlx_cache_copy == "merge"
             batch = [type(c).merge([c] * len(part)) if merge else replicate(c, len(part)) for c in cache]   # both copy the arrays: `cache` is not mutated
+            if shared:
+                picks = [(i, t) for i, r in enumerate(part) for t in (r["decide"], *r["opts"])]
+                h = self._picked_hidden([r["ids"] for r in part], batch, picks, shared[0])
+                at = 0
+                for r in part:
+                    n = 1 + len(r["opts"])
+                    with torch.no_grad(): out.append(self.head(h[at], h[at + 1:at + n]))
+                    at += n
+                continue
             h = self._hidden([r["ids"] for r in part], batch)
             out += [self._logits(h[i], r["decide"], r["opts"]) for i, r in enumerate(part)]
         return out
+
+    def _picked_hidden(self, rows, cache, picks, depth):
+        """[len(picks), d] fp32 torch hidden states of the branch rows at `picks` (row, position) only. Gemma 4's layers from
+        `depth` on take their keys and values from earlier layers, so no position's output there feeds another: those
+        layers run over the picked positions alone, each as its own length-1 row at its own position (rope offset), with an
+        explicit mask over the shared keys (causal, and the window on sliding layers, as mlx-lm's own masks). The earlier
+        layers run over every row, as mlx-lm runs them."""
+        text = self.text
+        L = max(len(r) for r in rows)
+        ids = mx.array([r + [self.pad_id] * (L - len(r)) for r in rows], dtype=mx.int32)
+        emb = text.embed_tokens(ids)
+        h = emb * text.embed_scale
+        ple = text._project_per_layer_inputs(h, text._get_per_layer_inputs(ids, emb)) if text.hidden_size_per_layer_input else None
+        caches = cache + [None] * (len(text.layers) - len(cache))
+        masks = text._make_masks(h, caches)
+        kept = [(None, None)] * len(text.layers)
+        for i in range(depth):
+            kvs, offset = kept[text.previous_kvs[i]]
+            h, kvs, offset = text.layers[i](h, masks[i], caches[i], per_layer_input=None if ple is None else ple[:, :, i, :], shared_kv=kvs, offset=offset)
+            kept[i] = (kvs, offset)
+        row, pos = mx.array([r for r, _ in picks]), mx.array([t for _, t in picks])
+        h = h[row, pos][:, None, :]
+        ple = None if ple is None else ple[row, pos]
+        state = cache[0].offset - L                   # the state's length: the caches now hold the state and the rows
+        query = state + pos                           # each pick's absolute position, which its rope offset is too
+        pick_masks = {}
+        for i in range(depth, len(text.layers)):
+            src = text.previous_kvs[i]
+            if src not in pick_masks:
+                keys = kept[src][0][0]
+                key_pos = state + L - keys.shape[2] + mx.arange(keys.shape[2])   # a rotating cache returns only its last keys
+                allowed = key_pos[None] <= query[:, None]
+                if text.layers[i].layer_type == "sliding_attention": allowed = allowed & (query[:, None] - key_pos[None] < text.window_size)
+                pick_masks[src] = (allowed[:, None, None, :], tuple(x[row] for x in kept[src][0]))
+            mask, kvs = pick_masks[src]
+            h, _, _ = text.layers[i](h, mask, None, per_layer_input=None if ple is None else ple[:, None, i, :], shared_kv=kvs, offset=query)
+        h = text.norm(h)[:, 0, :]
+        return torch.from_numpy(np.asarray(h.astype(mx.float32)))
 
     def _branch_probs(self, enc, cache):
         return [F.softmax(z, -1) for z in self._branch_logits(enc, cache)]
