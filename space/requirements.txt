@@ -1,0 +1,4 @@
+# d1a pinned to a commit (space/push.sh writes it); the media extra brings Gemma 4's image, audio and video processing
+d1a[media] @ git+https://github.com/jonpol01/d1a@D1A_SHA
+torch==2.13.0
+spaces
