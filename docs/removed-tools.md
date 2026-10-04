@@ -1,6 +1,6 @@
 # Removed tools
 
-Tools D1A inherited from Kev and removed. They were useful ideas, so this records what each did and how to bring it back,
+Tools and options D1A inherited from Kev and removed. They were useful ideas, so this records what each did and how to bring it back,
 in our own code or by restoring the file from git:
 
 ```bash
@@ -61,3 +61,24 @@ entirely in the browser and autosaves to localStorage, keyed by a hash of the fi
 
 A good fit for reviewing D1A training labels, for example the PR-labeler data or Visionkit OK/NG photos, if we need
 that again.
+
+## Training options (removed October 2026)
+
+Research options of `d1a.train` that no D1A checkpoint used (every `training_config.json` of D1A-E2B, D1A-E4B and
+the routing model leaves them at their defaults, which turned them off). They are in commit `00371c1` and earlier:
+
+```bash
+git show 00371c1:d1a/train.py   # question_loss, anchor_loss, permutation_kl, batch_loss, parse_args
+git show 00371c1:d1a/model.py   # encode(option_isolation=...), branch_mask_batch(opts=...)
+```
+
+| Option | What it did |
+|---|---|
+| `--label_smoothing ε` | Hard-label cross-entropy with label smoothing (`F.cross_entropy(..., label_smoothing=ε)`); soft targets unchanged. |
+| `--brier_w w` | Adds `w × Σ(softmax(z) − one_hot(y))²` to the hard-label cross-entropy. |
+| `--focal_gamma γ` | Multiplies the hard-label cross-entropy by `(1 − p_y)^γ`. At most one of these three at a time. |
+| `--ord_w w` | For Score questions, adds `w ×` the ranked probability score: the mean squared gap between the predicted and the observed CDF over the ordered levels. |
+| `--perm_kl w`, `--perm_frac f` | For a fraction `f` of records with a Choice of 3+ options, a second forward pass with the options shuffled, and `w ×` the symmetric KL between the two predictions (mapped back to the original order). |
+| `--anchor file`, `--anchor_w w`, `--anchor_sources` | `w × KL(base ‖ model)` toward a frozen base model's zero-shot distribution per question (a JSON of `{record_id: {qid: {key: p}}}` targets; questions whose option set changed are skipped). Its builder, `d1a.anchors`, was already removed. |
+| `--option_isolation 1` | Every option span is its own sub-branch: it sees the state, the instruction and itself only, all spans share position ids, and `<decide>` sits after the longest. Answers are permutation-invariant by construction. Packed mask only, so not on Qwen3.5, MLX or the media server. A checkpoint trained with it is now refused at load. |
+| `--special_embeddings 1` | Also trains the 5 delimiter tokens' embeddings (PEFT `trainable_token_indices`). Such adapters still load on torch; MLX refuses them as before. |

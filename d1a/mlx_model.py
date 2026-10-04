@@ -1,5 +1,5 @@
 # Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); Gemma 4 bases (sliding-window and KV-shared layers) and quantized MLX exports (export_mlx); model-family details from d1a.backbone; Gemma 4's per-layer embeddings read from the weight files per request (FlashEmbedding); photo and voice soft tokens in the state pass (d1a.media); the state pass skips Gemma 4's KV-shared layers.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); Gemma 4 bases (sliding-window and KV-shared layers) and quantized MLX exports (export_mlx); model-family details from d1a.backbone; Gemma 4's per-layer embeddings read from the weight files per request (FlashEmbedding); photo and voice soft tokens in the state pass (d1a.media); the state pass skips Gemma 4's KV-shared layers; option isolation removed.
 """Apple Silicon backend for the Qwen3.5 and Gemma 4 checkpoints: mlx-lm's Metal implementation of the backbone under
 D1A's own encoder and pointer head.
 
@@ -169,7 +169,7 @@ def replicate(cache, n):
 
 class MLXDecisionModel:
     """Prefill-only scorer: hidden states from mlx-lm, logits from the shared torch PointerHead."""
-    backend, device, option_isolation = "mlx", "mlx", False
+    backend, device = "mlx", "mlx"
     ple_flash = False       # set by __init__ when Gemma 4's per-layer embeddings are read from the weight files
     prefix_min_tokens = 0   # d1a.serve caches the state prefix for every request: on Metal the branch-only pass is always the cheaper one
 
@@ -211,7 +211,7 @@ class MLXDecisionModel:
         self.head.eval(); return self
 
     def encode(self, tok, rec, **kw):
-        return encode(tok, rec, option_isolation=False, **kw)
+        return encode(tok, rec, **kw)
 
     def _hidden(self, rows, cache=None):
         """[N, L, d] hidden states of right-padded token rows. Pads sit after every real token and both layer kinds are
@@ -353,7 +353,6 @@ def export_mlx(ck, out, bits=None, group_size=64, embeddings=True, per_layer_bit
 
     if ck.export is not None: raise ValueError(f"{ck.path} is already an MLX export")
     if ck.full: raise ValueError("export_mlx merges an adapter; full-weight checkpoints are not supported")
-    if ck.meta.option_isolation: raise ValueError("option_isolation needs the packed mask; not available on the MLX backend")
     meta, out = ck.meta, Path(out)
     tok = load_tokenizer(meta.base, revision=meta.base_revision)
     lm, config = load_mlx_lm(resolve_run(f"{meta.base}@{meta.base_revision or ''}"))

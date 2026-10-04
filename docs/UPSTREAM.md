@@ -55,7 +55,10 @@ the Apache License 2.0. This file records where D1A's code came from and what D1
   full-weight snapshot cap moved to `d1a/full_ft.py`). `transfer_v9.py` stays because two suite builders import it. Then Kev's Next.js `playground/` and the `tools/review`
   label-review page, with `JevPredictor` in `d1a/predictors.py` (it ran the playground's `jev-evaluate.mjs`) and its tests;
   the demo app is now [jonpol01/d1a-playground](https://github.com/jonpol01/d1a-playground), and
-  [removed-tools.md](removed-tools.md) records what both tools did and how to restore them.
+  [removed-tools.md](removed-tools.md) records what both tools did and how to restore them. Then `d1a.train`'s research
+  options that no D1A checkpoint used: label smoothing, the Brier and focal terms, the ordinal RPS, the permutation KL,
+  anchoring, option isolation (also in `d1a.model`, `d1a.serve`, `d1a.mlx_model`; such checkpoints are refused at load)
+  and delimiter-embedding training, with their tests; removed-tools.md describes each.
 - **Rewritten from scratch** (no longer derived): `d1a/calibrate.py`, `scripts/calibrate_checkpoint.py` (now a wrapper
   around it).
 - **Rewritten**: `README.md`, `AGENTS.md`, `NOTICE`, `.gitignore`.

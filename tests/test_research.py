@@ -22,7 +22,7 @@ def choice_request():
 
 def test_score_loss_is_proper_at_true_distribution():
     logits = torch.tensor([0.2, 0.8]).log().requires_grad_()
-    loss = sum(p * question_loss(logits, {"label": y, "qtype": "score"}, "cpu", 0.5) for y, p in enumerate([0.2, 0.8]))
+    loss = sum(p * question_loss(logits, {"label": y, "qtype": "score"}, "cpu") for y, p in enumerate([0.2, 0.8]))
     loss.backward()
     assert logits.grad.abs().max().item() < 1e-6
 
@@ -350,46 +350,6 @@ def test_risk_curve_area_has_explicit_tie_policy():
     assert area_under_risk_coverage([0.99] * 10, [False] + [True] * 9) == pytest.approx(0.1)
 
 
-@pytest.mark.parametrize("options", [{}, {"label_smoothing": 0.05}, {"brier_w": 0.5}, {"focal_gamma": 1.0}])
-def test_training_losses_match_definitions(options):
-    z = torch.tensor([0.4, -0.7, 1.2], requires_grad=True)
-    q = {"label": 1, "qtype": "choice"}
-    ce = torch.nn.functional.cross_entropy(z[None], torch.tensor([1]))
-    target = torch.nn.functional.one_hot(torch.tensor(1), 3).float()
-    expected = ce
-    if "label_smoothing" in options:
-        epsilon = options["label_smoothing"]
-        expected = -(((1 - epsilon) * target + epsilon / 3) * z.log_softmax(-1)).sum()
-    elif "brier_w" in options:
-        expected = ce + options["brier_w"] * (z.softmax(-1) - target).square().sum()
-    elif "focal_gamma" in options:
-        expected = (1 - z.softmax(-1)[1]) ** options["focal_gamma"] * ce
-    actual = question_loss(z, q, "cpu", 0, **options)
-    assert torch.allclose(actual, expected)
-    actual.backward()
-    assert torch.isfinite(z.grad).all()
-
-
-def test_brier_mixture_is_proper_and_soft_targets_unchanged():
-    distribution = torch.tensor([0.2, 0.3, 0.5])
-    logits = distribution.log().requires_grad_()
-    expected_loss = sum(p * question_loss(logits, {"label": i, "qtype": "choice"}, "cpu", 0, brier_w=0.5)
-                        for i, p in enumerate(distribution))
-    expected_loss.backward()
-    assert logits.grad.abs().max() < 1e-6
-    soft = {"label": 0, "qtype": "choice", "target": [1 / 3] * 3}
-    base = question_loss(logits, soft, "cpu", 0)
-    for options in ({"label_smoothing": 0.05}, {"brier_w": 0.5}, {"focal_gamma": 1.0}):
-        assert torch.equal(question_loss(logits, soft, "cpu", 0, **options), base)
-
-
-@pytest.mark.parametrize("bad", [{"label_smoothing": -0.1}, {"label_smoothing": 1.1}, {"brier_w": float("nan")},
-                                  {"focal_gamma": -1}, {"brier_w": 0.5, "focal_gamma": 1.0}])
-def test_loss_options_fail_before_training(bad):
-    with pytest.raises(ValueError):
-        question_loss(torch.zeros(3), {"label": 0, "qtype": "choice"}, "cpu", 0, **bad)
-
-
 def test_temperature_fit_requires_raw_rows_and_uses_true_logit_nll():
     from d1a.metrics import fit_temperature, nll_at_temperature
     row = {"variant": "clean", "source": "fixture", "task": "fixture", "p": [1.0, 0.0],
@@ -599,18 +559,6 @@ def test_top_bins_and_confidence_bias():
     m = metrics(rows)
     assert m["top_bins"]["0.99"] == {"n": 2, "errors": 1, "error_rate": 0.5} and m["top_bins"]["0.9"]["n"] == 2
     assert abs(m["confidence_bias"] - ((0.99 + 0.99 + 0.6) / 3 - 2 / 3)) < 1e-9
-
-def test_anchor_loss_aligns_by_key_and_skips_changed_option_sets():
-    from d1a.train import anchor_loss
-    q = {"keys": ["b", "a"]}
-    z = torch.tensor([0.0, 0.0])
-    # teacher puts 0.9 on 'a'; student uniform -> KL(teacher||student) > 0 and the same for either key order
-    l1 = anchor_loss(z, {"keys": ["a", "b"]}, {"a": 0.9, "b": 0.1}, "cpu"); l2 = anchor_loss(z, q, {"a": 0.9, "b": 0.1}, "cpu")
-    assert l1 is not None and abs(l1.item() - l2.item()) < 1e-6 and l1.item() > 0
-    assert anchor_loss(z, {"keys": ["a", "b", "none"]}, {"a": 0.9, "b": 0.1}, "cpu") is None      # none-option inserted -> skip
-    assert anchor_loss(z, q, None, "cpu") is None
-    peaked = torch.tensor([10.0, -10.0])                                                       # student already matches teacher's argmax key 'b'? keys=[b,a]: p(b)=1
-    assert anchor_loss(peaked, q, {"b": 1.0, "a": 0.0}, "cpu").item() < 1e-3
 
 
 def test_frozen_suites_load_under_any_locale(tmp_path):

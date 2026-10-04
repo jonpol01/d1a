@@ -92,7 +92,7 @@ Calibration error is similar overall (0.04–0.10 for both). Clef-flash is less 
 1. **The gap is reasoning, not reading.** D1A matches Clef-flash on reading comprehension, policy rules and science questions. It loses on composed conditions and on knowledge. That's where a 9B base helps, and it's where Cloudflare's training data is aimed (the blog cites synthetic data with permuted fields, prompts and schemas).
 2. **Training ideas worth trying, from Cloudflare's write-up:**
    - LoRA rank 256, where D1A uses 16;
-   - label-smoothed cross-entropy plus a Brier term (`d1a.train --brier_w` already exists and is 0 by default);
+   - label-smoothed cross-entropy plus a Brier term (Kev's `--label_smoothing` and `--brier_w` did this; they were removed as unused, and [removed-tools.md](../removed-tools.md#training-options-removed-october-2026) says how to restore them);
    - an RL stage for calibration;
    - a joint head in which all questions and options attend to each other;
    - 64K-token context.

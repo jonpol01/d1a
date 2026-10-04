@@ -201,16 +201,18 @@ def test_soft_targets_and_date_facts():
     aug = augment(req, random.Random(0), p_none=1.0, p_none_distract=0.0, p_distract=0.0)      # would insert a none option for a hard-label question
     assert set(aug["questions"]["q"]["criteria"]) == {"a", "b", "c"}, "soft-target questions are only permuted"
     z = torch.tensor([2.0, 0.0, -2.0])
-    assert abs(question_loss(z, rec["questions"][0], "cpu", 0.0).item() - (-(torch.log_softmax(z, -1) / 3).sum()).item()) < 1e-6
+    assert abs(question_loss(z, rec["questions"][0], "cpu").item() - (-(torch.log_softmax(z, -1) / 3).sum()).item()) < 1e-6
     assert date_facts("Due July 4, 2026. Received June 26, 2026. Shipped 2026-07-01.") == "June 26, 2026 is 8 days before July 4, 2026. 2026-07-01 is 3 days before July 4, 2026. 2026-07-01 is 5 days after June 26, 2026."
     assert with_date_facts({"case": "one date: May 1, 2026"}) == {"case": "one date: May 1, 2026"}
 
 
 def test_checkpoint_meta_round_trip_and_defaults(tmp_path):
     """head.pt has one schema (d1a.checkpoint.Meta): old files get the same defaults everywhere, unknown keys survive a
-    read-modify-write, and LoadOptions.from_env is the only place the D1A_* variables are read."""
+    read-modify-write, and LoadOptions.from_env is the only place the D1A_* variables are read. A Kev checkpoint trained
+    with option_isolation is refused: encode() no longer isolates option spans, so its answers would be wrong."""
+    import dataclasses
     import torch
-    from d1a.checkpoint import LoadOptions, Meta, read_meta, write_meta
+    from d1a.checkpoint import Checkpoint, LoadOptions, Meta, read_meta, write_meta
     old = {"head": {"w": torch.zeros(1)}, "base": "Qwen/Qwen2.5-0.5B", "lora": 16, "args": {"lr": 1}, "suite_sha256": "abc"}
     m = Meta.from_dict(old)
     assert (m.head_dim, m.option_isolation, m.temperature, m.holdout, m.weights_dtype) == (256, False, 1.0, [], "fp32")
@@ -218,6 +220,8 @@ def test_checkpoint_meta_round_trip_and_defaults(tmp_path):
     m.temperature = 2.3; m.extra["temperature_fit"] = {"n": 10}
     write_meta(tmp_path, m); back = read_meta(tmp_path)
     assert back.temperature == 2.3 and back.extra["args"] == {"lr": 1} and back.extra["temperature_fit"] == {"n": 10} and back.lora == 16
+    (tmp_path / "isolated").mkdir(); write_meta(tmp_path / "isolated", dataclasses.replace(m, option_isolation=True))
+    with pytest.raises(ValueError, match="option_isolation"): Checkpoint(tmp_path / "isolated")
     assert LoadOptions.from_env({}) == LoadOptions()
     opts = LoadOptions.from_env({"D1A_DTYPE": "bf16", "D1A_MERGE": "0", "D1A_ATTN": "sdpa", "D1A_TEMPERATURE": "1.0", "D1A_LORA_SCALE": "0.5"})
     assert opts == LoadOptions(dtype=torch.bfloat16, merge=False, attn="sdpa", lora_scale=0.5, temperature=1.0)
@@ -428,18 +432,6 @@ def test_bearer_auth_and_request_id(monkeypatch):
         assert client.get("/v1/models").status_code == 401
         assert client.get("/v1/models", headers={"authorization": "Bearer wrong"}).status_code == 401
         assert client.get("/openapi.json").status_code == 200   # only /v1 is gated
-
-
-def test_option_isolation_mask_rule():
-    from d1a.model import branch_mask_batch, OPT_NONE, OPT_DECIDE
-    seg = [0, 0, 1, 1, 1, 1, 1, 1, 1]           # state x2, then q: instr x2, option0 x2, option1 x2, decide
-    opt = [OPT_NONE, OPT_NONE, OPT_NONE, OPT_NONE, 0, 0, 1, 1, OPT_DECIDE]
-    m = branch_mask_batch([seg], "cpu", opts=[opt])[0, 0] == 0
-    assert m[6, 4] == False and m[7, 5] == False      # option1 never sees option0
-    assert m[6, 2] and m[6, 3] and m[6, 0]           # option sees instruction and state
-    assert m[7, 6] and m[5, 4]                        # option sees itself (causal within span)
-    assert all(m[8, j] for j in range(9))             # decide sees everything in its question
-    assert m[3, 4] == False                           # instruction never sees options (causal)
 
 
 # --- full-weight training (d1a.train --full_ft 1, d1a.full_ft): a 2-layer Qwen3.5 with random weights, no downloads ----
@@ -834,7 +826,7 @@ def test_none_pair_max_state_pairs_only_short_states_and_the_plan_counts_them(ti
     reqs = load_records(tiny_base / "data.jsonl")   # states of 6 + i tokens, each with a 3-option Choice
     counts = state_token_counts(tok, reqs)
     assert [counts[id(r)] for r in reqs] == [sum(s == 0 for s in encode(tok, materialize(r))["seg"]) for r in reqs] == [6 + i for i in range(16)]
-    knobs = dict(seed=0, p_none=0.0, p_none_distract=0.0, p_distract=0.0, perm_kl=0.0, perm_frac=0.0, max_state=MAX_STATE, row_budget=0, shared_prefix=1)
+    knobs = dict(seed=0, p_none=0.0, p_none_distract=0.0, p_distract=0.0, max_state=MAX_STATE, row_budget=0, shared_prefix=1)
     a = SimpleNamespace(**knobs, p_none_pair=1.0, none_pair_max_state=10)
     everything = 100   # a gate every state passes
     short = {id(r) for r in reqs if counts[id(r)] <= 10}
@@ -867,7 +859,7 @@ def test_plan_shapes_are_the_encoded_shapes(tiny_base):
     model = DecisionModel(str(tiny_base / "base"), tok, "cpu")
     reqs = load_records(tiny_base / "data.jsonl")
     counts = state_token_counts(tok, reqs)
-    a = SimpleNamespace(seed=0, p_none=0.3, p_none_distract=0.3, p_distract=0.3, p_none_pair=0.5, none_pair_max_state=12, perm_kl=0.0, perm_frac=0.0,
+    a = SimpleNamespace(seed=0, p_none=0.3, p_none_distract=0.3, p_distract=0.3, p_none_pair=0.5, none_pair_max_state=12,
                         max_state=MAX_STATE, row_budget=0, shared_prefix=1)
     for pairs in (none_pairs(a, reqs, 1, counts), None):
         shapes = plan_shapes(model, tok, a, reqs, 1, pairs, counts)
@@ -934,15 +926,15 @@ def test_row_budget_changes_passes_not_gradients(tiny_base, shared):
     tok = load_tokenizer(str(tiny_base / "base"))
     model = DecisionModel(str(tiny_base / "base"), tok, "cpu"); model.train()
     reqs = load_records(tiny_base / "data.jsonl")[:4]
-    knobs = dict(seed=0, p_none=0.0, p_none_distract=0.0, p_distract=0.0, p_none_pair=0.0, perm_kl=0.0, perm_frac=0.0, max_state=MAX_STATE,
-                 ord_w=0.0, label_smoothing=0.0, brier_w=0.0, focal_gamma=0.0, anchor_w=0.0, shared_prefix=shared)
+    knobs = dict(seed=0, p_none=0.0, p_none_distract=0.0, p_distract=0.0, p_none_pair=0.0, max_state=MAX_STATE,
+                 shared_prefix=shared)
     grads, sizes = [], []
     for budget in (0, 16):
         a = SimpleNamespace(**knobs, row_budget=budget)
         batch = encode_batch(model, tok, a, reqs, 0); model.zero_grad()
         passes = row_passes(batch, budget, shared)
         for part in passes:
-            batch_loss(model, a, part, "cpu", {}, None, contextlib.nullcontext())[0].backward()
+            batch_loss(model, a, part, "cpu", contextlib.nullcontext())[0].backward()
         grads.append([p.grad.clone() for p in model.parameters() if p.grad is not None]); sizes.append((len(batch), len(passes), sum(v.share for v in batch)))
     assert sizes == [(4, 1, 4.0), (8, 8, 4.0)]
     scale = max(g.abs().max() for g in grads[0])
@@ -1188,17 +1180,6 @@ def _parse_train(monkeypatch, *args):
     from d1a import train
     monkeypatch.setattr(sys, "argv", ["d1a.train", "--out", "/nonexistent/kev-test-run", *args])
     return train.parse_args()
-
-
-def test_row_budget_refuses_split_loss_terms(monkeypatch, capsys):
-    """--row_budget splits a record's questions into parts that each carry their share of its mean question loss; the
-    permutation KL and the anchor KL are per record (the anchor over its anchored questions), so both are refused with
-    it. --shared_prefix changes only how the logits are computed (the same nested logits per record), not a term."""
-    for extra in (("--perm_kl", "0.1"), ("--anchor", "anchors.json", "--anchor_w", "0.1")):
-        with pytest.raises(SystemExit):
-            _parse_train(monkeypatch, "--row_budget", "8192", *extra)
-        assert "--row_budget splits micro-batches" in capsys.readouterr().err
-    assert _parse_train(monkeypatch, "--row_budget", "8192").row_budget == 8192
 
 
 def test_full_ft_refuses_old_torch(monkeypatch, capsys):
@@ -1477,9 +1458,8 @@ def test_media_audio_is_mono_16k_and_bounded():
 
 
 def test_pass_tokens_max_refusals(monkeypatch, capsys):
-    """The ceiling caps the passes --length_sort plans: refused without it, with --row_budget and with --perm_kl (a
-    permuted copy is a second pass alive at the same time)."""
-    for extra in ((), ("--length_sort", "1", "--perm_kl", "0.1"), ("--length_sort", "1", "--row_budget", "8192")):
+    """The ceiling caps the passes --length_sort plans: refused without it and with --row_budget."""
+    for extra in ((), ("--length_sort", "1", "--row_budget", "8192")):
         with pytest.raises(SystemExit):
             _parse_train(monkeypatch, "--pass_tokens_max", "40960", *extra)
         assert "--pass_tokens_max caps" in capsys.readouterr().err
