@@ -62,7 +62,11 @@ the Apache License 2.0. This file records where D1A's code came from and what D1
   `d1a/full_ft.py` (MasterAdamW, FSDP2 across GPUs under torchrun, snapshots), `--full_ft` and the snapshot options,
   loading full-weight checkpoints (now refused), and the two scripts that only served them, `interpolate_checkpoint.py`
   and `merge_lora_checkpoint.py`, with their tests. Training is single-process LoRA; resume points became D1A's own
-  `d1a/resume.py`.
+  `d1a/resume.py`. Then Kev's training-history suites (`decision-v1`, `public-pool-v5`/`v6`, `round3`-`round15`, `sft-v1`, `sft-v2` and
+  its `r21`-`r26`, `transfer-v1`, `v3`, `v5`, `v6`, `v8`) and the builders that only wrote them or the two below
+  (`build_long_states`, `build_soft_targets`, `build_night2_data`, `freeze_calibration_audit`, `freeze_semif`,
+  `freeze_semif_external`). `external` (semif-v1, typesafe-v1, wanli-v1, wanli-v2) and `night2` moved, byte for byte,
+  into D1A suites (`evals/d1a/external`, `evals/d1a/night2`, data in the private dataset `JohnP1/d1a-evals`).
 - **Rewritten from scratch** (no longer derived): `d1a/calibrate.py`, `scripts/calibrate_checkpoint.py` (now a wrapper
   around it).
 - **Rewritten**: `README.md`, `AGENTS.md`, `NOTICE`, `.gitignore`.
@@ -98,14 +102,8 @@ scripts/build_devtools_v1.py
 scripts/build_documents_v1.py
 scripts/build_documents_v2.py
 scripts/build_hard_v1.py
-scripts/build_long_states.py
 scripts/build_longdoc_v1.py
-scripts/build_night2_data.py
-scripts/build_soft_targets.py
-scripts/freeze_calibration_audit.py
 scripts/freeze_documents_v1.py
-scripts/freeze_semif.py
-scripts/freeze_semif_external.py
 scripts/label_documents_v1.py
 scripts/longdoc_serving.py
 scripts/mlx_parity.py

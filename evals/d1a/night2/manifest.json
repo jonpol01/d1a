@@ -1,0 +1,39 @@
+{
+ "format": "d1a-suite",
+ "version": 1,
+ "dataset": "JohnP1/d1a-evals",
+ "revision": "2dc4d859b6d0b216d6e57c0de99fe80137ea29d2",
+ "partitions": {
+  "dates": {
+   "path": "night2/dates.jsonl",
+   "role": "eval",
+   "sha256": "9d068b1e7d382992add46e93b22a9d539036f4db78b576ea07c0954534b3d401",
+   "records": 900
+  },
+  "unknowable": {
+   "path": "night2/unknowable.jsonl",
+   "role": "eval",
+   "sha256": "7d3ec178c743e922a491d372bf0920b5a341260414d38c99d7c1159855bf6e14",
+   "records": 525
+  },
+  "assertion": {
+   "path": "night2/assertion.jsonl",
+   "role": "eval",
+   "sha256": "0cf795280db6c16ec66499b6d8e5326215080e76a1f5b0a1a265d1f8ef9dd164",
+   "records": 800
+  },
+  "all": {
+   "path": "night2/all.jsonl",
+   "role": "eval",
+   "sha256": "b8692830579a1b501aed66a4b5490c943a6fc47d5eca2ac7d1fa132eda0a3319",
+   "records": 2225
+  },
+  "dates-unknowable": {
+   "path": "night2/dates_unknowable.jsonl",
+   "role": "eval",
+   "sha256": "afd8502d162163605ac446439e32c7b9083302dd78a6bfdc5e30075619e98437",
+   "records": 1425
+  }
+ },
+ "provenance": "Kev's evals/night2 (dates, unknowable facts, assertions), byte for byte (sha256 equal to Kev's manifest); see it in git history (1bce9a4)"
+}

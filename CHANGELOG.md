@@ -16,6 +16,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Kev's eval suites as D1A suites**: `external` (semif-v1, typesafe-v1, wanli-v1, wanli-v2) and `night2` (dates,
+  unknowable facts, assertions) are `evals/d1a/external` and `evals/d1a/night2`, with the data byte for byte in the
+  private dataset `JohnP1/d1a-evals`. `d1a.benchmark --data evals/d1a/external:semif-v1` scores the same as the Kev suite
+  did (D1A-E4B: identical probabilities on all 252 rows). `python -m d1a.suites freeze --provenance` records where a
+  suite's data came from.
 - **D1A suites** (`d1a/suites.py`, `evals/d1a/`). Our own datasets, pinned: a manifest per dataset holds its Hub commit
   and each partition's sha256, record count and role (train or eval), while the text stays in the private dataset.
   `evals/d1a/<suite>:<partition>` works wherever `--data` does (`d1a.train`, `d1a.benchmark`). The partition is fetched
@@ -61,6 +66,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Removed
 
+- **Kev's training-history suites** (20 of them: `decision-v1`, `public-pool-v5`/`v6`, `round3`-`round15`, `sft-v1`,
+  `sft-v2` and its rounds, `transfer-v1`, `v3`, `v5`, `v6`, `v8`) and six builders that only served retired or moved
+  suites. Nothing D1A trains or evaluates on depends on them; docs/removed-tools.md says how to restore them.
 - **Full-weight training.** `d1a.train --full_ft`, its FSDP2 multi-GPU mode under torchrun and the snapshot options
   (`--snapshot_fractions`, `--snapshot_every_steps`, `--snapshot_dir`) are gone, with `d1a/full_ft.py`,
   `scripts/interpolate_checkpoint.py` and `scripts/merge_lora_checkpoint.py`. Training is single-process LoRA, and

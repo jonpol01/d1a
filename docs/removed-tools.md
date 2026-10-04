@@ -103,3 +103,19 @@ git show 2a9be28:scripts/merge_lora_checkpoint.py    # a LoRA merged into a full
 - **Checkpoints**: `save_pretrained` of the whole backbone plus `head.pt` with `weights: "full"`; such a checkpoint is now
   refused at load. LoRA scaling at load time (`LoadOptions.lora_scale`, `D1A_LORA_SCALE`) still gives WiSE-FT-style
   interpolation for adapters.
+
+## Kev's training-history suites (removed October 2026)
+
+Frozen suites Kev trained or screened rounds on, which nothing D1A trains or evaluates on depends on: `decision-v1`,
+`public-pool-v5`, `public-pool-v6`, `round3`, `round4`, `round5`, `round6`, `round10`, `round15`, `sft-v1`, `sft-v2`,
+`sft-v2-r21`, `sft-v2-r22`, `sft-v2-r25`, `sft-v2-r26`, `transfer-v1`, `v3`, `v5`, `v6`, `v8`. Their manifests, and the
+builders that only wrote them (`build_long_states`, `build_soft_targets`, `freeze_calibration_audit`), are in commit
+`47a8cc2` and earlier; most large partitions also stay on Kev's public mirror `jaredpalmer/kev-suites` at `cc4bac8`.
+
+```bash
+git checkout 47a8cc2 -- evals/round4 scripts/build_long_states.py   # for example
+```
+
+Kev's `external` (semif-v1, typesafe-v1, wanli-v1, wanli-v2) and `night2` were not dropped: they are D1A suites now,
+byte for byte (`evals/d1a/external`, `evals/d1a/night2`), and their builders (`freeze_semif`, `freeze_semif_external`,
+`build_night2_data`) left with the originals.
