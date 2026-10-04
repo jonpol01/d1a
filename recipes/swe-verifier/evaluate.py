@@ -44,6 +44,16 @@ def risk_coverage(y, p, targets=(0.5, 0.6, 0.7, 0.8)):
     return rows
 
 
+def filter_purity(y, p, yields=(0.1, 0.2, 0.3)):
+    """Rejection-sampling fine-tuning keeps the top share of runs by a score: per yield, the share of kept runs that
+    truly resolved, and how many resolved runs were kept (ties broken by order)."""
+    order = np.argsort(-p, kind="stable"); out = []
+    for f in yields:
+        keep = order[: max(1, int(round(f * len(y))))]
+        out.append((f, round(float(y[keep].mean()), 3), int(y[keep].sum())))
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--train-heuristics", required=True); ap.add_argument("--dev", action="append", default=[]); ap.add_argument("--test", action="append", default=[])
@@ -75,6 +85,12 @@ def main():
     for name in [n for n in scores if n.endswith("calibrated") or n.startswith("heuristics")]:
         print(f"reliability {name}: {calibration(y, scores[name])[2]}")
         print(f"risk-coverage {name} (precision target, threshold, share submitted, resolved submitted): {risk_coverage(y, scores[name])}")
+    print("fine-tuning data filter (yield kept, precision of kept runs, resolved runs kept):")
+    filters = {"no filter (random)": np.random.default_rng(0).random(len(y)), "agent's clean submit": np.array([r["clean_submit"] for r in first], float)
+               + 1e-3 * np.random.default_rng(1).random(len(y)), **scores}
+    for name, p in filters.items():
+        if name.endswith(" raw"): continue
+        print(f"  {name:28s} {filter_purity(y, p)}")
     for name, rows in test.items():
         s = [r["seconds"] for r in rows if "seconds" in r]
         if s: print(f"seconds per run, {name}: median {np.median(s):.2f}, p95 {np.percentile(s, 95):.2f}")
