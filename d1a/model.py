@@ -1,11 +1,11 @@
 # Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: Gemma 4 support (reserved delimiter tokens, sliding-window masks, text-only loading; model-family details behind d1a.backbone; from jonpol01/kev); package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); option isolation removed (encode, the packed mask).
+# Changes for D1A Copyright 2026 John Soliva: Gemma 4 support (reserved delimiter tokens, sliding-window masks, text-only loading; model-family details behind d1a.backbone; from jonpol01/kev); package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); option isolation removed (encode, the packed mask); full-weight loading removed.
 """Decision model: causal LM backbone + block-causal branch mask + pointer readout."""
 import copy, functools, math, os, re
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from transformers import AutoModel, AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer
 from transformers.cache_utils import LinearAttentionCacheLayerMixin
 from .backbone import Attention, for_config
 
@@ -235,20 +235,14 @@ def probs_one(model, enc, prefix, keep):
 
 
 class DecisionModel(nn.Module):
-    def __init__(self, name, tok, device, lora=None, revision=None, attn=None, head_dim=256, lora_targets="all", dtype=torch.float32,
-                 weights=None, direct_load=False):
-        """weights: a full-weight checkpoint directory whose saved backbone replaces the base's (d1a.checkpoint's loader rule).
-        direct_load: load the backbone straight onto `device` (transformers device_map) instead of staging it in host memory;
-        full-weight training on several GPUs in one container needs it (N processes x a 51 GB checkpoint otherwise). Off by
-        default: it changes where the rotary buffers are computed, so every other path keeps its bits."""
+    def __init__(self, name, tok, device, lora=None, revision=None, attn=None, head_dim=256, lora_targets="all", dtype=torch.float32):
         super().__init__()
         # backbone only (no vocab head): we never generate text.
         # eager on MPS/CPU (known-good with our float 4D mask); SDPA on CUDA (accepts arbitrary additive masks).
         attn = attn or ("sdpa" if str(device).startswith("cuda") else "eager")
         # dtype: fp32 for training and exact evaluation; bf16 is a serving option for large backbones (8B on a 32 GB Mac)
         load = {"dtype": dtype, "attn_implementation": attn}
-        if direct_load: load["device_map"] = {"": torch.cuda.current_device() if device == "cuda" else device}   # "cuda": under torchrun, this rank's GPU
-        self.lm = AutoModel.from_pretrained(weights, **load) if weights else AutoModelForCausalLM.from_pretrained(name, revision=revision, **load).model
+        self.lm = AutoModelForCausalLM.from_pretrained(name, revision=revision, **load).model
         # multimodal checkpoints (Gemma 4) load as a wrapper around the text model: keep the text model only, so the vision and
         # audio towers are neither held in memory nor matched by the LoRA target names
         self.lm = Attention.unwrap(self.lm)

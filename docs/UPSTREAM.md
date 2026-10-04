@@ -18,8 +18,8 @@ the Apache License 2.0. This file records where D1A's code came from and what D1
   `d1a/train.py` (Gemma's reserved `<unused0>`–`<unused4>` tokens as delimiters with a leading `<bos>`, a packed mask for
   the sliding-window layers, text-only loading, re-admission of suite records under Gemma's tokenizer) with tests in
   `tests/test_unit.py` and `tests/test_model.py`.
-- **Training robustness**: `d1a/train.py` writes resume points for LoRA runs too (`--save_every_steps`,
-  `--save_every_minutes`, `--resume`; Kev had them for full-weight runs only), and a non-finite loss or gradient skips
+- **Training robustness**: `d1a/train.py` writes resume points for LoRA runs (`--save_every_steps`,
+  `--save_every_minutes`, `--resume`; Kev had them for full-weight runs only; now D1A's own `d1a/resume.py`), and a non-finite loss or gradient skips
   its micro-batch or step (up to `MAX_NONFINITE` in a row) instead of ending the run.
 - **MLX backend for Gemma 4 and MLX exports**: `d1a/mlx_model.py` runs Gemma 4 bases on Apple Silicon (row form on
   replicated plain and sliding-window caches, KV-shared layers) besides Kev's Qwen3.5 path, and writes merged, optionally
@@ -58,7 +58,11 @@ the Apache License 2.0. This file records where D1A's code came from and what D1
   [removed-tools.md](removed-tools.md) records what both tools did and how to restore them. Then `d1a.train`'s research
   options that no D1A checkpoint used: label smoothing, the Brier and focal terms, the ordinal RPS, the permutation KL,
   anchoring, option isolation (also in `d1a.model`, `d1a.serve`, `d1a.mlx_model`; such checkpoints are refused at load)
-  and delimiter-embedding training, with their tests; removed-tools.md describes each.
+  and delimiter-embedding training, with their tests; removed-tools.md describes each. Then full-weight training:
+  `d1a/full_ft.py` (MasterAdamW, FSDP2 across GPUs under torchrun, snapshots), `--full_ft` and the snapshot options,
+  loading full-weight checkpoints (now refused), and the two scripts that only served them, `interpolate_checkpoint.py`
+  and `merge_lora_checkpoint.py`, with their tests. Training is single-process LoRA; resume points became D1A's own
+  `d1a/resume.py`.
 - **Rewritten from scratch** (no longer derived): `d1a/calibrate.py`, `scripts/calibrate_checkpoint.py` (now a wrapper
   around it).
 - **Rewritten**: `README.md`, `AGENTS.md`, `NOTICE`, `.gitignore`.
@@ -77,7 +81,6 @@ d1a/api.py
 d1a/benchmark.py
 d1a/checkpoint.py
 d1a/cuda_graphs.py
-d1a/full_ft.py
 d1a/fused_qwen35.py
 d1a/metrics.py
 d1a/mlx_model.py
@@ -103,10 +106,8 @@ scripts/freeze_calibration_audit.py
 scripts/freeze_documents_v1.py
 scripts/freeze_semif.py
 scripts/freeze_semif_external.py
-scripts/interpolate_checkpoint.py
 scripts/label_documents_v1.py
 scripts/longdoc_serving.py
-scripts/merge_lora_checkpoint.py
 scripts/mlx_parity.py
 tests/test_api.py
 tests/test_breadth_v1.py

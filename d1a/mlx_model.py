@@ -352,7 +352,6 @@ def export_mlx(ck, out, bits=None, group_size=64, embeddings=True, per_layer_bit
     from .model import layout, load_tokenizer, pad_id
 
     if ck.export is not None: raise ValueError(f"{ck.path} is already an MLX export")
-    if ck.full: raise ValueError("export_mlx merges an adapter; full-weight checkpoints are not supported")
     meta, out = ck.meta, Path(out)
     tok = load_tokenizer(meta.base, revision=meta.base_revision)
     lm, config = load_mlx_lm(resolve_run(f"{meta.base}@{meta.base_revision or ''}"))

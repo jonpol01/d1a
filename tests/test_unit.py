@@ -209,7 +209,8 @@ def test_soft_targets_and_date_facts():
 def test_checkpoint_meta_round_trip_and_defaults(tmp_path):
     """head.pt has one schema (d1a.checkpoint.Meta): old files get the same defaults everywhere, unknown keys survive a
     read-modify-write, and LoadOptions.from_env is the only place the D1A_* variables are read. A Kev checkpoint trained
-    with option_isolation is refused: encode() no longer isolates option spans, so its answers would be wrong."""
+    with option_isolation is refused (encode() no longer isolates option spans, so its answers would be wrong), and so is
+    a full-weight checkpoint."""
     import dataclasses
     import torch
     from d1a.checkpoint import Checkpoint, LoadOptions, Meta, read_meta, write_meta
@@ -222,6 +223,8 @@ def test_checkpoint_meta_round_trip_and_defaults(tmp_path):
     assert back.temperature == 2.3 and back.extra["args"] == {"lr": 1} and back.extra["temperature_fit"] == {"n": 10} and back.lora == 16
     (tmp_path / "isolated").mkdir(); write_meta(tmp_path / "isolated", dataclasses.replace(m, option_isolation=True))
     with pytest.raises(ValueError, match="option_isolation"): Checkpoint(tmp_path / "isolated")
+    (tmp_path / "full").mkdir(); write_meta(tmp_path / "full", dataclasses.replace(m, weights="full"))
+    with pytest.raises(ValueError, match="full-weight"): Checkpoint(tmp_path / "full")
     assert LoadOptions.from_env({}) == LoadOptions()
     opts = LoadOptions.from_env({"D1A_DTYPE": "bf16", "D1A_MERGE": "0", "D1A_ATTN": "sdpa", "D1A_TEMPERATURE": "1.0", "D1A_LORA_SCALE": "0.5"})
     assert opts == LoadOptions(dtype=torch.bfloat16, merge=False, attn="sdpa", lora_scale=0.5, temperature=1.0)
@@ -434,7 +437,7 @@ def test_bearer_auth_and_request_id(monkeypatch):
         assert client.get("/openapi.json").status_code == 200   # only /v1 is gated
 
 
-# --- full-weight training (d1a.train --full_ft 1, d1a.full_ft): a 2-layer Qwen3.5 with random weights, no downloads ----
+# --- training (d1a.train): a 2-layer Qwen3.5 with random weights, no downloads -------------------------------------
 
 @pytest.fixture(scope="module")
 def tiny_base(tmp_path_factory):
@@ -468,312 +471,13 @@ def train_tiny(tiny_base, out, *args, monkeypatch=None):
     train.main()
 
 
-FULL = ("--full_ft", "1", "--weights_dtype", "bf16")
 
 
-def test_full_weight_checkpoint_round_trip(tiny_base, tmp_path, monkeypatch):
-    """A full-weight run saves the bf16 backbone with save_pretrained (config.json + safetensors, no adapter) and head.pt in
-    today's format marked weights="full"; d1a.checkpoint loads the backbone from the checkpoint directory itself (bf16 by
-    default, fp32 when asked) with exactly the saved values, and the trained weights moved away from the base."""
-    from safetensors.torch import load_file
-    from d1a.checkpoint import Checkpoint, LoadOptions, read_meta
-    from d1a.data import load_records, materialize
-    train_tiny(tiny_base, tmp_path / "full", *FULL, "--max_steps", "3", monkeypatch=monkeypatch)
-    files = {p.name for p in (tmp_path / "full").iterdir()}
-    assert {"config.json", "model.safetensors", "head.pt", "tokenizer.json", "tokenizer_config.json"} <= files and "adapter_config.json" not in files
-    meta = read_meta(tmp_path / "full")
-    assert (meta.weights, meta.lora, meta.weights_dtype, meta.base) == ("full", 0, "bf16", str(tiny_base / "base")) and set(meta.head) == {"q.weight", "q.bias", "k.weight", "k.bias"}
-    ck = Checkpoint(tmp_path / "full")
-    assert ck.full and len(ck.weights_sha256()) == 64
-    tok, model = ck.load("cpu")
-    saved, base = load_file(tmp_path / "full/model.safetensors"), load_file(tiny_base / "base/model.safetensors")
-    assert model.dtype == "bfloat16" and all(torch.equal(model.lm.state_dict()[k], v) for k, v in saved.items())
-    assert any(not torch.equal(v, base["model." + k]) for k, v in saved.items()), "training moved no weight"
-    rec = materialize(load_records(tiny_base / "data.jsonl")[0])
-    _, fp32 = ck.load("cpu", LoadOptions(dtype=torch.float32))
-    assert fp32.dtype == "float32"
-    assert max(float((a - b).abs().max()) for a, b in zip(model.probs(model.encode(tok, rec)), fp32.probs(fp32.encode(tok, rec)))) < 0.02
-    with pytest.raises(ValueError, match="lora_scale"):
-        ck.load("cpu", LoadOptions(lora_scale=0.5))
-    with pytest.raises(ValueError, match="backend=torch"):                     # before importing mlx: the refusal, not an ImportError
-        ck.load("cpu", LoadOptions(backend="mlx"))
-    assert ck.backend("mps", LoadOptions(backend="auto")) == "torch"
-
-
-def test_full_weight_dtype_must_match_config(tiny_base, tmp_path, monkeypatch):
-    """A full checkpoint loads in the dtype head.pt's weights_dtype names, which must be the dtype save_pretrained wrote to
-    config.json: a mislabelled export (fp32 weights marked bf16, or the reverse) fails instead of being silently cast."""
-    import json
-    from d1a.checkpoint import Checkpoint, read_meta, write_meta
-    train_tiny(tiny_base, tmp_path / "full", *FULL, "--max_steps", "1", monkeypatch=monkeypatch)
-    config = tmp_path / "full/config.json"
-    assert json.loads(config.read_text(encoding="utf-8"))["dtype"] == "bfloat16"
-    meta = read_meta(tmp_path / "full"); meta.weights_dtype = "fp32"; write_meta(tmp_path / "full", meta)
-    with pytest.raises(ValueError, match="config.json records the weights as bfloat16 but head.pt says weights_dtype='fp32'"):
-        Checkpoint(tmp_path / "full").load("cpu")
-    meta.weights_dtype = "fp16"; write_meta(tmp_path / "full", meta)          # a name d1a.train never writes
-    with pytest.raises(ValueError, match="weights_dtype='fp16'"):
-        Checkpoint(tmp_path / "full").load("cpu")
-    meta.weights_dtype = "bf16"; write_meta(tmp_path / "full", meta)
-    config.write_text(json.dumps({k: v for k, v in json.loads(config.read_text(encoding="utf-8")).items() if k != "dtype"}), encoding="utf-8")
-    assert Checkpoint(tmp_path / "full").load("cpu")[1].dtype == "bfloat16"  # no recorded dtype: head.pt decides
-
-
-def test_loader_rule_needs_head_pt_and_files_to_agree(tmp_path):
-    """adapter_config.json -> LoRA; config.json + model*.safetensors and no adapter -> full weights; head.pt's `weights` must
-    name the same layout, so a half-copied directory fails loudly instead of loading the wrong thing."""
-    from d1a.checkpoint import Checkpoint, Meta, write_meta
-    for weights, present in (("full", ["adapter_config.json", "adapter_model.safetensors"]), ("lora", ["config.json", "model.safetensors"]), ("full", ["config.json"])):
-        d = tmp_path / f"{weights}-{len(present)}-{present[0]}"; d.mkdir()
-        write_meta(d, Meta(base="b", weights=weights))
-        for name in present: (d / name).write_text("{}", encoding="utf-8")
-        with pytest.raises(ValueError, match="head.pt says"):
-            Checkpoint(d).full
-
-
-def test_full_weight_warm_start(tiny_base, tmp_path, monkeypatch):
-    """--init_from a full checkpoint copies every backbone tensor over the base (coverage checked) and records the shard
-    hash; a LoRA run cannot start from full weights."""
-    from d1a.checkpoint import Checkpoint
+def test_nonfinite_gradient_never_moves_a_weight(tiny_base, tmp_path, monkeypatch):
+    """A finite loss whose gradient is NaN passes batch_loss's loss check, and no update runs with it: the run skips that
+    optimizer step (counted in training_metrics.json) and finishes."""
+    from d1a import train
     from d1a.suite import read_json
-    train_tiny(tiny_base, tmp_path / "a", *FULL, "--max_steps", "2", monkeypatch=monkeypatch)
-    train_tiny(tiny_base, tmp_path / "b", *FULL, "--max_steps", "1", "--init_from", str(tmp_path / "a"), monkeypatch=monkeypatch)
-    source = read_json(tmp_path / "b/training_config.json")["init_source"]
-    assert source["tensors"] == 27 and source["weights_sha256"] == Checkpoint(tmp_path / "a").weights_sha256()
-    with pytest.raises(ValueError, match="lora is 0 there and 4 here"):
-        train_tiny(tiny_base, tmp_path / "c", "--lora", "4", "--init_from", str(tmp_path / "a"), monkeypatch=monkeypatch)
-
-
-def test_interpolated_checkpoint_is_the_weighted_mean_of_sft_and_base(tiny_base, tmp_path, monkeypatch):
-    """scripts/interpolate_checkpoint.py (round 20's WiSE-FT arms): alpha 1 writes the SFT backbone, alpha 0 the base as
-    training builds it, 0.5 the fp32 midpoint rounded once to bf16; same shard files, names and dtypes; the pointer head is
-    the SFT's; head.pt records the interpolation; d1a.checkpoint loads the result as a full-weight checkpoint."""
-    from safetensors.torch import load_file
-    from d1a.checkpoint import Checkpoint, read_meta
-    from scripts.interpolate_checkpoint import interpolate, weight_label
-    train_tiny(tiny_base, tmp_path / "sft", *FULL, "--max_steps", "3", monkeypatch=monkeypatch)
-    alphas = [1.0, 0.0, 0.5]
-    outs = [tmp_path / f"w{weight_label(a)}" / "checkpoint" for a in alphas]
-    reports = interpolate(tmp_path / "sft", alphas, outs, log=lambda m: None)
-    sft, base = load_file(tmp_path / "sft/model.safetensors"), load_file(tiny_base / "base/model.safetensors")
-    base = {k: base["model." + k] for k in sft}   # save_pretrained of the CausalLM prefixes the backbone's names
-    one, zero, half = (load_file(o / "model.safetensors") for o in outs)
-    assert [weight_label(a) for a in alphas] == ["100", "00", "50"] and all(x.keys() == sft.keys() for x in (one, zero, half))
-    assert all(torch.equal(one[k], sft[k]) and one[k].dtype == sft[k].dtype for k in sft)
-    assert all(torch.equal(zero[k], base[k]) for k in sft)
-    assert all(torch.equal(half[k], (0.5 * sft[k].float() + 0.5 * base[k].float()).to(torch.bfloat16)) for k in sft)
-    assert any(not torch.equal(half[k], sft[k]) and not torch.equal(half[k], base[k]) for k in sft)
-    source, meta = read_meta(tmp_path / "sft"), read_meta(outs[2])
-    assert all(torch.equal(meta.head[k], source.head[k]) for k in source.head) and meta.temperature == source.temperature
-    assert meta.extra["interpolation"] == {"alpha": 0.5, "sft": {"path": str(tmp_path / "sft"), "weights_sha256": Checkpoint(tmp_path / "sft").weights_sha256()},
-                                           "base": f"{source.base}@{source.base_revision}"}
-    assert reports[2]["weights_sha256"] == Checkpoint(outs[2]).weights_sha256() and (outs[2].parent / "interpolation.json").exists()
-    assert not any((o.parent / "checkpoint.partial").exists() for o in outs) and not (outs[2] / "training_config.json").exists()
-    ck = Checkpoint(outs[2])
-    _, model = ck.load("cpu")
-    assert ck.full and all(torch.equal(model.lm.state_dict()[k], v) for k, v in half.items())
-    with pytest.raises(FileExistsError):
-        interpolate(tmp_path / "sft", [0.5], [outs[2]], log=lambda m: None)
-
-
-def test_interpolation_refuses_a_checkpoint_that_does_not_match_its_base(tiny_base, tmp_path, monkeypatch):
-    """A renamed or reshaped tensor, or a different base, stops the tool before anything is written."""
-    import shutil
-    from safetensors.torch import load_file, save_file
-    from scripts.interpolate_checkpoint import interpolate
-    train_tiny(tiny_base, tmp_path / "sft", *FULL, "--max_steps", "1", monkeypatch=monkeypatch)
-    tensors = load_file(tmp_path / "sft/model.safetensors")
-    first = next(iter(tensors))
-    for name, change in (("renamed", lambda t: {**{k: v for k, v in t.items() if k != first}, "bogus.weight": t[first]}),
-                         ("reshaped", lambda t: {**t, first: t[first].flatten()[:-1].clone()})):
-        shutil.copytree(tmp_path / "sft", tmp_path / name)
-        save_file(change(tensors), tmp_path / name / "model.safetensors", metadata={"format": "pt"})
-        with pytest.raises(ValueError, match="does not match its base"):
-            interpolate(tmp_path / name, [0.5], [tmp_path / f"{name}-out/checkpoint"], log=lambda m: None)
-        assert not (tmp_path / f"{name}-out").exists()
-    with pytest.raises(ValueError, match="was trained from"):
-        interpolate(tmp_path / "sft", [0.5], [tmp_path / "other/checkpoint"], base="Qwen/Qwen3.8-27B", log=lambda m: None)
-
-
-def test_interpolation_toward_a_lora_checkpoint_merged_in_fp32(tiny_base, tmp_path, monkeypatch):
-    """--toward a LoRA checkpoint (round 23: round 22's SFT toward Kev-27B): alpha 1 is the SFT exactly; alpha 0 with
-    --blend_head is the LoRA model exactly (backbone = the fp32 merge_and_unload rounded once to bf16, head = the LoRA's);
-    0.5 the fp32 midpoint of the SFT and the unrounded fp32 merge, heads averaged in fp32; without --blend_head the backbone is
-    the same and the head the SFT's; head.pt records both endpoints and both heads."""
-    from peft import PeftModel
-    from safetensors.torch import load_file
-    from d1a.checkpoint import Checkpoint, LoadOptions, read_meta
-    from d1a.data import load_records, materialize
-    from d1a.model import DecisionModel, load_tokenizer
-    from d1a.suite import digest
-    from scripts.interpolate_checkpoint import interpolate
-    train_tiny(tiny_base, tmp_path / "sft", *FULL, "--max_steps", "3", monkeypatch=monkeypatch)
-    train_tiny(tiny_base, tmp_path / "lora", "--lora", "4", "--weights_dtype", "bf16", "--head_lr", "1e-2", "--max_steps", "3", monkeypatch=monkeypatch)
-    sft_meta, lora_meta = read_meta(tmp_path / "sft"), read_meta(tmp_path / "lora")
-    assert lora_meta.weights == "lora" and any(not torch.equal(sft_meta.head[k], lora_meta.head[k]) for k in sft_meta.head)
-    alphas = [1.0, 0.0, 0.5]
-    outs = [tmp_path / f"kh-{i}" / "checkpoint" for i in range(3)]
-    reports = interpolate(tmp_path / "sft", alphas, outs, toward=tmp_path / "lora", blend_head=True, log=lambda m: None)
-    [plain] = interpolate(tmp_path / "sft", [0.5], [tmp_path / "k-50/checkpoint"], toward=tmp_path / "lora", log=lambda m: None)
-
-    tok = load_tokenizer(lora_meta.base)
-    ref = DecisionModel(lora_meta.base, tok, "cpu", head_dim=lora_meta.head_dim, dtype=torch.float32)
-    merged = PeftModel.from_pretrained(ref.lm, str(tmp_path / "lora"), torch_device="cpu").merge_and_unload().state_dict()   # fp32 W + delta
-    sft = load_file(tmp_path / "sft/model.safetensors")
-    one, zero, half = (load_file(o / "model.safetensors") for o in outs)
-    assert merged.keys() == sft.keys() == zero.keys()
-    assert all(torch.equal(one[k], sft[k]) for k in sft)
-    assert all(torch.equal(zero[k], merged[k].to(torch.bfloat16)) and zero[k].dtype == torch.bfloat16 for k in sft)
-    assert all(torch.equal(half[k], (0.5 * sft[k].float() + 0.5 * merged[k]).to(torch.bfloat16)) for k in sft)
-    base = load_file(tiny_base / "base/model.safetensors")
-    assert any(not torch.equal(merged[k], base["model." + k].float()) for k in sft), "the adapter moved no weight"
-    assert any(not torch.equal(half[k], one[k]) and not torch.equal(half[k], zero[k]) for k in sft)
-    heads = [read_meta(o) for o in outs]
-    assert all(torch.equal(heads[0].head[k], sft_meta.head[k]) and torch.equal(heads[1].head[k], lora_meta.head[k]) for k in sft_meta.head)
-    assert all(torch.equal(heads[2].head[k], 0.5 * sft_meta.head[k] + 0.5 * lora_meta.head[k]) for k in sft_meta.head)
-    k50 = read_meta(tmp_path / "k-50/checkpoint")
-    assert all(torch.equal(k50.head[k], sft_meta.head[k]) for k in sft_meta.head) and k50.temperature == sft_meta.temperature
-    assert load_file(tmp_path / "k-50/checkpoint/model.safetensors").keys() == half.keys()
-    assert all(torch.equal(load_file(tmp_path / "k-50/checkpoint/model.safetensors")[k], half[k]) for k in half)
-
-    info = heads[2].extra["interpolation"]
-    assert info["alpha"] == 0.5 and info["base"] == f"{sft_meta.base}@{sft_meta.base_revision}"
-    assert info["toward"]["kind"] == "lora" and info["toward"]["weights_sha256"] == Checkpoint(tmp_path / "lora").weights_sha256()
-    assert info["toward"]["adapted_tensors"] > 0 and info["toward"]["head_sha256"] == digest(tmp_path / "lora/head.pt")
-    assert info["head"] == {"kind": "blend", "sft": {"head_sha256": digest(tmp_path / "sft/head.pt"), "temperature": sft_meta.temperature},
-                            "toward": {"head_sha256": digest(tmp_path / "lora/head.pt"), "temperature": lora_meta.temperature}}
-    assert k50.extra["interpolation"]["head"]["kind"] == "sft" and reports[2]["head"]["kind"] == "blend" and plain["head"]["kind"] == "sft"
-
-    # alpha 0 with --blend_head scores like the LoRA checkpoint served merged (bf16 fold of the adapter, its head)
-    rec = materialize(load_records(tiny_base / "data.jsonl")[0])
-    _, lora_model = Checkpoint(tmp_path / "lora").load("cpu", LoadOptions(fused=True))
-    ck0 = Checkpoint(outs[1]); _, full0 = ck0.load("cpu")
-    assert ck0.full and all(torch.equal(full0.lm.state_dict()[k], v) for k, v in lora_model.lm.state_dict().items())
-    with torch.no_grad():
-        pa, pb = full0.probs(full0.encode(tok, rec)), lora_model.probs(lora_model.encode(tok, rec))   # equal weights; CPU kernels
-        assert max(float((a - b).abs().max()) for a, b in zip(pa, pb)) < 1e-5                        # differ at ~1e-6 by layout
-
-
-def test_interpolation_toward_a_full_checkpoint_and_its_refusals(tiny_base, tmp_path, monkeypatch):
-    """--toward a full-weight checkpoint: alpha 0 is its backbone (and, blended, its head) exactly. Refused before anything is
-    written: another base or revision, --blend_head without --toward, heads of another shape, a tensor the SFT does not have."""
-    import shutil
-    from safetensors.torch import load_file, save_file
-    from d1a.checkpoint import read_meta, write_meta
-    from scripts.interpolate_checkpoint import interpolate
-    train_tiny(tiny_base, tmp_path / "sft", *FULL, "--max_steps", "3", monkeypatch=monkeypatch)
-    train_tiny(tiny_base, tmp_path / "other", *FULL, "--max_steps", "2", "--seed", "1", monkeypatch=monkeypatch)
-    [report] = interpolate(tmp_path / "sft", [0.0], [tmp_path / "w00/checkpoint"], toward=tmp_path / "other", blend_head=True, log=lambda m: None)
-    got, want = load_file(tmp_path / "w00/checkpoint/model.safetensors"), load_file(tmp_path / "other/model.safetensors")
-    assert got.keys() == want.keys() and all(torch.equal(got[k], want[k]) for k in want) and report["toward"]["kind"] == "full"
-    head, other = read_meta(tmp_path / "w00/checkpoint").head, read_meta(tmp_path / "other").head
-    assert all(torch.equal(head[k], other[k]) for k in other)
-    quiet = lambda m: None   # noqa: E731
-
-    shutil.copytree(tmp_path / "other", tmp_path / "rev")
-    meta = read_meta(tmp_path / "rev"); meta.base_revision = "0" * 40; write_meta(tmp_path / "rev", meta)
-    with pytest.raises(ValueError, match="both must share one base and revision"):
-        interpolate(tmp_path / "sft", [0.5], [tmp_path / "x1/checkpoint"], toward=tmp_path / "rev", log=quiet)
-    with pytest.raises(ValueError, match="needs|base has no head"):
-        interpolate(tmp_path / "sft", [0.5], [tmp_path / "x2/checkpoint"], blend_head=True, log=quiet)
-    shutil.copytree(tmp_path / "other", tmp_path / "head")
-    meta = read_meta(tmp_path / "head"); meta.head = {**meta.head, "q.weight": meta.head["q.weight"][:-1].clone()}; write_meta(tmp_path / "head", meta)
-    with pytest.raises(ValueError, match="--blend_head: head.q.weight"):
-        interpolate(tmp_path / "sft", [0.5], [tmp_path / "x3/checkpoint"], toward=tmp_path / "head", blend_head=True, log=quiet)
-    shutil.copytree(tmp_path / "other", tmp_path / "renamed")
-    first = next(iter(want))
-    save_file({**{k: v for k, v in want.items() if k != first}, "bogus.weight": want[first]}, tmp_path / "renamed/model.safetensors", metadata={"format": "pt"})
-    with pytest.raises(ValueError, match="does not match --toward"):
-        interpolate(tmp_path / "sft", [0.5], [tmp_path / "x4/checkpoint"], toward=tmp_path / "renamed", log=quiet)
-    assert not any((tmp_path / f"x{i}").exists() for i in range(1, 5))
-
-
-def test_merged_lora_checkpoint_initializes_full_weight_training(tiny_base, tmp_path, monkeypatch):
-    """scripts/merge_lora_checkpoint.py (round 25 starts full-weight SFT from Kev-27B): the backbone is exactly what
-    interpolate_checkpoint writes at alpha 0 toward the LoRA checkpoint (fp32 W + delta rounded once to bf16), with the same
-    names and shapes as a full-weight run's save; head.pt is the LoRA's meta and head with lora 0 and weights "full"; it
-    loads as a full-weight checkpoint scoring like the LoRA served merged, and d1a.train --full_ft 1 --init_from warm-starts
-    backbone and head from it."""
-    import json
-    from safetensors.torch import load_file
-    from d1a.checkpoint import Checkpoint, LoadOptions, read_meta
-    from d1a.data import load_records, materialize
-    from d1a.model import load_tokenizer
-    from d1a.suite import digest, read_json
-    from scripts.interpolate_checkpoint import interpolate
-    from scripts.merge_lora_checkpoint import merge, weights_sha256
-    train_tiny(tiny_base, tmp_path / "sft", *FULL, "--max_steps", "2", monkeypatch=monkeypatch)
-    train_tiny(tiny_base, tmp_path / "lora", "--lora", "4", "--weights_dtype", "bf16", "--lr", "5e-2", "--head_lr", "1e-2", "--max_steps", "3", monkeypatch=monkeypatch)   # lr: a delta bf16 can hold
-    report = merge(tmp_path / "lora", tmp_path / "merged", like=tmp_path / "sft", log=lambda m: None)
-    [blend] = interpolate(tmp_path / "sft", [0.0], [tmp_path / "w00/checkpoint"], toward=tmp_path / "lora", blend_head=True, log=lambda m: None)
-    out = tmp_path / "merged/checkpoint"
-    got, want, sft = (load_file(d / "model.safetensors") for d in (out, tmp_path / "w00/checkpoint", tmp_path / "sft"))
-    assert got.keys() == want.keys() == sft.keys() and all(torch.equal(got[k], want[k]) and got[k].dtype == torch.bfloat16 for k in want)
-    base = load_file(tiny_base / "base/model.safetensors")
-    assert any(not torch.equal(got[k], base["model." + k]) for k in got), "the adapter moved no weight"
-    assert json.loads((out / "config.json").read_text(encoding="utf-8")) == json.loads((tmp_path / "sft/config.json").read_text(encoding="utf-8"))
-    files = {p.name for p in out.iterdir()}
-    assert {"config.json", "model.safetensors", "head.pt", "tokenizer.json", "tokenizer_config.json"} <= files
-    assert not files & {"adapter_config.json", "adapter_model.safetensors", "training_config.json", "provenance.json"}
-    lora, meta = read_meta(tmp_path / "lora"), read_meta(out)
-    assert (meta.weights, meta.lora, meta.weights_dtype) == ("full", 0, "bf16") and (lora.weights, lora.lora) == ("lora", 4)
-    assert all(torch.equal(meta.head[k], lora.head[k]) for k in lora.head) and meta.head.keys() == lora.head.keys()
-    assert (meta.temperature, meta.head_dim, meta.base, meta.base_revision) == (lora.temperature, lora.head_dim, lora.base, lora.base_revision)
-    assert meta.extra["args"] == lora.extra["args"]
-    info = meta.extra["merged_lora"]
-    assert info["source"] == {"path": str(tmp_path / "lora"), "resolved": str(tmp_path / "lora"), "weights_sha256": Checkpoint(tmp_path / "lora").weights_sha256(),
-                              "head_sha256": digest(tmp_path / "lora/head.pt")}
-    assert info["adapted_tensors"] == blend["toward"]["adapted_tensors"] > 0
-    ck = Checkpoint(out)
-    assert ck.full and report["weights_sha256"] == ck.weights_sha256() == weights_sha256(ck) == blend["weights_sha256"]
-    assert set(report["phases"]) == {"load_base_and_adapter", "merge", "write_backbone", "check_like", "hash_output"}
-    assert read_json(tmp_path / "merged/merge.json") == report and not (tmp_path / "merged/checkpoint.partial").exists()
-
-    tok = load_tokenizer(lora.base)
-    rec = materialize(load_records(tiny_base / "data.jsonl")[0])
-    _, served = Checkpoint(tmp_path / "lora").load("cpu", LoadOptions(fused=True))   # the LoRA folded into bf16, its head
-    _, full = ck.load("cpu")
-    with torch.no_grad():
-        pa, pb = full.probs(full.encode(tok, rec)), served.probs(served.encode(tok, rec))
-    assert max(float((a - b).abs().max()) for a, b in zip(pa, pb)) < 1e-5 and full.head.temperature == served.head.temperature
-
-    train_tiny(tiny_base, tmp_path / "cont", *FULL, "--max_steps", "1", "--init_from", str(out), monkeypatch=monkeypatch)
-    source = read_json(tmp_path / "cont/training_config.json")["init_source"]
-    assert source["tensors"] == len(got) and source["weights_sha256"] == ck.weights_sha256() and source["head_sha256"] == digest(out / "head.pt")
-    with pytest.raises(ValueError, match="head_dim is"):
-        train_tiny(tiny_base, tmp_path / "bad", *FULL, "--max_steps", "1", "--head_dim", "64", "--init_from", str(out), monkeypatch=monkeypatch)
-    with pytest.raises(FileExistsError):
-        merge(tmp_path / "lora", tmp_path / "merged", log=lambda m: None)
-    with pytest.raises(ValueError, match="full-weight checkpoint already"):
-        merge(tmp_path / "sft", tmp_path / "again", log=lambda m: None)
-
-
-def test_master_adamw_is_adamw_on_fp32_masters():
-    """MasterAdamW with host masters = torch AdamW after clip_grad_norm_, step for step; bf16 weights hold bf16(master)."""
-    from d1a.full_ft import MasterAdamW
-    torch.manual_seed(0)
-    ref = [torch.nn.Parameter(torch.randn(5, 3)), torch.nn.Parameter(torch.randn(4))]
-    ours = [torch.nn.Parameter(p.detach().clone()) for p in ref]
-    low = [torch.nn.Parameter(p.detach().to(torch.bfloat16)) for p in ref]
-    opt_ref = torch.optim.AdamW([{"params": ref[:1], "lr": 1e-2}, {"params": ref[1:], "lr": 1e-3}], weight_decay=0.01, foreach=False)
-    opt = MasterAdamW([{"params": ours[:1], "lr": 1e-2}, {"params": ours[1:], "lr": 1e-3}], lr=1e-2, weight_decay=0.01, offload=True)
-    opt_low = MasterAdamW([{"params": low}], lr=1e-2, weight_decay=0.01, offload=True)
-    for step in range(4):
-        g = [torch.randn_like(p) * (5 if step == 1 else 0.1) for p in ref]   # step 1 is clipped
-        for ps in (ref, ours): 
-            for p, gi in zip(ps, g): p.grad = gi.clone()
-        for p, gi in zip(low, g): p.grad = gi.to(torch.bfloat16)
-        torch.nn.utils.clip_grad_norm_(ref, 1.0); opt_ref.step(); opt.step(); opt_low.step()
-        assert all(torch.allclose(a, b, atol=1e-6) for a, b in zip(ref, ours)) and all(p.grad is None for p in ours)
-    assert all(torch.equal(p, opt_low.state[p]["master"].to(torch.bfloat16)) for p in low)
-
-
-@pytest.mark.parametrize("weights", ["lora", "full"])
-def test_nonfinite_gradient_never_moves_a_weight(tiny_base, tmp_path, monkeypatch, weights):
-    """A finite loss whose gradient is NaN passes batch_loss's loss check, and no update runs with it: a LoRA run skips
-    that optimizer step (counted in training_metrics.json) and finishes; a full-weight run refuses it (MasterAdamW's
-    global norm) and writes no checkpoint."""
-    from d1a import full_ft, train
 
     class NanGrad(torch.autograd.Function):   # the value passes through, its gradient becomes NaN
         @staticmethod
@@ -786,30 +490,10 @@ def test_nonfinite_gradient_never_moves_a_weight(tiny_base, tmp_path, monkeypatc
         calls.append(1); z = real(*args, **kwargs)
         return NanGrad.apply(z) if len(calls) == 3 else z
     monkeypatch.setattr(train, "question_loss", nan_grad_on_third)
-    real_adamw, real_step = full_ft.adamw, torch.optim.AdamW.step
-    monkeypatch.setattr(full_ft, "adamw", lambda *a, **k: (updates.append(1), real_adamw(*a, **k)))
+    real_step = torch.optim.AdamW.step
     monkeypatch.setattr(torch.optim.AdamW, "step", lambda self, *a, **k: (updates.append(1), real_step(self, *a, **k))[1])
-    if weights == "lora":
-        from d1a.suite import read_json
-        train_tiny(tiny_base, tmp_path / weights, "--accum", "2", "--max_steps", "2", "--lora", "4", monkeypatch=monkeypatch)
-        assert updates == [1] and read_json(tmp_path / weights / "training_metrics.json")["nonfinite_skipped"] == {"steps": 1}   # step 1 skipped, step 2 ran
-        return
-    with pytest.raises(RuntimeError, match="non-finite"):
-        train_tiny(tiny_base, tmp_path / weights, "--accum", "2", "--max_steps", "2", *FULL, monkeypatch=monkeypatch)
-    assert len(calls) >= 3 and updates == [] and not (tmp_path / weights / "head.pt").exists()
-
-
-def test_master_adamw_refuses_nonfinite_gradients():
-    """A NaN gradient makes the global norm NaN; step() raises before any master, moment or weight changes."""
-    from d1a.full_ft import MasterAdamW
-    params = [torch.nn.Parameter(torch.randn(3, 2).to(torch.bfloat16)), torch.nn.Parameter(torch.randn(4).to(torch.bfloat16))]
-    opt = MasterAdamW([{"params": params}], lr=1e-2, weight_decay=0.01, offload=True)
-    before = [(p.detach().clone(), opt.state[p]["master"].clone()) for p in params]
-    params[0].grad = torch.ones_like(params[0]); params[1].grad = torch.tensor([0.1, float("nan"), 0.2, 0.3], dtype=torch.bfloat16)
-    with pytest.raises(RuntimeError, match="non-finite gradient norm"):
-        opt.step()
-    assert all(torch.equal(p, w) and torch.equal(opt.state[p]["master"], m) and not opt.state[p]["exp_avg"].any() and opt.state[p]["step"] == 0
-               for p, (w, m) in zip(params, before))
+    train_tiny(tiny_base, tmp_path / "lora", "--accum", "2", "--max_steps", "2", "--lora", "4", monkeypatch=monkeypatch)
+    assert updates == [1] and read_json(tmp_path / "lora" / "training_metrics.json")["nonfinite_skipped"] == {"steps": 1}   # step 1 skipped, step 2 ran
 
 
 def test_none_pair_max_state_pairs_only_short_states_and_the_plan_counts_them(tiny_base):
@@ -841,11 +525,11 @@ def test_none_pair_max_state_pairs_only_short_states_and_the_plan_counts_them(ti
     assert Counter(v.request_id for v in batch) == Counter({r["_meta"]["id"]: 3 if id(r) in short else 1 for r in reqs})
     assert len(encode_batch(model, tok, SimpleNamespace(**{**knobs, "p_none_pair": 0.0}), reqs, 0)) == 16   # pairs None: today's draw
     plan_knobs = SimpleNamespace(batch=2, accum=2, length_sort=1, shared_prefix=1)
-    plain = [microbatch_plan(reqs, plan_knobs, 2, rank) for rank in (0, 1)]
-    assert [microbatch_plan(reqs, plan_knobs, 2, rank, set()) for rank in (0, 1)] == plain
-    paired = [microbatch_plan(reqs, plan_knobs, 2, rank, short) for rank in (0, 1)]
-    assert paired != plain and [[len(c) for c, _, _ in p] for p in paired] != [[len(c) for c, _, _ in p] for p in plain]
-    assert sorted(r["_meta"]["id"] for p in paired for c, _, _ in p for r in c) == sorted(r["_meta"]["id"] for p in plain for c, _, _ in p for r in c)
+    plain = microbatch_plan(reqs, plan_knobs)
+    assert microbatch_plan(reqs, plan_knobs, set()) == plain
+    paired = microbatch_plan(reqs, plan_knobs, short)
+    assert paired != plain and [len(c) for c, _, _ in paired] != [len(c) for c, _, _ in plain]
+    assert sorted(r["_meta"]["id"] for c, _, _ in paired for r in c) == sorted(r["_meta"]["id"] for c, _, _ in plain for r in c)
 
 
 def test_plan_shapes_are_the_encoded_shapes(tiny_base):
@@ -867,31 +551,27 @@ def test_plan_shapes_are_the_encoded_shapes(tiny_base):
         assert any(len(s) == 3 for s in shapes.values()) and any(len(s) == 1 for s in shapes.values())
 
 
-def test_pass_tokens_max_caps_every_pass_with_equal_counts_per_rank():
-    """--pass_tokens_max: on token shapes, a step whose costliest run is over the ceiling gets more micro-batches, the same
-    number on every rank, until no pass is over it; each step still trains its own records once (a short last step with
-    more runs than records repeats its cheapest, counted in the step's normaliser); a record over the ceiling on its
-    own is refused; without shapes the plan is today's."""
+def test_pass_tokens_max_caps_every_pass():
+    """--pass_tokens_max: on token shapes, a step whose costliest run is over the ceiling gets more micro-batches until no
+    pass is over it; each step still trains its own records once; a record over the ceiling on its own is refused;
+    without shapes the plan is today's."""
     from d1a.train import microbatch_plan, pass_tokens
-    # two full steps of 8 records (2 x 2 per rank) and a last step of 3; the short records at indices divisible by 3 carry siblings
+    # four steps of 4 records (2 x 2) and a last step of 3; the short records at indices divisible by 3 carry siblings
     sizes = [300, 290, 280, 270, 260, 5, 6, 7, 8, 9, 12, 60, 70, 15, 25, 35, 400, 390, 7]
     reqs = [{"_meta": {"id": f"r{i}"}, "state": "s" * n, "questions": {"q": {"instr": "x"}}} for i, n in enumerate(sizes)]
     shapes = {id(r): [(n, [4])] + ([(n, [5]), (n, [5])] if n < 100 and i % 3 == 0 else []) for i, (r, n) in enumerate(zip(reqs, sizes))}
     cost = lambda chunk: pass_tokens([s for r in chunk for s in shapes[id(r)]], True)
-    a, world = SimpleNamespace(batch=2, accum=2, length_sort=1, shared_prefix=1, pass_tokens_max=450), 2
-    plans = [microbatch_plan(reqs, a, world, rank, None, shapes) for rank in range(world)]
-    assert len(plans[0]) == len(plans[1]) and [e for _, _, e in plans[0]] == [e for _, _, e in plans[1]]
-    assert max(cost(c) for p in plans for c, _, _ in p) <= 450
-    free = [microbatch_plan(reqs, SimpleNamespace(**{**vars(a), "pass_tokens_max": 0}), world, rank, None, shapes) for rank in range(world)]
-    assert max(cost(c) for p in free for c, _, _ in p) > 450 and len(free[0]) == 5 and len(plans[0]) == 7   # steps 1 and 3 got one more each
-    ends = [k for k, (_, _, e) in enumerate(plans[0]) if e]
-    steps = [[r["_meta"]["id"] for p in plans for c, _, _ in p[lo:hi + 1] for r in c] for lo, hi in zip([0] + [k + 1 for k in ends], ends)]
-    assert [sorted(s) for s in steps[:2]] == [sorted(r["_meta"]["id"] for r in reqs[:8]), sorted(r["_meta"]["id"] for r in reqs[8:16])]
-    assert sorted(steps[2]) == ["r16", "r17", "r18", "r18"]   # 4 runs for 3 records: the cheapest repeats
-    assert [plans[0][k][1] for k in ends] == [8, 8, 4]         # and counts in the step's normaliser
+    a = SimpleNamespace(batch=2, accum=2, length_sort=1, shared_prefix=1, pass_tokens_max=450)
+    plan = microbatch_plan(reqs, a, None, shapes)
+    free = microbatch_plan(reqs, SimpleNamespace(**{**vars(a), "pass_tokens_max": 0}), None, shapes)
+    assert max(cost(c) for c, _, _ in plan) <= 450 < max(cost(c) for c, _, _ in free) and len(plan) > len(free) == 10
+    ends = [k for k, (_, _, e) in enumerate(plan) if e]
+    steps = [sorted(r["_meta"]["id"] for c, _, _ in plan[lo:hi + 1] for r in c) for lo, hi in zip([0] + [k + 1 for k in ends], ends)]
+    assert steps == [sorted(r["_meta"]["id"] for r in reqs[k:k + 4]) for k in range(0, 19, 4)]
+    assert [plan[k][1] for k in ends] == [4, 4, 4, 4, 3]   # each step's normaliser: its own records
     with pytest.raises(ValueError, match="r16"):
-        microbatch_plan(reqs, SimpleNamespace(**{**vars(a), "pass_tokens_max": 400}), world, 0, None, shapes)   # r16 alone: 400 + 4
-    assert microbatch_plan(reqs, a, world, 0) == microbatch_plan(reqs, SimpleNamespace(batch=2, accum=2, length_sort=1, shared_prefix=1), world, 0)
+        microbatch_plan(reqs, SimpleNamespace(**{**vars(a), "pass_tokens_max": 400}), None, shapes)   # r16 alone: 400 + 4
+    assert microbatch_plan(reqs, a) == microbatch_plan(reqs, SimpleNamespace(batch=2, accum=2, length_sort=1, shared_prefix=1))
 
 
 def test_pass_tokens_max_refuses_an_attention_only_base(tiny_base, tmp_path, monkeypatch):
@@ -946,7 +626,7 @@ def test_shared_prefix_equals_rows(tiny_base, checkpointing, lora):
     """d1a.shared_prefix (each state once, branches continuing from it: attention keys and values, the DeltaNet conv
     window and recurrent state) gives the row form's logits and gradients in fp32, over states of unequal length (left
     padding) and 1-4 questions; with gradient checkpointing each layer's two passes are recomputed together. With a LoRA
-    (d1a.train --shared_prefix 1 without --full_ft) the same holds for the adapter's gradients (dropout off: eval mode,
+    (d1a.train --shared_prefix 1) the same holds for the adapter's gradients (dropout off: eval mode,
     so the two passes draw no different masks)."""
     assert_shared_prefix_equals_rows(tiny_base, checkpointing, lora, ((5, 3), (17, 4), (1, 2), (40, 1)))
 
@@ -979,8 +659,8 @@ def test_local_predictor_scores_long_rows_through_the_shared_prefix(tiny_base, t
     from d1a.checkpoint import LoadOptions
     from d1a.data import load_records
     from d1a.model import ROW_PASS_TOKENS
-    train_tiny(tiny_base, tmp_path / "full", *FULL, "--max_steps", "1", monkeypatch=monkeypatch)
-    predictor = P.LocalPredictor(str(tmp_path / "full"), "cpu", LoadOptions(dtype=torch.float32, temperature=1.0))
+    train_tiny(tiny_base, tmp_path / "lora", "--lora", "4", "--max_steps", "1", monkeypatch=monkeypatch)
+    predictor = P.LocalPredictor(str(tmp_path / "lora"), "cpu", LoadOptions(dtype=torch.float32, temperature=1.0))
     record = load_records(tiny_base / "data.jsonl")[7]
     record = {**record, "_meta": {**record["_meta"], "group_id": "g", "variant": "clean"}, "questions": {qid: {**q, "src": "tiny"} for qid, q in record["questions"].items()}}
     short_report, short_rows = evaluate_records([record], predictor, tmp_path / "short")
@@ -1047,132 +727,41 @@ def assert_shared_prefix_equals_rows(tiny_base, checkpointing, lora, shapes, att
     assert not lora or any("lora_" in k for k in g_rows)
 
 
-# torchrun on this machine only, by address: --standalone resolves the hostname, which hangs where it has no DNS entry
-LOCAL_RENDEZVOUS = ("--nnodes=1", "--rdzv-backend=c10d", "--rdzv-endpoint=127.0.0.1:0", "--local-addr=127.0.0.1")
-
-
-def _run_train(args, out, ranks=1):
+def _run_train(args, out):
     import subprocess, sys
-    launcher = ["-m", "torch.distributed.run", *LOCAL_RENDEZVOUS, f"--nproc_per_node={ranks}"] if ranks > 1 else []
-    done = subprocess.run([sys.executable, *launcher, "-m", "d1a.train", *args, "--out", str(out)], capture_output=True, text=True)
+    done = subprocess.run([sys.executable, "-m", "d1a.train", *args, "--out", str(out)], capture_output=True, text=True)
     assert done.returncode == 0, done.stderr[-3000:]
     return done.stdout
 
 
-@pytest.mark.parametrize("ranks,gate", [(1, ()), (2, ()), (1, ("--none_pair_max_state", "10")), (2, ("--none_pair_max_state", "10")),
-                                        # the ceilings just above the costliest tiny record alone (siblings included: 157 padded
-                                        # tokens with every record's own draw, 127 gated), so some steps split
-                                        (1, ("--pass_tokens_max", "160")), (2, ("--none_pair_max_state", "10", "--pass_tokens_max", "128"))])
-def test_resume_is_bit_identical(tiny_base, tmp_path, ranks, gate):
-    """A full-weight run that stops after step 3 (its resume point: fp32 masters and moments, scheduler, RNG, data
-    position) and continues with --resume 1 ends with the same bits as an uninterrupted run, across an epoch boundary,
-    on one process and on two FSDP2 ranks; with --none_pair_max_state too (the ranks deal the same gated pairs), and with
-    --pass_tokens_max (the continuation plans the same extra micro-batches)."""
+@pytest.mark.parametrize("gate", [(), ("--none_pair_max_state", "10"),
+                                  # just above the costliest tiny record alone (siblings included: 157 padded tokens), so some steps split
+                                  ("--pass_tokens_max", "160")])
+def test_resume_is_bit_identical_under_length_sort(tiny_base, tmp_path, gate):
+    """A --length_sort run stopped after step 3 and continued with --resume 1 ends with the same bits as an uninterrupted
+    run, across an epoch boundary; with --none_pair_max_state too (the continuation deals the same gated pairs), and with
+    --pass_tokens_max (it plans the same extra micro-batches)."""
     import re
     from safetensors.torch import load_file
     from d1a.checkpoint import read_meta
-    args = ["--base", str(tiny_base / "base"), "--data", str(tiny_base / "data.jsonl"), "--device", "cpu", "--batch", "2", "--accum", str(2 // ranks),
-            "--lr", "1e-3", "--epochs", "2", "--p_none_pair", "0.5", "--length_sort", "1", *FULL, *gate]
-    out = _run_train(args, tmp_path / "whole", ranks)
+    args = ["--base", str(tiny_base / "base"), "--data", str(tiny_base / "data.jsonl"), "--device", "cpu", "--batch", "2", "--accum", "2",
+            "--lr", "1e-3", "--epochs", "2", "--p_none_pair", "0.5", "--length_sort", "1", "--shared_prefix", "1", "--lora", "4", *gate]
+    out = _run_train(args, tmp_path / "whole")
     assert ("none pairs: " in out) == ("--none_pair_max_state" in gate)
     if "--pass_tokens_max" in gate:   # the first epoch (where the run stops) has more micro-batches than --accum per step; no pass is over
         ceiling = int(gate[-1])
-        plans = [tuple(map(int, m)) for m in re.findall(r"plan: (\d+) micro-batches per rank for (\d+) steps \(--accum \d+\); the plan's largest pass (\d+)", out)]
-        assert len(plans) == 2 and plans[0][0] > plans[0][1] * (2 // ranks) and all(largest <= ceiling for _, _, largest in plans), out
-    _run_train([*args, "--save_every_steps", "3", "--stop_after", "3"], tmp_path / "split", ranks)
-    assert (tmp_path / "split/resume/latest.json").exists() and not (tmp_path / "split/model.safetensors").exists()
-    _run_train([*args, "--resume", "1"], tmp_path / "split", ranks)
-    a, b = load_file(tmp_path / "whole/model.safetensors"), load_file(tmp_path / "split/model.safetensors")
+        plans = [tuple(map(int, m)) for m in re.findall(r"plan: (\d+) micro-batches for (\d+) steps \(--accum \d+\); the plan's largest pass (\d+)", out)]
+        assert len(plans) == 2 and plans[0][0] > plans[0][1] * 2 and all(largest <= ceiling for _, _, largest in plans), out
+    _run_train([*args, "--save_every_steps", "3", "--stop_after", "3"], tmp_path / "split")
+    assert (tmp_path / "split/resume/latest.json").exists() and not (tmp_path / "split/adapter_model.safetensors").exists()
+    _run_train([*args, "--resume", "1"], tmp_path / "split")
+    a, b = load_file(tmp_path / "whole/adapter_model.safetensors"), load_file(tmp_path / "split/adapter_model.safetensors")
     head_a, head_b = read_meta(tmp_path / "whole").head, read_meta(tmp_path / "split").head
     assert all(torch.equal(a[k], b[k]) for k in a) and all(torch.equal(head_a[k], head_b[k]) for k in head_a)
     assert not (tmp_path / "split/resume").exists()   # the finished checkpoint supersedes the resume point
     from d1a.suite import read_json
     norms = [read_json(tmp_path / d / "training_metrics.json")["grad_norm"] for d in ("whole", "split")]
     assert norms[0] == norms[1] and [e["epoch"] for e in norms[0]] == [0, 1]   # carried across the resume point
-
-
-def test_fsdp2_ranks_train_what_one_process_trains(tiny_base, tmp_path):
-    """Two gloo ranks under torchrun (FSDP2 over the layers, the head replicated) take the same first step as one process
-    with the same records per step: the sharded gradient is the sum over ranks, not the mean."""
-    import subprocess, sys
-    from safetensors.torch import load_file
-    common = ["-m", "d1a.train", "--base", str(tiny_base / "base"), "--data", str(tiny_base / "data.jsonl"), "--device", "cpu", "--batch", "2",
-              "--lr", "1e-3", "--max_steps", "1", *FULL]
-    subprocess.run([sys.executable, *common, "--accum", "2", "--out", str(tmp_path / "one")], check=True, capture_output=True)
-    subprocess.run([sys.executable, "-m", "torch.distributed.run", *LOCAL_RENDEZVOUS, "--nproc_per_node=2", *common, "--accum", "1", "--out", str(tmp_path / "two")], check=True, capture_output=True)
-    one, two = load_file(tmp_path / "one/model.safetensors"), load_file(tmp_path / "two/model.safetensors")
-    assert one.keys() == two.keys() and all(torch.equal(one[k], two[k]) for k in one)
-
-
-@pytest.mark.parametrize("ranks", [1, 2])
-def test_snapshots_are_checkpoints_kept_and_completed_on_resume(tiny_base, tmp_path, ranks):
-    """--snapshot_fractions 0.25,0.5 of 8 steps writes <snapshot_dir>/step-{2,4}/checkpoint: the final checkpoint's files
-    (+ snapshot.json, written last), loadable by the full-weight loader, with head.pt recording the step, epoch fraction
-    and records seen (on two FSDP2 ranks written by rank 0 in the background). A continued run keeps a snapshot that
-    exists (not rewritten) and writes one it missed, a write left incomplete included, with the uninterrupted run's
-    bits; a snapshot before the resume point that is gone is reported, not invented."""
-    import shutil
-    from safetensors.torch import load_file
-    from d1a.checkpoint import Checkpoint, read_meta
-    from d1a.full_ft import SNAPSHOT_INFO, completed_snapshots, snapshot_path
-    from d1a.suite import read_json
-    args = ["--base", str(tiny_base / "base"), "--data", str(tiny_base / "data.jsonl"), "--device", "cpu", "--batch", "2", "--accum", str(2 // ranks),
-            "--lr", "1e-3", "--epochs", "2", *FULL, "--snapshot_fractions", "0.25,0.5"]
-    snaps = lambda name: ["--snapshot_dir", str(tmp_path / f"{name}-snaps")]
-    _run_train([*args, *snaps("whole")], tmp_path / "whole", ranks)
-    whole = tmp_path / "whole-snaps"
-    assert completed_snapshots(whole) == [2, 4] and sorted(p.name for p in whole.iterdir()) == ["step-0000002", "step-0000004"]
-    for step, epoch in ((2, 0.5), (4, 1.0)):
-        snap = snapshot_path(whole, step)
-        final_files = {p.name for p in (tmp_path / "whole").iterdir()} - {"training_metrics.json", "training_config.json"}
-        assert {p.name for p in snap.iterdir()} == final_files | {SNAPSHOT_INFO}
-        meta = read_meta(snap)
-        assert meta.extra["snapshot"] == {"step": step, "steps": 8, "epoch": epoch, "records_seen": 4 * step} and (meta.weights, meta.lora) == ("full", 0)
-        assert read_json(snap / SNAPSHOT_INFO)["step"] == step and read_json(snap / SNAPSHOT_INFO)["write_seconds"] >= 0
-        ck = Checkpoint(snap)
-        assert ck.full and ck.load("cpu")[1].dtype == "bfloat16"
-    assert not torch.equal(load_file(snapshot_path(whole, 2) / "model.safetensors")["layers.0.mlp.up_proj.weight"],
-                           load_file(snapshot_path(whole, 4) / "model.safetensors")["layers.0.mlp.up_proj.weight"])
-    assert [s["step"] for s in read_json(tmp_path / "whole/training_metrics.json")["snapshots"]] == [2, 4]
-
-    # killed after step 5 (resume point at 3, snapshots 2 and 4 on disk): the continuation leaves snapshot 4 alone
-    _run_train([*args, *snaps("a"), "--save_every_steps", "3", "--stop_after", "5"], tmp_path / "a", ranks)
-    info = snapshot_path(tmp_path / "a-snaps", 4) / SNAPSHOT_INFO
-    written = info.stat().st_mtime_ns
-    _run_train([*args, *snaps("a"), "--resume", "1"], tmp_path / "a", ranks)
-    assert info.stat().st_mtime_ns == written and completed_snapshots(tmp_path / "a-snaps") == [2, 4]
-
-    # killed at step 3, before snapshot 4 (and with a half-written step-4 directory); snapshot 2 was lost as well
-    _run_train([*args, *snaps("b"), "--save_every_steps", "3", "--stop_after", "3"], tmp_path / "b", ranks)
-    b = tmp_path / "b-snaps"
-    assert completed_snapshots(b) == [2]
-    shutil.rmtree(snapshot_path(b, 2).parent)
-    snapshot_path(b, 4).mkdir(parents=True); (snapshot_path(b, 4) / "model.safetensors").write_bytes(b"partial")
-    out = _run_train([*args, *snaps("b"), "--resume", "1"], tmp_path / "b", ranks)
-    assert "snapshot(s) at step(s) [2] are missing and cannot be written" in out and completed_snapshots(b) == [4]
-    for name in ("whole", "a", "b"):   # the continued runs end where the uninterrupted one does
-        assert all(torch.equal(v, load_file(tmp_path / name / "model.safetensors")[k]) for k, v in load_file(tmp_path / "whole/model.safetensors").items())
-    mine, theirs = load_file(snapshot_path(b, 4) / "model.safetensors"), load_file(snapshot_path(whole, 4) / "model.safetensors")
-    assert mine.keys() == theirs.keys() and all(torch.equal(mine[k], theirs[k]) for k in mine)
-    assert all(torch.equal(v, read_meta(snapshot_path(whole, 4)).head[k]) for k, v in read_meta(snapshot_path(b, 4)).head.items())
-
-
-def test_every_n_snapshots_over_the_cap_stop_before_training(tiny_base, tmp_path, monkeypatch):
-    """Without --max_steps an every-N plan is counted once the run's steps are known, before the first step."""
-    with pytest.raises(SystemExit, match="MAX_SNAPSHOTS"):
-        train_tiny(tiny_base, tmp_path / "x", *FULL, "--accum", "1", "--epochs", "2", "--snapshot_every_steps", "1", monkeypatch=monkeypatch)   # 16 steps: 15 snapshots
-    assert not (tmp_path / "x-snapshots").exists() or not any((tmp_path / "x-snapshots").iterdir())
-
-
-def test_resume_writer_keeps_a_later_point_being_written(tmp_path):
-    """Rank 0 finishes a point after the other ranks have started the next one (a background write outlasting the
-    interval): it removes only earlier points, never the one in progress."""
-    from d1a.full_ft import LATEST, ResumeWriter
-    from d1a.suite import read_json
-    for step in (1, 9): (tmp_path / f"step-{step:07d}").mkdir()
-    writer = ResumeWriter(tmp_path, background=False)
-    writer._write_point(5, {"optimizer": {}}, {"world": 1})
-    assert sorted(p.name for p in tmp_path.glob("step-*")) == ["step-0000005", "step-0000009"] and read_json(tmp_path / LATEST)["dir"] == "step-0000005"
 
 
 def _parse_train(monkeypatch, *args):
@@ -1182,51 +771,16 @@ def _parse_train(monkeypatch, *args):
     return train.parse_args()
 
 
-def test_full_ft_refuses_old_torch(monkeypatch, capsys):
-    """d1a.full_ft needs torch >= 2.8 (FSDPModule.set_gradient_divide_factor) while pyproject allows 2.6: --full_ft 1
-    stops at argument parsing with the reason."""
-    import d1a.full_ft as F
-    assert F.unsupported_torch("2.8.0+cu128") is None and F.unsupported_torch("2.10.1") is None
-    assert "torch >= 2.8" in F.unsupported_torch("2.7.1+cu126") and "2.6.0" in F.unsupported_torch("2.6.0")
-    monkeypatch.setattr(F, "unsupported_torch", lambda: "--full_ft 1 needs torch >= 2.8 (test)")
-    with pytest.raises(SystemExit):
-        _parse_train(monkeypatch, "--full_ft", "1", "--weights_dtype", "bf16")
-    assert "needs torch >= 2.8" in capsys.readouterr().err
-
-
-def test_padding_repeats_shuffled_order_not_the_longest():
-    """Filling every rank to the same count repeats the first records of the shuffled order: in rank_share (plain) and in
-    microbatch_plan's short last step (--length_sort 1, padded before its records are sorted by length)."""
-    from d1a.full_ft import rank_share
-    from d1a.train import microbatch_plan
-    assert rank_share([5, 1, 9], 1, 2) == [1, 5]
-    reqs = [{"state": "s" * n, "questions": {"q": {"instr": "x"}}} for n in (50, 60, 70, 80, 3, 900, 800)]   # last step: 3, 900, 800
-    plans = [microbatch_plan(reqs, SimpleNamespace(batch=1, accum=2, length_sort=1, shared_prefix=1), 2, rank) for rank in (0, 1)]
-    last = sorted(len(r["state"]) for plan in plans for c, _, _ in plan[2:] for r in c)
-    assert last == [3, 3, 800, 900]   # the shuffled first (the shortest here) is repeated, not the longest
-
-
 def test_grad_norm_in_training_metrics(tiny_base, tmp_path, monkeypatch):
     """training_metrics.json carries, per epoch, the mean and max global gradient norm before clipping and the number of
-    clipped steps, for LoRA (clip_grad_norm_) and full weights (MasterAdamW's own norm)."""
+    clipped steps."""
     from d1a.suite import read_json
-    for name, args in (("lora", ("--lora", "4")), ("full", FULL)):
+    for name, args in (("lora", ("--lora", "4")),):
         train_tiny(tiny_base, tmp_path / name, *args, "--accum", "1", "--epochs", "2", monkeypatch=monkeypatch)
         metrics = read_json(tmp_path / name / "training_metrics.json")
         norms = metrics["grad_norm"]
         assert [e["epoch"] for e in norms] == [0, 1] and sum(e["steps"] for e in norms) == metrics["optimizer_steps"]
         assert all(0 < e["mean"] <= e["max"] and 0 <= e["clipped_steps"] <= e["steps"] for e in norms)
-
-
-def test_resume_writer_bounds_the_wait_for_peers(tmp_path, monkeypatch):
-    """Rank 0 waits PEER_WAIT for the other ranks' files, then fails loudly instead of hanging; latest.json is untouched."""
-    import d1a.full_ft as F
-    monkeypatch.setattr(F, "PEER_WAIT", 0)
-    writer = F.ResumeWriter(tmp_path, background=False)
-    writer.world = 2   # a peer that never writes
-    with pytest.raises(TimeoutError, match=r"rank\(s\) \[1\]"):
-        writer._write_point(3, {"optimizer": {}}, {"world": 2})
-    assert not (tmp_path / F.LATEST).exists()
 
 
 class _FakeLM:
@@ -1241,44 +795,6 @@ class _FakeLM:
 
 def _finish(directory):
     (Path(directory) / "head.pt").write_bytes(b"head")
-
-
-def test_a_failed_snapshot_withholds_the_resume_point_and_the_continuation_rewrites_it(tmp_path, capsys):
-    """The headline invariant: a snapshot whose background write fails (a full disk) keeps the resume point being written
-    after it from becoming latest.json (ResumeWriter._write_point's after.join() path), training raises, and a
-    continuation from the previous point finds the snapshot's step ahead of it and writes it."""
-    from d1a.full_ft import LATEST, ResumeWriter, SnapshotWriter, completed_snapshots, snapshot_path
-    from d1a.suite import read_json, write_json
-    resume, snaps = tmp_path / "resume", tmp_path / "snapshots"
-    (resume / "step-0000003").mkdir(parents=True); write_json(resume / LATEST, {"dir": "step-0000003", "step": 3})
-    first = SnapshotWriter(snaps, [4], background=True)
-    first.save(4, _FakeLM(failures=1), _finish, {"step": 4})
-    with pytest.raises(RuntimeError, match="snapshot failed to write"):
-        ResumeWriter(resume, background=False)._write_point(5, {"optimizer": {}}, {"world": 1}, after=first)
-    assert read_json(resume / LATEST)["step"] == 3 and (resume / "step-0000003").exists()   # the previous point stays the latest
-    with pytest.raises(RuntimeError, match="writing a snapshot failed"):
-        first.wait()
-    assert completed_snapshots(snaps) == [] and snapshot_path(snaps, 4).exists()   # an incomplete directory
-    again = SnapshotWriter(snaps, [4], background=False)   # the continuation from step 3
-    assert again.missed(3) == [] and again.due(4)
-    again.save(4, _FakeLM(), _finish, {"step": 4})
-    assert completed_snapshots(snaps) == [4] and read_json(snapshot_path(snaps, 4) / "snapshot.json")["step"] == 4
-    ResumeWriter(resume, background=False)._write_point(5, {"optimizer": {}}, {"world": 1}, after=again)
-    assert read_json(resume / LATEST)["step"] == 5
-
-
-def test_a_complete_snapshot_is_never_deleted(tmp_path, capsys):
-    """A writer that reaches a step whose snapshot is complete (a racing writer, an earlier attempt) leaves it alone;
-    an unpadded step directory from before zero-padding still counts as that step."""
-    from d1a.full_ft import SNAPSHOT_INFO, SnapshotWriter, completed_snapshot_dirs, completed_snapshots, snapshot_path
-    from d1a.suite import write_json
-    done = snapshot_path(tmp_path, 4); done.mkdir(parents=True); write_json(done / SNAPSHOT_INFO, {"step": 4}); (done / "head.pt").write_bytes(b"kept")
-    lm = _FakeLM()
-    SnapshotWriter(tmp_path, [4], background=False)._write(4, lm, None, _finish, {"step": 4}, 0.0)
-    assert (done / "head.pt").read_bytes() == b"kept" and lm.calls == 0 and "complete already" in capsys.readouterr().out
-    old = tmp_path / "step-300" / "checkpoint"; old.mkdir(parents=True); write_json(old / SNAPSHOT_INFO, {"step": 300})
-    assert done.parent.name == "step-0000004" and completed_snapshots(tmp_path) == [4, 300] and completed_snapshot_dirs(tmp_path)[300] == old
-    assert not SnapshotWriter(tmp_path, [300], background=False).due(300)
 
 
 def test_serve_self_check():
@@ -1466,39 +982,23 @@ def test_pass_tokens_max_refusals(monkeypatch, capsys):
     assert _parse_train(monkeypatch, "--pass_tokens_max", "40960", "--length_sort", "1").pass_tokens_max == 40960
 
 
-def test_snapshot_count_is_capped(monkeypatch, capsys):
-    """d1a.full_ft.MAX_SNAPSHOTS bounds what a full-weight run may plan (every snapshot is kept on the run's disk next to
-    its resume points); d1a.train refuses more at parse time and again once the run's steps are known."""
-    from d1a.full_ft import too_many_snapshots
-    nine = tuple(round(0.1 * i, 1) for i in range(1, 10))
-    assert too_many_snapshots(nine[:8]) is None and "9 snapshots planned" in too_many_snapshots(nine)
-    assert too_many_snapshots((), 100, 900) is None and "9 snapshots planned" in too_many_snapshots((), 100, 1000)   # steps 100..900
-    assert "needs the run's step count" in too_many_snapshots((), 100) and too_many_snapshots((0.5,), 100, 450) is None   # {100, 200, 225, 300, 400}
-    with pytest.raises(SystemExit):
-        _parse_train(monkeypatch, *FULL, "--snapshot_fractions", ",".join(map(str, nine)))
-    with pytest.raises(SystemExit):
-        _parse_train(monkeypatch, *FULL, "--snapshot_every_steps", "10", "--max_steps", "100")
-    assert capsys.readouterr().err.count("MAX_SNAPSHOTS") == 2
-    assert _parse_train(monkeypatch, *FULL, "--snapshot_every_steps", "10").snapshot_every_steps == 10   # unbounded: checked in main
-
-
-def test_ranks_share_an_epoch_and_micro_batches_balance_length():
-    """Each rank's equal share of an epoch (d1a.full_ft.rank_share), and --length_sort's micro-batch plan: a long record
-    gets a micro-batch to itself, the short ones share one, and a step holds its own records once each."""
+def test_micro_batches_balance_length():
+    """--length_sort's micro-batch plan: a step's records are cut in length order (its long records share the costliest
+    micro-batch, its short ones the other) and each step holds its own records once; the plain plan cuts --batch
+    consecutive records."""
     from types import SimpleNamespace
-    from d1a.full_ft import rank_share
     from d1a.train import microbatch_plan
-    assert [rank_share(list(range(5)), r, 2) for r in (0, 1)] == [[0, 2, 4], [1, 3, 0]] and rank_share([1, 2], 0, 1) == [1, 2]
     reqs = [{"state": "s" * n, "questions": {"q": {"instr": "x"}}} for n in (1, 90, 5, 70, 3, 80, 2, 4, 6, 7)]
     knobs = lambda sort: SimpleNamespace(batch=2, accum=2, length_sort=sort, shared_prefix=1)
-    plain = [microbatch_plan(reqs, knobs(0), 2, rank) for rank in (0, 1)]
-    assert [len(c) for c, _, _ in plain[0]] == [2, 2, 1] and [(n, ends) for _, n, ends in plain[0]] == [(8, False), (8, True), (2, True)]
-    balanced = [microbatch_plan(reqs, knobs(1), 2, rank) for rank in (0, 1)]
-    assert len(balanced[0]) == len(balanced[1]) == 3 and [ends for _, _, ends in balanced[0]] == [False, True, True]
-    first = sorted(len(r["state"]) for plan in balanced for c, _, _ in plan[:2] for r in c)
-    assert first == sorted(len(r["state"]) for r in reqs[:8])
-    alone = {len(c[0]["state"]) for plan in balanced for c, _, _ in plan[:2] if len(c) == 1}
-    assert {90, 80, 70} <= alone
+    plain = microbatch_plan(reqs, knobs(0))
+    assert [len(c) for c, _, _ in plain] == [2] * 5 and [(n, ends) for _, n, ends in plain] == [(4, False), (4, True), (4, False), (4, True), (2, True)]
+    balanced = microbatch_plan(reqs, knobs(1))
+    assert len(balanced) == 5 and [ends for _, _, ends in balanced] == [False, True, False, True, True]
+    for k in (0, 2):   # each step's two micro-batches hold exactly its four records, long ones first
+        assert sorted(id(r) for c, _, _ in balanced[k:k + 2] for r in c) == sorted(id(r) for r in reqs[2 * k:2 * k + 4])
+        long, short = ([len(r["state"]) for r in c] for c, _, _ in balanced[k:k + 2])
+        assert min(long) > max(short)
+    assert [len(r["state"]) for r in balanced[0][0]] == [90, 70] and [len(r["state"]) for r in balanced[2][0]] == [80]
 
 
 def test_max_state_lifts_row_and_packed_limits_together():

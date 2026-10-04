@@ -1,13 +1,10 @@
 # Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); the MLX backend for Gemma 4 bases and MLX export folders (d1a_config.json); the ple_flash load option (D1A_PLE_FLASH); model-family decisions (MLX support, Qwen3.5's CUDA kernels) from d1a.backbone; option_isolation checkpoints refused.
-"""Trained checkpoints: a run directory or a Hub repo holding a LoRA adapter (or, for a full-weight run, the whole bf16
-backbone), `head.pt` and the tokenizer; or an MLX export of one (d1a_config.json).
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); the MLX backend for Gemma 4 bases and MLX export folders (d1a_config.json); the ple_flash load option (D1A_PLE_FLASH); model-family decisions (MLX support, Qwen3.5's CUDA kernels) from d1a.backbone; option_isolation checkpoints refused; full-weight checkpoints refused.
+"""Trained checkpoints: a run directory or a Hub repo holding a LoRA adapter, `head.pt` and the tokenizer; or an MLX
+export of one (d1a_config.json).
 
-Loader rule: `adapter_config.json` present -> a LoRA adapter on `meta.base` at `meta.base_revision`; no adapter and
-`config.json` + `model*.safetensors` (save_pretrained of the backbone, `meta.weights == "full"`) -> the backbone is loaded from
-the checkpoint directory itself, nothing is merged, in the dtype head.pt's `weights_dtype` names (it must match the `dtype`
-save_pretrained wrote to config.json). The tokenizer always comes from the base (both layouts carry a copy).
-`d1a_config.json` present (EXPORT_CONFIG, written by d1a.mlx_model.export_mlx / scripts/export_mlx.py) -> an MLX export:
+Loader rule: `adapter_config.json` -> a LoRA adapter on `meta.base` at `meta.base_revision`; the tokenizer comes from the
+base. `d1a_config.json` present (EXPORT_CONFIG, written by d1a.mlx_model.export_mlx / scripts/export_mlx.py) -> an MLX export:
 the adapter already merged into the base and saved by mlx-lm (config.json + model*.safetensors, optionally quantized),
 the pointer head in fp32 in head.safetensors and the tokenizer files; it loads through the MLX backend only, with its
 own tokenizer, and needs neither the base nor the adapter.
@@ -69,7 +66,7 @@ class Meta:
     weights_dtype: str = "fp32"
     temperature: float = 1.0
     holdout: list = field(default_factory=list)
-    weights: str = "lora"          # "lora": an adapter on the base; "full": the whole backbone is in the checkpoint (d1a.train --full_ft); "mlx": an MLX export (never written to a head.pt)
+    weights: str = "lora"          # "lora": an adapter on the base; "mlx": an MLX export (never written to a head.pt)
     extra: dict = field(default_factory=dict)
 
     KNOWN = ("base", "head", "base_revision", "lora", "head_dim", "option_isolation", "special_embeddings", "weights_dtype", "temperature", "holdout", "weights")
@@ -222,6 +219,8 @@ class Checkpoint:
         self.meta = export_meta(self.path, self.export) if self.export else read_meta(self.path)
         if self.meta.option_isolation:   # Kev's isolated option spans: encode() no longer builds them, so its answers would be wrong
             raise ValueError(f"{self.requested} was trained with option_isolation, which D1A no longer supports (docs/UPSTREAM.md)")
+        if self.meta.weights == "full":   # Kev's full-weight runs (d1a.train --full_ft, removed)
+            raise ValueError(f"{self.requested} is a full-weight checkpoint, which D1A no longer loads (docs/removed-tools.md)")
 
     def file(self, name):
         return Path(self.path) / name
@@ -229,26 +228,14 @@ class Checkpoint:
     def adapter_config(self):
         return json.loads(self.file("adapter_config.json").read_text(encoding="utf-8"))
 
-    @property
-    def full(self):
-        """The loader rule (module docstring): True for a full-weight checkpoint, False for a LoRA adapter; head.pt's
-        `weights` must agree with the files. An MLX export is neither (its weights are mlx-lm's): False."""
-        if self.export is not None: return False
-        found = "lora" if self.file("adapter_config.json").exists() else "full" if self.file("config.json").exists() and self.shards() else None
-        if found != self.meta.weights:
-            raise ValueError(f"{self.path}: head.pt says weights={self.meta.weights!r} but the directory holds "
-                             f"{ {'lora': 'an adapter', 'full': 'backbone weights'}.get(found, 'neither an adapter nor backbone weights') }")
-        return found == "full"
-
     def shards(self):
-        """The backbone's safetensors files of a full-weight checkpoint (model.safetensors or model-*-of-*.safetensors)."""
+        """An MLX export's safetensors files (model.safetensors or model-*-of-*.safetensors)."""
         return weight_shards(self.path)
 
     def weights_sha256(self):
-        """What a run's provenance pins: the adapter file's sha256, or for full weights and MLX exports the sha256 over
-        every shard's."""
+        """What a run's provenance pins: the adapter file's sha256, or for an MLX export the sha256 over every shard's."""
         from .suite import digest   # lazy: the Space vendors this module without d1a/suite.py
-        if self.export is None and not self.full: return digest(self.file("adapter_model.safetensors"))
+        if self.export is None: return digest(self.file("adapter_model.safetensors"))
         import hashlib
         return hashlib.sha256("".join(f"{p.name}:{digest(p)}\n" for p in self.shards()).encode()).hexdigest()
 
@@ -286,7 +273,7 @@ class Checkpoint:
             return "mlx"
         if opts.backend != "auto": return opts.backend or "torch"
         exact = opts.dtype is torch.float32   # D1A_DTYPE=fp32: the caller wants the reported-numbers path, not a faster one
-        return "mlx" if str(device) == "mps" and not exact and mlx_available() and not self.full and self.mlx_base() else "torch"
+        return "mlx" if str(device) == "mps" and not exact and mlx_available() and self.mlx_base() else "torch"
 
     def load(self, device, opts=LoadOptions()):
         """-> (tokenizer, model) in eval mode with the LoRA applied (or the full backbone loaded) and the pointer head loaded. The model is a
@@ -309,7 +296,6 @@ class Checkpoint:
         return tok
 
     def _load_mlx(self, tok, opts):
-        if self.full: raise ValueError("the MLX backend merges an adapter into the base; full-weight checkpoints run on backend=torch")
         if not mlx_available(): raise ValueError("the MLX backend needs mlx-lm on Apple Silicon (the `mlx` extra)")
         from .mlx_model import MLXDecisionModel, merge_lora   # after the refusal: without mlx-lm the import would hide it
         if not opts.merge: raise ValueError("the MLX backend always merges the adapter (D1A_MERGE=0 needs backend=torch)")
@@ -323,25 +309,9 @@ class Checkpoint:
         return m
 
     def _load_torch(self, tok, device, opts):
-        m, merged = self._full_torch(tok, device, opts) if self.full else self._adapted_torch(tok, device, opts)
+        m, merged = self._adapted_torch(tok, device, opts)
         if str(device).startswith("cuda"): m.backbone.serve_cuda(m, opts, merged)   # Qwen3.5: fused kernels and CUDA graphs
         return m
-
-    SAVED_DTYPES = {"bf16": "bfloat16", "fp32": "float32"}   # head.pt weights_dtype -> the dtype save_pretrained writes to config.json
-
-    def _full_torch(self, tok, device, opts):
-        """-> (model, True). Full weights load in the dtype head.pt's `weights_dtype` names (bf16 for every d1a.train
-        --full_ft run: the dtype they were trained in), which must be the dtype save_pretrained recorded in config.json;
-        otherwise a mislabelled export would be silently cast (fp32 weights rounded to bf16, or bf16 upcast to twice the
-        memory). An explicit dtype still casts on purpose (fp32: the same values computed in fp32). Nothing to merge."""
-        if opts.lora_scale != 1: raise ValueError("lora_scale interpolates an adapter; a full-weight checkpoint has none")
-        meta = self.meta
-        cfg = json.loads(self.file("config.json").read_text(encoding="utf-8"))
-        expected, saved = self.SAVED_DTYPES.get(meta.weights_dtype), cfg.get("dtype") or cfg.get("torch_dtype")
-        if expected is None or saved not in (None, expected):
-            raise ValueError(f"{self.path}: config.json records the weights as {saved} but head.pt says weights_dtype={meta.weights_dtype!r}")
-        return DecisionModel(meta.base, tok, device, head_dim=meta.head_dim,
-                             dtype=opts.dtype or getattr(torch, expected), attn=opts.attn, weights=self.path), True
 
     def _adapted_torch(self, tok, device, opts):
         """-> (model, whether the adapter was merged): the base with this checkpoint's LoRA."""
@@ -369,8 +339,8 @@ class Checkpoint:
     COMPAT_FIELDS = ("base", "base_revision", "lora", "head_dim", "option_isolation", "special_embeddings", "weights")
 
     def warm_start(self, model, ours):
-        """Delta training: load this checkpoint's weights (adapter, or full backbone) and pointer head into `model` (a fresh
-        DecisionModel built the way `ours` says: with LoRA, or for full-weight training without). `ours` is the Meta the new
+        """Delta training: load this checkpoint's adapter and pointer head into `model` (a fresh DecisionModel with LoRA,
+        built the way `ours` says). `ours` is the Meta the new
         run will save; every architecture field is compared BEFORE loading, because peft and load_state_dict(strict=False)
         load matching keys silently and a half-loaded model still trains and still reports a loss. Returns provenance."""
         from .suite import digest   # lazy: the Space vendors this module without d1a/suite.py
@@ -379,24 +349,10 @@ class Checkpoint:
             theirs, mine = getattr(self.meta, name), getattr(ours, name)
             if theirs != mine and not (name == "base_revision" and None in (theirs, mine)):
                 raise ValueError(f"--init_from {self.path}: {name} is {theirs!r} there and {mine!r} here")
-        tensors = self._load_backbone_into(model.lm) if self.full else self._load_adapter_into(model.lm)
+        tensors = self._load_adapter_into(model.lm)
         model.head.load_state_dict(self.meta.head)
         return {"init_from": self.requested, "resolved": self.path, "weights_sha256": self.weights_sha256(),
                 "head_sha256": digest(self.file("head.pt")), "tensors": tensors}
-
-    def _load_backbone_into(self, lm):
-        """Copy the saved backbone over `lm` shard by shard (the base's copy in memory is replaced, never merged); every
-        tensor of `lm` must be covered exactly once. -> tensor count."""
-        from safetensors.torch import load_file
-        have, seen = set(lm.state_dict()), set()
-        for shard in self.shards():
-            part = load_file(shard)
-            unexpected = sorted(set(part) - have)
-            if unexpected: raise ValueError(f"--init_from {self.path}: {shard.name} carries tensors this backbone does not have (e.g. {unexpected[:2]})")
-            lm.load_state_dict(part, strict=False); seen |= set(part)
-        missing = sorted(have - seen)
-        if missing: raise ValueError(f"--init_from {self.path} does not cover {len(missing)} of this backbone's tensors (e.g. {missing[:2]})")
-        return len(seen)
 
     def _load_adapter_into(self, lm):
         from peft import get_peft_model_state_dict, load_peft_weights, set_peft_model_state_dict

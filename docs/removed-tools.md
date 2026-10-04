@@ -82,3 +82,24 @@ git show 00371c1:d1a/model.py   # encode(option_isolation=...), branch_mask_batc
 | `--anchor file`, `--anchor_w w`, `--anchor_sources` | `w × KL(base ‖ model)` toward a frozen base model's zero-shot distribution per question (a JSON of `{record_id: {qid: {key: p}}}` targets; questions whose option set changed are skipped). Its builder, `d1a.anchors`, was already removed. |
 | `--option_isolation 1` | Every option span is its own sub-branch: it sees the state, the instruction and itself only, all spans share position ids, and `<decide>` sits after the longest. Answers are permutation-invariant by construction. Packed mask only, so not on Qwen3.5, MLX or the media server. A checkpoint trained with it is now refused at load. |
 | `--special_embeddings 1` | Also trains the 5 delimiter tokens' embeddings (PEFT `trainable_token_indices`). Such adapters still load on torch; MLX refuses them as before. |
+
+## Full-weight training (removed October 2026)
+
+`d1a.train --full_ft 1` trained every backbone weight instead of a LoRA. No D1A model used it: D1A trains LoRA adapters
+on one GPU (an L4), and a whole-backbone run of E4B wants far more memory. It is in commit `2a9be28` and earlier:
+
+```bash
+git show 2a9be28:d1a/full_ft.py                      # MasterAdamW, FSDP2 sharding, resume and snapshot writers
+git show 2a9be28:scripts/interpolate_checkpoint.py   # WiSE-FT blends of full-weight checkpoints
+git show 2a9be28:scripts/merge_lora_checkpoint.py    # a LoRA merged into a full-weight checkpoint, to start full-weight training
+```
+
+- **Optimizer** (`MasterAdamW`): bf16 working weights, with fp32 master weights and AdamW moments kept in host memory
+  on one GPU, streamed one tensor at a time, clipped by the global norm and refusing a non-finite one.
+- **Several GPUs**: `torchrun` + FSDP2 over the decoder layers, each rank holding its shard's masters and moments, with
+  the epoch split evenly across ranks (`rank_share`) and micro-batches balanced across them.
+- **Snapshots** (`--snapshot_fractions`, `--snapshot_every_steps`, `--snapshot_dir`): loadable checkpoints at chosen
+  steps, kept beside the run and completed on resume.
+- **Checkpoints**: `save_pretrained` of the whole backbone plus `head.pt` with `weights: "full"`; such a checkpoint is now
+  refused at load. LoRA scaling at load time (`LoadOptions.lora_scale`, `D1A_LORA_SCALE`) still gives WiSE-FT-style
+  interpolation for adapters.
