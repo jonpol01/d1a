@@ -16,7 +16,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- **A Hugging Face Space** (`space/`, published by `space/push.sh` as `JohnP1/d1a`, hosted on ZeroGPU): model routing,
+- **A Hugging Face Space, ready to publish** (`space/`, `space/push.sh`; not hosted yet: a Gradio or ZeroGPU Space needs HF PRO): model routing,
   guardrails, tool-call gating, the PR labeler (paste a GitHub PR link) and zero-shot photo and voice checks on
   D1A-E4B v0.4. One `d1a.media.MediaModel` answers all of them: `MediaModel.probs` now also scores a text-only record
   (media None) on the same weights.
