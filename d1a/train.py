@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import torch
 import torch.nn.functional as F
-from . import resume
+from . import resume, suites
 from .checkpoint import Checkpoint, Meta, write_meta
 from .device import allocated_bytes, default_device, empty_cache, sync
 from .data import EVAL_ONLY, build, augment, load_records, materialize, none_pair, source_seed
@@ -47,7 +47,7 @@ def training_requests(a, tok, manifest, holdout):
     against the eval-only policy, then the ablation knobs (--train_sources, --public_frac, --synthetic_repeat)."""
     # the suite's rules (declared trainable sources, no held-out structures) apply to every record taken from it
     if a.data:
-        reqs = load_records(a.data)
+        reqs = load_records(suites.resolve(a.data, purpose="train"))   # a d1a suite partition: pinned, verified, train role only
         if a.replay:
             pool = load_split(a.suite, "train"); replay = random.Random(f"replay:{a.seed}").sample(pool, min(a.replay, len(pool)))
             validate_training(replay, manifest)
@@ -342,7 +342,7 @@ def parse_args():
     ap.add_argument("--synthetic_repeat", type=int, default=1, help="oversample synthetic policy sources (legacy_policy, compositional, contrastive) this many times per epoch")
     ap.add_argument("--public_frac", type=float, default=1.0, help="deterministic subsample of public-source training records (mix ablations)")
     ap.add_argument("--out", default="runs/d1a")
-    ap.add_argument("--data", default="", help="your own labelled requests, one JSON object per line (see d1a.data.load_records); an alternative to --suite for fine-tuning, or combined with --suite and --replay")
+    ap.add_argument("--data", default="", help="your own labelled requests, one JSON object per line (see d1a.data.load_records), or a D1A suite partition (evals/d1a/<suite>:<partition>, d1a.suites); an alternative to --suite for fine-tuning, or combined with --suite and --replay")
     ap.add_argument("--max_state", type=int, default=MAX_STATE, help=f"state tokens per training record (default {MAX_STATE}); raising it admits long-state --data records, the packed limit grows by the same amount")
     ap.add_argument("--extra_suites", default="", help="comma-separated frozen suite directories whose training partitions are added to this run (each checked against its own manifest), e.g. evals/hard-v1,evals/devtools-v1")
     ap.add_argument("--replay", type=int, default=0, help="with --data and --suite: mix in this many records sampled (by --seed) from the suite's training partition, so a delta fine-tune does not forget the released recipe")
@@ -419,6 +419,7 @@ def pinned_revision(a, manifest):
 
 def main():
     a = parse_args()
+    if a.data: suites.resolve(a.data, purpose="train")   # before the model loads: a refused or mismatched suite partition fails at once
     dev = a.device or default_device()
     out_dir = Path(a.out)
     out_dir.mkdir(parents=True, exist_ok=bool(a.resume))

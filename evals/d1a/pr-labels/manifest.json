@@ -1,0 +1,56 @@
+{
+ "format": "d1a-suite",
+ "version": 1,
+ "dataset": "JohnP1/d1a-pr-labels",
+ "revision": "cb55e5fbff823aa1f89199b935f2eadec9455c92",
+ "partitions": {
+  "train": {
+   "path": "train.jsonl",
+   "role": "train",
+   "sha256": "821067b2d379945f62c7e92835616ec5c3d9adca163182099de91a544a86a34b",
+   "records": 7563
+  },
+  "train-ja": {
+   "path": "train_ja.jsonl",
+   "role": "train",
+   "sha256": "a8b7a4582e2672c1a0182ae5fdb03044a600e4f1f0c56ea167828472a2b5e8e7",
+   "records": 768
+  },
+  "train-blast": {
+   "path": "train_blast.jsonl",
+   "role": "train",
+   "sha256": "dfaba3f3f69260a20766e10ca72b35748f976808348bcaea8abe929ba42aeffc",
+   "records": 2185
+  },
+  "development": {
+   "path": "development.jsonl",
+   "role": "eval",
+   "sha256": "22347d1c11ba77997724212ba20e98ff91a269172c216f3375f95ab90d584d27",
+   "records": 946
+  },
+  "development-ja": {
+   "path": "development_ja.jsonl",
+   "role": "eval",
+   "sha256": "099a00b2caaab04f1b16cd9567fde3b231c5e5612b7ec676b68b3e47a5331800",
+   "records": 95
+  },
+  "test": {
+   "path": "test.jsonl",
+   "role": "eval",
+   "sha256": "518a7c3a299c237cf78ecaf4e78fbe544289997cc32441e2dd4a855f82620bdf",
+   "records": 953
+  },
+  "test-ja": {
+   "path": "test_ja.jsonl",
+   "role": "eval",
+   "sha256": "a796399f61a577f6418988475e90895abd1115495a15ae48dbc19ac9d7086a85",
+   "records": 92
+  },
+  "real17": {
+   "path": "real17.jsonl",
+   "role": "eval",
+   "sha256": "71194e31ce17dd22dcf3295321752f175882c32e2049d40ae3949686e34cf8bc",
+   "records": 17
+  }
+ }
+}

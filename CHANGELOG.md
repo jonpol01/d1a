@@ -16,6 +16,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **D1A suites** (`d1a/suites.py`, `evals/d1a/`). Our own datasets, pinned: a manifest per dataset holds its Hub commit
+  and each partition's sha256, record count and role (train or eval), while the text stays in the private dataset.
+  `evals/d1a/<suite>:<partition>` works wherever `--data` does (`d1a.train`, `d1a.benchmark`). The partition is fetched
+  at the pinned commit and checked before use, and `d1a.train` refuses an eval partition before loading the model.
+  `pr-labels`, `ja-jglue` and `routing` are frozen. The PR-labeler recipe reads them through `recipes/pr-labeler/mix.py`,
+  which replaces the job's inline mixing script (byte-identical mixes, round 2's included) and records the inputs'
+  hashes, the parameters and the mix's sha256 beside it. `EXTRA` now names partitions (`train-ja train-blast`), and
+  `DATA` is gone.
 - **Video.** `POST /v1/systemone/media` takes `{"type": "video"}`: an MP4, MOV or WebM clip up to 32 MB, of which 16
   frames are sampled evenly and read through Gemma 4's own video path (timestamped frames, the same vision encoder), by
   the same model on MLX and in `d1a.media`. The sound track is not used. Zero-shot: on single-scene clips D1A-E4B v0.3

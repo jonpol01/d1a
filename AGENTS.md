@@ -10,7 +10,9 @@ the question's `<decide>` token. README.md is the user guide; docs/UPSTREAM.md r
   `checkpoint.py` (loading; `D1A_*` load options are read only by `LoadOptions.from_env`), `suite.py` (frozen suites,
   Hub-mirrored partitions), `api.py` (request schema), `resume.py` (training resume points), `shared_prefix.py` (Qwen3.5 training through a shared state prefix),
   `mlx_model.py` (Apple Silicon backend for Qwen3.5 and Gemma 4, and the MLX export folders `scripts/export_mlx.py` writes), `calibrate.py` (writes a checkpoint's temperature, refusing fit rows that are not held out from its training).
-- `evals/` frozen suites from Kev (manifests pin every partition's sha256; never edit them in place).
+- `evals/` frozen suites from Kev (manifests pin every partition's sha256; never edit them in place). `evals/d1a/` holds D1A's
+  own suites (`d1a/suites.py`): a manifest per dataset pins its Hub commit and each partition's sha256 and role
+  (train/eval); the text stays in the private dataset. Re-pin with `python -m d1a.suites freeze`, never by hand.
 - `scripts/` suite builders and one-off tools;
   `clients/` the dependency-free Python and JS clients.
 
