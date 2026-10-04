@@ -54,6 +54,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **Gemma 4 trains and scores about a third faster on torch** (the path HF Jobs uses). Its last 18 of 42 layers
+  (E4B; KV-shared) take keys and values from earlier layers, so in the packed forward they now run only over the
+  positions the pointer head reads (each question's `<decide>` and option ends, about 10-20 per record) instead of the
+  whole document (`d1a.backbone.Gemma4.picked_hidden`). D1A-E4B v0.4 on 2 PR records (Apple M1 Max, bf16): scoring
+  4.84 -> 3.00 s, a LoRA training step with checkpointing 12.9-14.0 -> 8.5-8.9 s. Exact in fp32 (D1A-E2B, 120
+  questions: max |dp| 1.8e-6, gradients equal to 1e-5); in bf16 it moves answers less than changing the batch size
+  does (438 questions: mean |dp| 0.0011 and 2 flips, against 0.0060 and 5 for batch 1 vs 2).
 - **Model families behind one interface.** `d1a.backbone` now also decides whether the MLX backend runs a base (Gemma 4
   and Qwen3.5; it was a `model_type` list in `d1a.checkpoint`) and loads Qwen3.5's CUDA serving kernels
   (`d1a.fused_qwen35`, `d1a.cuda_graphs`) through `Qwen35.serve_cuda`, so Gemma 4 is the main path and Qwen3.5 a

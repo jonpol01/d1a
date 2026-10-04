@@ -61,6 +61,11 @@ class Attention:
     def serve_cuda(self, m, opts, merged):
         """Swap in this family's CUDA serving kernels (d1a.checkpoint, serving on CUDA). Plain attention has none."""
 
+    def picked_hidden(self, lm, ids, pos, mask, picks):
+        """[B, P, d] final hidden states at `picks` [B, P] of a packed batch, when this family can compute them more cheaply
+        than every position (d1a.model.forward_batch); None: run the whole sequence."""
+        return None
+
 
 class Gemma4(Attention):
     """Gemma 4: attention-only with sliding layers (a 512-token window), KV-shared layers, reserved <unused0-4> delimiter
@@ -79,6 +84,34 @@ class Gemma4(Attention):
     def mlx(self):
         """Gemma 4 only: d1a.mlx_model reads its per-layer embeddings and KV-shared layers, which another sliding family lacks."""
         return self.config.model_type == "gemma4_text"
+
+    def picked_hidden(self, lm, ids, pos, mask, picks):
+        """Gemma 4's last num_kv_shared_layers layers take their keys and values from earlier layers (transformers'
+        shared_kv_states), so no position's output there feeds any other position: only the positions the head reads need
+        those layers. The earlier layers run over the whole packed sequence as transformers runs them; the shared layers run
+        over `picks` alone (their queries, rotary angles, mask rows and per-layer inputs). Exact: per-token norms, MLPs and
+        gates, and attention over the same keys and values; the same applies to the gradients."""
+        from collections import UserDict
+        text = lm.get_base_model() if hasattr(lm, "get_base_model") else lm
+        shared = getattr(text.config, "num_kv_shared_layers", 0) or 0
+        if not shared or not hasattr(text, "rotary_emb"): return None
+        depth, types = len(text.layers) - shared, text.config.layer_types
+        masks = mask if isinstance(mask, dict) else {t: mask for t in set(types)}
+        h = text.embed_tokens(ids)
+        ple = text.project_per_layer_inputs(h, text.get_per_layer_inputs(ids, h)) if text.hidden_size_per_layer_input else None
+        rope = {t: text.rotary_emb(h, pos, t) for t in text.unique_layer_types}
+        kv = UserDict()   # transformers fills it from the last non-shared layer of each type; the shared layers read it
+        for i in range(depth):
+            h = text.layers[i](h, ple[:, :, i] if ple is not None else None, shared_kv_states=kv, position_embeddings=rope[types[i]],
+                               attention_mask=masks[types[i]], position_ids=pos)
+        take = lambda x: x.gather(1, picks.view(*picks.shape, *[1] * (x.dim() - 2)).expand(-1, -1, *x.shape[2:]))   # rows along dim 1
+        h, pos_p, ple = take(h), pos.gather(1, picks), take(ple) if ple is not None else None
+        rope = {t: tuple(take(x) for x in cs) for t, cs in rope.items()}
+        masks = {t: m.gather(2, picks[:, None, :, None].expand(-1, m.shape[1], -1, m.shape[-1])) for t, m in masks.items()}
+        for i in range(depth, len(text.layers)):
+            h = text.layers[i](h, ple[:, :, i] if ple is not None else None, shared_kv_states=kv, position_embeddings=rope[types[i]],
+                               attention_mask=masks[types[i]], position_ids=pos_p)
+        return text.norm(h)
 
 
 class Qwen35(Attention):

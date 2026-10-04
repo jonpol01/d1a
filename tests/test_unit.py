@@ -1196,3 +1196,44 @@ def test_d1a_suite_partitions_are_pinned_verified_and_eval_ones_never_train(tmp_
     (data / "train.jsonl").write_text('{"a": 1}\n{"a": 9}\n', encoding="utf-8")   # the file changed under the same revision
     with pytest.raises(ValueError, match="does not match"): suites.resolve(f"{suite}:train", purpose="train")
     assert suites.resolve("mine.jsonl") == "mine.jsonl" and suites.resolve(str(tmp_path / "x:y")) == str(tmp_path / "x:y")
+
+
+def test_gemma4_shared_layers_run_only_the_read_positions(tmp_path):
+    """Gemma 4's KV-shared layers read keys and values from earlier layers, so the packed forward runs them over the
+    positions the head reads alone (d1a.backbone.Gemma4.picked_hidden): the same logits and, with a LoRA, the same
+    gradients as the whole sequence, over states past the sliding window."""
+    from tokenizers import Tokenizer, models, pre_tokenizers
+    from transformers import Gemma4ForCausalLM, Gemma4TextConfig, PreTrainedTokenizerFast
+    from d1a.data import materialize
+    from d1a.model import GEMMA_SPECIAL, load_tokenizer
+    words = "it is charged twice which team billing shipping refund angry the customer how calm annoyed".split()
+    vocab = {t: i for i, t in enumerate(["<unk>", "<pad>", *GEMMA_SPECIAL, *words])}
+    tk = Tokenizer(models.WordLevel(vocab, unk_token="<unk>")); tk.pre_tokenizer = pre_tokenizers.Whitespace()
+    s, f = "sliding_attention", "full_attention"
+    torch.manual_seed(0)
+    Gemma4ForCausalLM(Gemma4TextConfig(vocab_size=len(vocab), hidden_size=64, intermediate_size=128, num_hidden_layers=6, num_attention_heads=2,
+                                       head_dim=32, global_head_dim=64, num_key_value_heads=1, num_kv_shared_layers=2, hidden_size_per_layer_input=16,
+                                       vocab_size_per_layer_input=len(vocab), sliding_window=8, layer_types=[s, s, f, s, s, f], pad_token_id=1)).save_pretrained(tmp_path)
+    PreTrainedTokenizerFast(tokenizer_object=tk, unk_token="<unk>", pad_token="<pad>", additional_special_tokens=GEMMA_SPECIAL).save_pretrained(tmp_path)
+    tok = load_tokenizer(str(tmp_path))
+    m = DecisionModel(str(tmp_path), tok, "cpu", lora=4); m.train()
+    for mod in m.modules():   # dropout off, so both passes see the same function
+        if hasattr(mod, "lora_dropout"):
+            for k in mod.lora_dropout: mod.lora_dropout[k] = torch.nn.Identity()
+    questions = {"team": {"type": "choice", "instructions": "which team", "criteria": {"billing": None, "shipping": None, "refund": None}, "label": "billing", "src": "x"},
+                 "angry": {"type": "noul", "instructions": "is the customer angry", "label": True, "src": "x"},
+                 "level": {"type": "score", "instructions": "how angry", "criteria": ["calm", "annoyed", "angry"], "label": 1, "src": "x"}}
+    encs = [m.encode(tok, materialize({"state": "the customer is charged twice" + " it" * n, "questions": questions})) for n in (0, 5, 17)]
+    params = [p for p in m.parameters() if p.requires_grad]
+    seen = []   # sequence length the last (shared) layer runs over
+    m.lm.get_base_model().layers[-1].register_forward_hook(lambda mod, args, out: seen.append(args[0].shape[1]))
+    def run():
+        out = m.forward_batch(encs)
+        return [z.detach() for r in out for z in r], torch.autograd.grad(sum(z.logsumexp(-1) - z[0] for r in out for z in r), params)
+    picked, gp = run()
+    read = max(len({i for d, oi in zip(e["decide_idx"], e["opt_idx"]) for i in (d, *oi)}) for e in encs)
+    assert seen == [read] and read < max(len(e["ids"]) for e in encs) // 4
+    m.backbone.picked_hidden = lambda *a: None   # the whole sequence through every layer
+    whole, gw = run()
+    assert all(torch.allclose(a, b, atol=1e-5) for a, b in zip(picked, whole))
+    assert sum((a - b).abs().sum() for a, b in zip(gp, gw)) / sum(b.abs().sum() for b in gw) < 1e-5

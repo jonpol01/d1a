@@ -1,5 +1,5 @@
 # Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: Gemma 4 support (reserved delimiter tokens, sliding-window masks, text-only loading; model-family details behind d1a.backbone; from jonpol01/kev); package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); option isolation removed (encode, the packed mask); full-weight loading removed.
+# Changes for D1A Copyright 2026 John Soliva: Gemma 4 support (reserved delimiter tokens, sliding-window masks, text-only loading; model-family details behind d1a.backbone; from jonpol01/kev); package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); option isolation removed (encode, the packed mask); full-weight loading removed; the packed forward hands the backbone the positions the head reads (Gemma 4 runs its KV-shared layers on those alone).
 """Decision model: causal LM backbone + block-causal branch mask + pointer readout."""
 import copy, functools, math, os, re
 import torch
@@ -302,11 +302,15 @@ class DecisionModel(nn.Module):
             ids[i, : len(rid)] = torch.tensor(rid, device=self.device); pos[i, : len(rpos)] = torch.tensor(rpos, device=self.device); att[i, : len(rid)] = 1
         return ids, pos, att
 
-    def hidden_batch(self, encs):
-        """[B, L_max, d] hidden states for a right-padded batch of encoded records under the packed block-causal mask."""
+    def hidden_batch(self, encs, picks=None):
+        """[B, L_max, d] hidden states for a right-padded batch of encoded records under the packed block-causal mask; with
+        picks ([B, P] positions) [B, P, d] at those positions, which the backbone may compute more cheaply (Gemma 4)."""
         ids, pos, _ = self._pad_rows([(e["ids"], e["pos"]) for e in encs])
         mask = self._packed_mask(encs, length=ids.shape[1])
-        return self.lm(input_ids=ids, position_ids=pos, attention_mask=mask).last_hidden_state.float()   # head stays fp32
+        if picks is not None and (h := self.backbone.picked_hidden(self.lm, ids, pos, mask, picks)) is not None:
+            return h.float()
+        h = self.lm(input_ids=ids, position_ids=pos, attention_mask=mask).last_hidden_state.float()   # head stays fp32
+        return h if picks is None else h.gather(1, picks[..., None].expand(-1, -1, h.shape[-1]))
 
     def _packed_mask(self, encs, length=None):
         return branch_masks(encs, self.device, next(self.lm.parameters()).dtype, self.sliding_window, length=length)
@@ -384,8 +388,14 @@ class DecisionModel(nn.Module):
         """List (per record) of lists (per question) of logits. Row form or packed block-causal mask, see rows_form
         (the packed mask already runs each state once; shared_prefix does that for the row form of a hybrid backbone)."""
         if self.rows_form(encs): return self.forward_rows_batch(encs, shared_prefix and self.hybrid)
-        hs = self.hidden_batch(encs)
-        return [self._readout(hs[b], e) for b, e in enumerate(encs)]
+        # only the positions the head reads: each question's <decide> and its options' </opt>
+        picked = [sorted({i for d, oi in zip(e["decide_idx"], e["opt_idx"]) for i in (d, *oi)}) for e in encs]
+        P = max(map(len, picked))
+        picks = torch.tensor([p + [0] * (P - len(p)) for p in picked], device=self.device)
+        hs = self.hidden_batch(encs, picks)
+        slot = [{i: j for j, i in enumerate(p)} for p in picked]
+        return [[self.head(hs[b, slot[b][d]], hs[b, torch.tensor([slot[b][i] for i in oi], device=self.device)])
+                 for d, oi in zip(e["decide_idx"], e["opt_idx"])] for b, e in enumerate(encs)]
 
     @torch.no_grad()
     def probs(self, enc):
