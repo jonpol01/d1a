@@ -39,7 +39,7 @@ def risk_coverage(y, p, targets=(0.5, 0.6, 0.7, 0.8)):
     rows = []
     for t in targets:
         ok = np.flatnonzero(prec >= t)
-        if len(ok): i = ok.max(); rows.append((t, round(float(p[order][i]), 3), round((i + 1) / len(y), 3), int(ys[: i + 1].sum())))
+        if len(ok): i = ok.max(); rows.append((t, round(float(p[order][i]), 3), round(float((i + 1) / len(y)), 3), int(ys[: i + 1].sum())))
         else: rows.append((t, None, 0.0, 0))
     return rows
 
