@@ -16,6 +16,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **A Hugging Face Space** (`space/`, published by `space/push.sh` as `JohnP1/d1a`, hosted on ZeroGPU): model routing,
+  guardrails, tool-call gating, the PR labeler (paste a GitHub PR link) and zero-shot photo and voice checks on
+  D1A-E4B v0.4. One `d1a.media.MediaModel` answers all of them: `MediaModel.probs` now also scores a text-only record
+  (media None) on the same weights.
 - **Kev's eval suites as D1A suites**: `external` (semif-v1, typesafe-v1, wanli-v1, wanli-v2) and `night2` (dates,
   unknowable facts, assertions) are `evals/d1a/external` and `evals/d1a/night2`, with the data byte for byte in the
   private dataset `JohnP1/d1a-evals`. `d1a.benchmark --data evals/d1a/external:semif-v1` scores the same as the Kev suite
