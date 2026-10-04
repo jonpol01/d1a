@@ -26,6 +26,7 @@ from d1a.device import default_device
 from d1a.metrics import EPSILON, grouped_metrics, metrics, unknowable_report
 from d1a.model import ROW_PASS_TOKENS, ContextOverflow
 from d1a.predictors import LocalPredictor, RemotePredictor, RotationAveraged
+from d1a.suites import resolve
 from d1a.suite import CONTEXT, ENCODING, SERVING_CONTEXT, digest, load_split, read_manifest, record_digest, write_json
 
 
@@ -177,7 +178,7 @@ def main():
     ap.add_argument("--remote-model", default="d1a-latest")
     ap.add_argument("--remote-concurrency", type=int, default=1, help="requests kept in flight against --remote (1 = sequential); rows and their order do not depend on it")
     ap.add_argument("--suite", help="frozen suite directory (scores its development partition)")
-    ap.add_argument("--data", help="your own labelled requests, one JSON object per line (d1a.data.load_records); an alternative to --suite")
+    ap.add_argument("--data", help="your own labelled requests, one JSON object per line (d1a.data.load_records), or a D1A suite partition (evals/d1a/<suite>:<partition>); an alternative to --suite")
     ap.add_argument("--context", choices=["training", "serving"], default="training",
                     help="--data only: the length limits records are scored under. training: a checkpoint's training limits (384-token "
                          "states by default); longer records are skipped and counted. serving: what d1a.serve accepts (up to 64k tokens)")
@@ -194,7 +195,8 @@ def main():
     if a.remote_concurrency < 1: ap.error("--remote-concurrency must be >= 1")
     if bool(a.suite) == bool(a.data): ap.error("give exactly one of --suite or --data")
     if a.data:
-        records, heldout, split, source_hash = load_records(a.data), [], "custom", digest(Path(a.data))
+        path = resolve(a.data)   # a d1a suite partition (evals/d1a/<suite>:<partition>): fetched pinned and verified
+        records, heldout, split, source_hash = load_records(path), [], "custom", digest(Path(path))
         context, skip_overlong = (SERVING_CONTEXT if a.context == "serving" else CONTEXT), True
     else:
         split = "test" if a.allow_test else a.split

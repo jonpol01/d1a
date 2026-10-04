@@ -1,0 +1,38 @@
+{
+ "format": "d1a-suite",
+ "version": 1,
+ "dataset": "JohnP1/d1a-routing",
+ "revision": "b8f8066e59834a8e7900c4f9d23d698abcf1682c",
+ "partitions": {
+  "factory-train": {
+   "path": "factory/train.jsonl",
+   "role": "train",
+   "sha256": "fea873d7d075b3110cef8577cb6b97f674216d864d73c2d7fbb06bdcec2840dc",
+   "records": 1216
+  },
+  "factory-development": {
+   "path": "factory/development.jsonl",
+   "role": "eval",
+   "sha256": "0bb7fef6971eba304f500abaf8b961c49476adbb7d3094a0d8b083007864cc61",
+   "records": 214
+  },
+  "generic-train": {
+   "path": "generic/train.jsonl",
+   "role": "train",
+   "sha256": "49a4ee8d8acb18604b9e51f0259e74055348abdd048df7b44aef47435cafa411",
+   "records": 1529
+  },
+  "generic-development": {
+   "path": "generic/development.jsonl",
+   "role": "eval",
+   "sha256": "17272c1f7c3c8104a3b541da2bb5518de2f18bf56ad946375859f8631d280c35",
+   "records": 270
+  },
+  "handlabelled-45": {
+   "path": "test/handlabelled-45.jsonl",
+   "role": "eval",
+   "sha256": "f0e4d3f6b6b4b4d9c476a77c0bcb4435c94a4ed0bb35b079597be2a84f96b771",
+   "records": 45
+  }
+ }
+}

@@ -44,6 +44,19 @@ test, so the language gets its own scores.
 The v0.3 data is the private dataset `JohnP1/d1a-pr-labels` (7,563 / 946 / 953 English, 768 / 95 / 92 Japanese). New
 languages go next to it as `train_<lang>.jsonl`, `development_<lang>.jsonl`, `test_<lang>.jsonl`.
 
+Training and scoring read it as a D1A suite, pinned to one dataset commit: `evals/d1a/pr-labels/manifest.json` holds each
+partition's sha256 and record count (the text stays in the dataset), and `evals/d1a/ja-jglue` and `evals/d1a/routing`
+pin the replay data the same way. After adding files to the dataset, pin the new commit:
+
+```bash
+uv run python -m d1a.suites freeze evals/d1a/pr-labels --dataset JohnP1/d1a-pr-labels \
+    --partition train=train.jsonl:train --partition train-ja=train_ja.jsonl:train ... --partition test=test.jsonl:eval
+```
+
+`mix.py` builds the training mix from them (every rare-label PR plus a sample of the rest, extra partitions, JGLUE and
+routing replay) and writes `<out>.json` beside it: the inputs' hashes, the parameters and the mix's own sha256. A
+partition marked `eval` is refused for training.
+
 ## 3. Train
 
 `train_job.sh` trains from `INIT` with replay of D1A's earlier data, calibrates on pooled held-out rows, uploads the
@@ -51,7 +64,7 @@ checkpoint, and scores the start and the result at full length (`--context servi
 header lists every setting. On Hugging Face Jobs:
 
 ```bash
-./launch_hf_job.sh pr-labeler-v2 6h EN=3500 EN_SKIP=1 EXTRA="train_ja.jsonl train_blast.jsonl"   # round 2: continue v0.3
+./launch_hf_job.sh pr-labeler-v2 6h EN=3500 EN_SKIP=1 EXTRA="train-ja train-blast"   # round 2: continue v0.3
 ```
 
 On your own NVIDIA machine, run it in the same image (it works in absolute paths such as `/data` and `/runs`):

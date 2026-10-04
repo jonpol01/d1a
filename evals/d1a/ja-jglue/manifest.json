@@ -1,0 +1,26 @@
+{
+ "format": "d1a-suite",
+ "version": 1,
+ "dataset": "JohnP1/d1a-ja-jglue",
+ "revision": "727afd677a5e46b4e532f840def59a96a80654fd",
+ "partitions": {
+  "train": {
+   "path": "train.jsonl",
+   "role": "train",
+   "sha256": "8e9ac503b2a10e637db50121b88d2f9c36da20462a8f24036b745b2c0ef4c1ff",
+   "records": 6000
+  },
+  "development": {
+   "path": "development.jsonl",
+   "role": "eval",
+   "sha256": "9d247a788941291e9dbfd3c8442af6e2f7e516dbe12b2ee23d56a1589c34988c",
+   "records": 1500
+  },
+  "test": {
+   "path": "test.jsonl",
+   "role": "eval",
+   "sha256": "e17ddbc162e3cf43bc0181dca30c6c4295f7e9fc92a1c89e7170fbb74d1d71ca",
+   "records": 1500
+  }
+ }
+}

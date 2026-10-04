@@ -1173,3 +1173,26 @@ def test_the_package_version_has_release_notes():
     # GitHub renders every line break of a release text, so wrapped lines are joined; blocks stay as they are
     assert rn.unwrap("para\nwraps\n\n- item\n  continues\n- next\n\n| a |\n|---|\n\n### H\ntext") == \
         "para wraps\n\n- item continues\n- next\n\n| a |\n|---|\n\n### H\ntext"
+
+
+def test_d1a_suite_partitions_are_pinned_verified_and_eval_ones_never_train(tmp_path, monkeypatch):
+    """d1a.suites: `<suite>:<partition>` resolves to the dataset file at the manifest's revision only when its sha256 and
+    record count match; an eval partition is refused for training (no held-out leakage); other arguments pass through."""
+    import json
+    import huggingface_hub
+    from d1a import suites
+    data = tmp_path / "hub"; data.mkdir()
+    (data / "train.jsonl").write_text('{"a": 1}\n{"a": 2}\n', encoding="utf-8"); (data / "dev.jsonl").write_text('{"a": 3}\n', encoding="utf-8")
+    fetched = []
+    monkeypatch.setattr(huggingface_hub, "hf_hub_download", lambda repo, path, repo_type, revision: (fetched.append((repo, path, revision)), str(data / path))[1])
+    suite = tmp_path / "evals/d1a/toy"; suite.mkdir(parents=True)
+    parts = {"train": {"path": "train.jsonl", "role": "train", "sha256": suites.sha256(data / "train.jsonl"), "records": 2},
+             "dev": {"path": "dev.jsonl", "role": "eval", "sha256": suites.sha256(data / "dev.jsonl"), "records": 1}}
+    (suite / "manifest.json").write_text(json.dumps({"format": "d1a-suite", "version": 1, "dataset": "me/toy", "revision": "abc123", "partitions": parts}), encoding="utf-8")
+    assert suites.resolve(f"{suite}:train", purpose="train") == str(data / "train.jsonl") and fetched == [("me/toy", "train.jsonl", "abc123")]
+    assert suites.resolve(f"{suite}:dev") == str(data / "dev.jsonl")
+    with pytest.raises(ValueError, match="eval partition"): suites.resolve(f"{suite}:dev", purpose="train")
+    with pytest.raises(ValueError, match="no partition"): suites.resolve(f"{suite}:test")
+    (data / "train.jsonl").write_text('{"a": 1}\n{"a": 9}\n', encoding="utf-8")   # the file changed under the same revision
+    with pytest.raises(ValueError, match="does not match"): suites.resolve(f"{suite}:train", purpose="train")
+    assert suites.resolve("mine.jsonl") == "mine.jsonl" and suites.resolve(str(tmp_path / "x:y")) == str(tmp_path / "x:y")
