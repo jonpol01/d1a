@@ -99,7 +99,6 @@ class MediaModel:
         self.checkpoint = ck = Checkpoint(run); meta = ck.meta
         if ck.export is not None or meta.weights != "lora":
             raise SystemExit(f"{run}: the media server needs a LoRA checkpoint (torch), not an MLX export or full weights")
-        if meta.option_isolation: raise SystemExit(f"{run}: option_isolation needs the packed mask; the media rows are plain causal rows")
         self.device = device
         self.proc = AutoProcessor.from_pretrained(meta.base, revision=meta.base_revision)
         self.tok = self.proc.tokenizer
@@ -240,7 +239,6 @@ def with_media(enc, n_head, ids, at, embeds):
     out = dict(enc)
     out["ids"] = enc["ids"][:n_head] + ids + enc["ids"][n_head:]
     out["seg"] = enc["seg"][:n_head] + [0] * n + enc["seg"][n_head:]
-    out["opt"] = enc["opt"][:n_head] + [enc["opt"][0]] * n + enc["opt"][n_head:]
     out["pos"] = enc["pos"][:n_head] + list(range(n_head, n_head + n)) + [p + n for p in enc["pos"][n_head:]]
     out["decide_idx"] = [d + n for d in enc["decide_idx"]]
     out["opt_idx"] = [[o + n for o in oi] for oi in enc["opt_idx"]]

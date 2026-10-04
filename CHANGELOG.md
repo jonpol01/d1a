@@ -53,6 +53,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Removed
 
+- **Kev's unused training options.** `d1a.train` drops `--label_smoothing`, `--brier_w`, `--focal_gamma`, `--ord_w`,
+  `--perm_kl`/`--perm_frac`, `--anchor`/`--anchor_w`/`--anchor_sources`, `--option_isolation` and
+  `--special_embeddings`: no D1A checkpoint used any of them. Training with the remaining options is bit-identical
+  (same weights and losses on tiny Qwen3.5 and Gemma 4 bases). A checkpoint trained with option isolation is now
+  refused at load; token-trained adapters still load. [docs/removed-tools.md](docs/removed-tools.md) describes each
+  option and how to restore it.
 - Kev's in-repo `playground/` (Next.js: request editor, packed vs separate, option permutation, chess) and the
   `tools/review` label-review page, about 14,000 lines, and `JevPredictor` in `d1a/predictors.py`, which ran the
   playground's Jev script. The demo app is [jonpol01/d1a-playground](https://github.com/jonpol01/d1a-playground);

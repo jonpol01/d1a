@@ -1,5 +1,5 @@
 # Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); the MLX backend for Gemma 4 bases and MLX export folders (d1a_config.json); the ple_flash load option (D1A_PLE_FLASH); model-family decisions (MLX support, Qwen3.5's CUDA kernels) from d1a.backbone.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); the MLX backend for Gemma 4 bases and MLX export folders (d1a_config.json); the ple_flash load option (D1A_PLE_FLASH); model-family decisions (MLX support, Qwen3.5's CUDA kernels) from d1a.backbone; option_isolation checkpoints refused.
 """Trained checkpoints: a run directory or a Hub repo holding a LoRA adapter (or, for a full-weight run, the whole bf16
 backbone), `head.pt` and the tokenizer; or an MLX export of one (d1a_config.json).
 
@@ -64,8 +64,8 @@ class Meta:
     base_revision: str | None = None
     lora: int = 0
     head_dim: int = 256
-    option_isolation: bool = False
-    special_embeddings: bool = False
+    option_isolation: bool = False      # Kev's research options, still read from old head.pt files: an isolated checkpoint is refused,
+    special_embeddings: bool = False    # a token-trained adapter loads (its embeddings live in the adapter) but is no longer trained
     weights_dtype: str = "fp32"
     temperature: float = 1.0
     holdout: list = field(default_factory=list)
@@ -220,6 +220,8 @@ class Checkpoint:
         self.path = resolve_run(run)
         self.export = read_export(self.path)         # d1a_config.json of an MLX export, else None
         self.meta = export_meta(self.path, self.export) if self.export else read_meta(self.path)
+        if self.meta.option_isolation:   # Kev's isolated option spans: encode() no longer builds them, so its answers would be wrong
+            raise ValueError(f"{self.requested} was trained with option_isolation, which D1A no longer supports (docs/UPSTREAM.md)")
 
     def file(self, name):
         return Path(self.path) / name
@@ -311,7 +313,6 @@ class Checkpoint:
         if not mlx_available(): raise ValueError("the MLX backend needs mlx-lm on Apple Silicon (the `mlx` extra)")
         from .mlx_model import MLXDecisionModel, merge_lora   # after the refusal: without mlx-lm the import would hide it
         if not opts.merge: raise ValueError("the MLX backend always merges the adapter (D1A_MERGE=0 needs backend=torch)")
-        if self.meta.option_isolation: raise ValueError("option_isolation needs the packed mask; not available on the MLX backend")
         if self.export is not None:
             if opts.lora_scale != 1: raise ValueError(f"an MLX export holds merged weights; lora_scale needs its source checkpoint {self.export['source']}")
             return MLXDecisionModel(self.path, pad_id(tok), head_dim=self.meta.head_dim, ple_flash=opts.ple_flash is not False)
@@ -339,7 +340,7 @@ class Checkpoint:
         expected, saved = self.SAVED_DTYPES.get(meta.weights_dtype), cfg.get("dtype") or cfg.get("torch_dtype")
         if expected is None or saved not in (None, expected):
             raise ValueError(f"{self.path}: config.json records the weights as {saved} but head.pt says weights_dtype={meta.weights_dtype!r}")
-        return DecisionModel(meta.base, tok, device, head_dim=meta.head_dim, option_isolation=meta.option_isolation,
+        return DecisionModel(meta.base, tok, device, head_dim=meta.head_dim,
                              dtype=opts.dtype or getattr(torch, expected), attn=opts.attn, weights=self.path), True
 
     def _adapted_torch(self, tok, device, opts):
@@ -354,7 +355,7 @@ class Checkpoint:
             dtype, merge = torch.bfloat16, merge and bool(opts.fused)
         merge = merge and not self.adapter_config().get("trainable_token_indices")   # token-trained adapters stay unmerged
         m = DecisionModel(meta.base, tok, device, lora=None, revision=meta.base_revision, head_dim=meta.head_dim,
-                          option_isolation=meta.option_isolation, dtype=dtype, attn=opts.attn)
+                          dtype=dtype, attn=opts.attn)
         m.lm = PeftModel.from_pretrained(m.lm, self.path, torch_device=str(device)).to(device)   # trainable token embeddings, if any, live in the adapter
         if opts.lora_scale != 1:
             for module in m.lm.modules():

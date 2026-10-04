@@ -1,5 +1,5 @@
 # Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); serves d1a-latest and keeps kev-latest and jev-latest as compatibility names; model cards name D1A; serves MLX export folders; --device with a GPU usability probe; a startup self-check of the readout and a warning when serving an uncalibrated checkpoint; recent batch latency in /v1/models; a 75 s keep-alive for proxies in front of it; --idle-unload; photos and voice clips through the same model (POST /v1/systemone/media).
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); serves d1a-latest and keeps kev-latest and jev-latest as compatibility names; model cards name D1A; serves MLX export folders; --device with a GPU usability probe; a startup self-check of the readout and a warning when serving an uncalibrated checkpoint; recent batch latency in /v1/models; a 75 s keep-alive for proxies in front of it; --idle-unload; photos and voice clips through the same model (POST /v1/systemone/media); prefix cache keyed by state ids only (option isolation removed).
 """FastAPI sidecar for the playground: loads one checkpoint, exposes prefill-only decisions.
 
 Run: uv run --extra serve python -m d1a.serve --run runs/d1a --port 8008
@@ -45,7 +45,7 @@ MODEL_NAMES = ("d1a-latest", "kev-latest", "jev-latest")                 # all n
 
 @dataclass
 class PrefixCache:
-    """State prefixes kept across requests, least recently used first: (state token ids, option_isolation) -> prefix.
+    """State prefixes kept across requests, least recently used first: state token ids -> prefix.
     At most `size` states and `max_tokens` state tokens in all; states shorter than min_tokens or longer than max_tokens
     are not cached. A batch keeps (copies) only the new states that will still be here after it, its last distinct ones
     within both bounds: the rest would be evicted by the batch itself."""
@@ -60,12 +60,12 @@ class PrefixCache:
     def plan(self, encs):
         """-> (key per request, None when its state is not cached; its cached prefix or None; whether to keep a new one)."""
         lengths = [enc["seg"].count(0) for enc in encs]
-        keys = [(tuple(enc["ids"][:n]), bool(enc.get("option_isolation"))) if self.size and self.min_tokens <= n <= self.max_tokens and enc.get("media") is None else None   # media: same placeholder ids for different photos
+        keys = [tuple(enc["ids"][:n]) if self.size and self.min_tokens <= n <= self.max_tokens and enc.get("media") is None else None   # media: same placeholder ids for different photos
                 for enc, n in zip(encs, lengths)]
         survivors, tokens = set(), 0
         for key in dict.fromkeys(k for k in reversed(keys) if k is not None):   # most recent first, as store() keeps them
-            if len(survivors) == self.size or tokens + len(key[0]) > self.max_tokens: break
-            survivors.add(key); tokens += len(key[0])
+            if len(survivors) == self.size or tokens + len(key) > self.max_tokens: break
+            survivors.add(key); tokens += len(key)
         return keys, [self.entries.get(k) if k is not None else None for k in keys], [k in survivors for k in keys]
 
     def store(self, keys, cached, prefixes):
@@ -75,7 +75,7 @@ class PrefixCache:
             self.hits += old is not None; self.misses += old is None
             if new is None: continue
             self.entries.pop(key, None); self.entries[key] = new
-            while len(self.entries) > self.size or sum(len(k[0]) for k in self.entries) > self.max_tokens: self.entries.pop(next(iter(self.entries)))
+            while len(self.entries) > self.size or sum(len(k) for k in self.entries) > self.max_tokens: self.entries.pop(next(iter(self.entries)))
 
     def clear(self):
         self.entries.clear()

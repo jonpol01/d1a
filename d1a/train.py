@@ -1,5 +1,5 @@
 # Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: Gemma 4 support (from jonpol01/kev); the default base is google/gemma-4-E2B at a pinned commit; package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); resume points for LoRA runs; a non-finite loss or gradient skips its batch (up to MAX_NONFINITE in a row) instead of ending the run; --extra_suites trains on several frozen suites' training partitions in one run.
+# Changes for D1A Copyright 2026 John Soliva: Gemma 4 support (from jonpol01/kev); the default base is google/gemma-4-E2B at a pinned commit; package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); resume points for LoRA runs; a non-finite loss or gradient skips its batch (up to MAX_NONFINITE in a row) instead of ending the run; --extra_suites trains on several frozen suites' training partitions in one run; Kev's unused research options removed (label smoothing, Brier, focal, ordinal RPS, permutation KL, anchoring, option isolation, delimiter-embedding training).
 """LoRA fine-tune of the decision model on labelled requests (a frozen suite's training partition, records built on the
 fly from the public sources, or your own JSONL), with the pointer head trained from scratch. `--full_ft 1` trains the
 whole backbone instead (d1a.full_ft: bf16 weights, fp32 masters; several GPUs through torchrun + FSDP2).
@@ -22,60 +22,18 @@ from . import full_ft
 from .checkpoint import Checkpoint, Meta, write_meta
 from .device import allocated_bytes, default_device, empty_cache, sync
 from .data import EVAL_ONLY, build, augment, load_records, materialize, none_pair, source_seed
-from .suite import ADMISSION_BRANCH_HEADROOM, SYNTHETIC_SOURCES, digest, load_split, read_json, read_manifest, validate_training, write_json
+from .suite import ADMISSION_BRANCH_HEADROOM, SYNTHETIC_SOURCES, digest, load_split, read_manifest, validate_training, write_json
 from .model import MAX_STATE, MAX_TRAIN_STATE, SPECIAL, DecisionModel, delimiter_ids, fits, layout, load_tokenizer, rows_of, training_context, user_tokens
 
 
 # --- losses -----------------------------------------------------------------------------------------------------------
 
-def permuted_copy(rec, rng):
-    """Re-shuffle options of every Choice question with K>=3; return (record, perms) with perms[q] = new->old index or None."""
-    out, perms = {"state": rec["state"], "questions": []}, []
-    for q in rec["questions"]:
-        if q["qtype"] == "choice" and len(q["options"]) >= 3:
-            perm = list(range(len(q["options"]))); rng.shuffle(perm)
-            out["questions"].append({**q, "options": [q["options"][j] for j in perm], "label": perm.index(q["label"])}); perms.append(perm)
-        else:
-            out["questions"].append(q); perms.append(None)
-    return out, perms
-
-
-def question_loss(z, q, dev, ord_w, label_smoothing=0.0, brier_w=0.0, focal_gamma=0.0):
-    """Cross-entropy (or cross-entropy against a soft target when the question carries one), optionally plus the
-    normalized ranked probability score for ordered levels."""
-    options = (label_smoothing, brier_w, focal_gamma)
-    if not all(math.isfinite(v) and v >= 0 for v in options) or label_smoothing > 1 or sum(v > 0 for v in options) > 1:
-        raise ValueError("choose at most one finite, nonnegative loss modifier; smoothing must be <= 1")
+def question_loss(z, q, dev):
+    """Cross-entropy, or cross-entropy against a soft target when the question carries one."""
     if q.get("target") is not None:
         t = torch.tensor(q["target"], device=dev, dtype=z.dtype)
         return -(t * F.log_softmax(z, -1)).sum()
-    y = torch.tensor([q["label"]], device=dev)
-    loss = F.cross_entropy(z[None], y, label_smoothing=label_smoothing)
-    if brier_w:
-        target = F.one_hot(y[0], len(z)).to(z.dtype)
-        loss = loss + brier_w * (F.softmax(z, -1) - target).square().sum()
-    if focal_gamma:
-        loss = (1 - torch.exp(-loss)).pow(focal_gamma) * loss
-    if q["qtype"] == "score" and ord_w > 0:
-        p = F.softmax(z, -1)
-        observed_cdf = (torch.arange(len(p) - 1, device=dev) >= q["label"]).to(p.dtype)
-        loss = loss + ord_w * (p.cumsum(-1)[:-1] - observed_cdf).square().mean()
-    return loss
-
-
-def anchor_loss(z, q, target, dev):
-    """KL(teacher || student) for one question, teacher = frozen base zero-shot distribution keyed by option key.
-    Skips (returns None) when the current option set is not exactly the teacher's (e.g. a none-option was inserted)."""
-    if target is None or set(target) != set(q["keys"]): return None
-    t = torch.tensor([target[k] for k in q["keys"]], device=dev, dtype=torch.float32).clamp_min(1e-6); t = t / t.sum()
-    return F.kl_div(F.log_softmax(z, -1), t, reduction="sum")
-
-
-def permutation_kl(z1, z2, perm, dev):
-    """Symmetric KL between one question's predictions under two option orders; perm maps the second order's positions
-    back to the first (perms from permuted_copy)."""
-    lp1 = F.log_softmax(z1, -1); lp2 = F.log_softmax(z2, -1)[torch.tensor([perm.index(j) for j in range(len(perm))], device=dev)]
-    return 0.5 * (F.kl_div(lp2, lp1, log_target=True, reduction="sum") + F.kl_div(lp1, lp2, log_target=True, reduction="sum"))
+    return F.cross_entropy(z[None], torch.tensor([q["label"]], device=dev))
 
 
 def accumulation_records(n, batch, accum, microbatch):
@@ -150,18 +108,15 @@ def training_requests(a, tok, manifest, holdout):
 
 @dataclass(eq=False)   # identity, so batch.index(v) finds this very variant
 class Variant:
-    """One encoded training example: an augmented copy of a source request, with the request's id and source kept for
-    the anchor lookup, and optionally the same record under a second option order for the permutation KL."""
+    """One encoded training example: an augmented copy of a source request, with the request's id."""
     rec: dict
     enc: dict
     request_id: str
-    source: str
-    permuted: tuple | None = None   # (encoding under the other order, perms from permuted_copy)
     share: float = 1.0              # the part of its variant this is, when --row_budget split the variant's questions (row_passes)
 
     @property
     def tokens(self):
-        return len(self.enc["ids"]) + (len(self.permuted[0]["ids"]) if self.permuted else 0)
+        return len(self.enc["ids"])
 
 
 def shape(enc):
@@ -334,12 +289,11 @@ def plan_shapes(model, tok, a, reqs, epoch, pairs, state_tokens):
 
 
 def encode_batch(model, tok, a, chunk, epoch, pairs=None):
-    """Each request's variants for this epoch (record_variants), optionally a permuted copy for the KL term, encoded
-    strictly."""
+    """Each request's variants for this epoch (record_variants), encoded strictly."""
     out, c = [], training_context(a.max_state)
     limits = {"max_state": c["max_state"], "max_branch": c["max_branch"]}
     for req in chunk:
-        variants, item_rng = record_variants(req, a, epoch, pairs)
+        variants, _ = record_variants(req, a, epoch, pairs)
         for v in variants:
             rec = materialize(v)
             enc = model.encode(tok, rec, strict=True, **limits)
@@ -348,38 +302,20 @@ def encode_batch(model, tok, a, chunk, epoch, pairs=None):
             parts = question_parts(enc, a.row_budget, a.shared_prefix)
             for part in parts:   # one part unless --row_budget splits a record whose rows do not fit one pass
                 sub = rec if len(parts) == 1 else {**rec, "questions": [rec["questions"][q] for q in part]}
-                out.append(Variant(sub, enc if sub is rec else model.encode(tok, sub, strict=True, **limits), req["_meta"]["id"], req["_meta"]["source"],
+                out.append(Variant(sub, enc if sub is rec else model.encode(tok, sub, strict=True, **limits), req["_meta"]["id"],
                                    share=len(part) / len(rec["questions"])))
-        if a.perm_kl > 0 and item_rng.random() < a.perm_frac and any(q["qtype"] == "choice" and len(q["options"]) >= 3 for q in rec["questions"]):
-            rec2, perms = permuted_copy(rec, item_rng)
-            out[-1].permuted = (model.encode(tok, rec2, strict=True, **limits), perms)
     return out
 
 
-def batch_loss(model, a, batch, dev, anchors, anchor_sources, autocast):
-    """Forward the variants and sum the loss terms: mean question loss per variant, the anchor KL per anchored variant,
-    the permutation KL per permuted variant. Returns (loss, terms) with the summed term values for logging."""
-    terms = Counter()
-    permuted = [v for v in batch if v.permuted]
+def batch_loss(model, a, batch, dev, autocast):
+    """Forward the variants and sum their mean question losses. Returns (loss, terms) with the summed loss for logging."""
     with autocast:
         logits_b = model.forward_batch([v.enc for v in batch], a.shared_prefix)
-        logits2_b = model.forward_batch([v.permuted[0] for v in permuted], a.shared_prefix) if permuted else []
-    loss = 0.0
-    for v, logits in zip(batch, logits_b):
-        ce = sum(question_loss(z.float(), q, dev, a.ord_w, a.label_smoothing, a.brier_w, a.focal_gamma)
-                 for z, q in zip(logits, v.rec["questions"])) / len(logits) * v.share
-        terms["ce"] += ce.item(); loss = loss + ce
-        if anchors and v.request_id in anchors and (anchor_sources is None or v.source in anchor_sources):
-            kls = [t for t in (anchor_loss(z.float(), q, anchors[v.request_id].get(q["qid"]), dev) for z, q in zip(logits, v.rec["questions"])) if t is not None]
-            if kls:
-                kl_a = sum(kls) / len(kls) * v.share; loss = loss + a.anchor_w * kl_a; terms["anchor"] += kl_a.item(); terms["anchor_n"] += v.share
-    for v, logits2 in zip(permuted, logits2_b):
-        logits = logits_b[batch.index(v)]
-        kls = [permutation_kl(z1.float(), z2.float(), perm, dev) for z1, z2, perm in zip(logits, logits2, v.permuted[1]) if perm is not None]
-        kl = sum(kls) / len(kls); loss = loss + a.perm_kl * kl; terms["kl"] += kl.item(); terms["kl_n"] += 1
+    loss = sum(sum(question_loss(z.float(), q, dev) for z, q in zip(logits, v.rec["questions"])) / len(logits) * v.share
+               for v, logits in zip(batch, logits_b))
     if not torch.isfinite(loss):
         raise NonFinite("non-finite training loss")
-    return loss, terms
+    return loss, Counter(ce=loss.item())
 
 
 # --- run --------------------------------------------------------------------------------------------------------------
@@ -398,12 +334,6 @@ def parse_args():
     ap.add_argument("--lora", type=int, default=16)
     ap.add_argument("--accum", type=int, default=8)
     ap.add_argument("--holdout", default="", help="comma-separated sources excluded from training (evaluated as out-of-source)")
-    ap.add_argument("--perm_kl", type=float, default=0.0, help="weight of symmetric KL between predictions under two option orders")
-    ap.add_argument("--perm_frac", type=float, default=0.3, help="fraction of records that get the second permuted forward pass")
-    ap.add_argument("--ord_w", type=float, default=0.0, help="weight of ranked probability score for Score questions")
-    ap.add_argument("--label_smoothing", type=float, default=0.0, help="hard-label CE smoothing; existing soft targets are unchanged")
-    ap.add_argument("--brier_w", type=float, default=0.0, help="weight of sum-squared probability error added to hard-label CE")
-    ap.add_argument("--focal_gamma", type=float, default=0.0, help="hard-label CE multiplier (1-p_y)^gamma; 0 is ordinary CE")
     ap.add_argument("--suite", help="frozen suite directory; train only on its training partition")
     ap.add_argument("--train_sources", default="", help="comma-separated subset of the suite's trainable sources (ablations); default all")
     ap.add_argument("--device", choices=["cpu", "mps", "cuda"], default=None)
@@ -412,8 +342,6 @@ def parse_args():
     ap.add_argument("--weights_dtype", choices=["fp32", "bf16"], default="fp32", help="dtype of the frozen backbone weights. bf16 halves memory and is required by the fused MoE experts "
                                                                                         "(torch._grouped_mm wants bf16); LoRA and head stay fp32 (peft upcasts adapters). The checkpoint records it and is loaded the same way.")
     ap.add_argument("--checkpointing", type=int, choices=[0, 1], default=0)
-    ap.add_argument("--option_isolation", type=int, choices=[0, 1], default=0, help="option spans are isolated sub-branches with shared positions (exact permutation invariance)")
-    ap.add_argument("--special_embeddings", type=int, choices=[0, 1], default=0, help="also train the embeddings of the 5 delimiter tokens")
     ap.add_argument("--head_dim", type=int, default=256, help="pointer head dimension")
     ap.add_argument("--lora_targets", choices=["all", "dense", "attn", "qv"], default="all", help="LoRA module set; fewer modules = less drift from the base; dense = all minus the DeltaNet projections on hybrid bases")
     ap.add_argument("--base_revision", default="", help="pin the base commit when the suite manifest does not pin this base")
@@ -425,9 +353,6 @@ def parse_args():
                                                                           "the state twice); their siblings count in the --length_sort cost (default: every record, as before)")
     ap.add_argument("--synthetic_repeat", type=int, default=1, help="oversample synthetic policy sources (legacy_policy, compositional, contrastive) this many times per epoch")
     ap.add_argument("--public_frac", type=float, default=1.0, help="deterministic subsample of public-source training records (mix ablations)")
-    ap.add_argument("--anchor", default="", help="JSON of frozen-base zero-shot distributions {record_id: {qid: {key: p}}} (d1a.anchors); enables the anchoring loss")
-    ap.add_argument("--anchor_w", type=float, default=0.0, help="weight of KL(base || model) toward the frozen base model's zero-shot distribution, per anchored question")
-    ap.add_argument("--anchor_sources", default="", help="comma-separated sources to anchor (default: every record with a target)")
     ap.add_argument("--out", default="runs/d1a")
     ap.add_argument("--data", default="", help="your own labelled requests, one JSON object per line (see d1a.data.load_records); an alternative to --suite for fine-tuning, or combined with --suite and --replay")
     ap.add_argument("--max_state", type=int, default=MAX_STATE, help=f"state tokens per training record (default {MAX_STATE}); raising it admits long-state --data records, the packed limit grows by the same amount")
@@ -463,13 +388,8 @@ def parse_args():
         ap.error("epochs, accum, n_per_source, lora, batch and synthetic_repeat must be positive; 0 < public_frac <= 1")
     if a.dtype == "bf16" and a.device != "cuda":
         ap.error("--dtype bf16 requires --device cuda")
-    if a.lr <= 0 or a.head_lr < 0 or a.weight_decay < 0 or min(a.ord_w, a.perm_kl, a.anchor_w) < 0 or not 0 <= a.perm_frac <= 1:
-        ap.error("invalid learning rate or loss weights")
-    loss_options = (a.label_smoothing, a.brier_w, a.focal_gamma)
-    if not all(math.isfinite(v) and v >= 0 for v in loss_options) or a.label_smoothing > 1 or sum(v > 0 for v in loss_options) > 1:
-        ap.error("use at most one finite, nonnegative loss modifier; smoothing must be <= 1")
-    if bool(a.anchor) != (a.anchor_w > 0):
-        ap.error("--anchor and --anchor_w > 0 go together")
+    if a.lr <= 0 or a.head_lr < 0 or a.weight_decay < 0:
+        ap.error("invalid learning rate or weight decay")
     if not MAX_STATE <= a.max_state <= MAX_TRAIN_STATE:
         ap.error(f"--max_state must be in [{MAX_STATE}, {MAX_TRAIN_STATE}]")
     if a.none_pair_max_state is not None and (a.none_pair_max_state < 1 or a.p_none_pair <= 0):
@@ -478,18 +398,15 @@ def parse_args():
         ap.error("--replay needs both --data and --suite")
     if a.full_ft and (problem := full_ft.unsupported_torch()):
         ap.error(problem)
-    if a.full_ft and (a.weights_dtype != "bf16" or a.special_embeddings):
-        ap.error("--full_ft 1 trains bf16 weights (--weights_dtype bf16) and every embedding already (no --special_embeddings)")
+    if a.full_ft and a.weights_dtype != "bf16":
+        ap.error("--full_ft 1 trains bf16 weights (--weights_dtype bf16)")
     if a.row_budget < 0 or a.max_steps < 0 or a.pass_tokens_max < 0:
         ap.error("--row_budget, --pass_tokens_max and --max_steps are >= 0")
-    if a.pass_tokens_max and (not a.length_sort or a.row_budget or a.perm_kl > 0):
-        ap.error("--pass_tokens_max caps the passes --length_sort 1 plans: not without it, nor with --row_budget (which splits them "
-                 "again), nor --perm_kl (a permuted copy is a second pass whose activations are alive at the same time)")
-    if a.row_budget and (a.perm_kl > 0 or a.anchor_w > 0 or int(os.environ.get("WORLD_SIZE", "1")) > 1):
-        ap.error("--row_budget splits micro-batches into passes: not with --perm_kl (a record and its permuted copy share a loss term), "
-                 "nor --anchor_w (a split record's parts would weight its anchored questions by their part's share of all its questions, "
-                 "not 1 / anchored questions), nor under torchrun (FSDP2 ranks must run the same number of backward passes; sharded "
-                 "ranks have the memory without it)")
+    if a.pass_tokens_max and (not a.length_sort or a.row_budget):
+        ap.error("--pass_tokens_max caps the passes --length_sort 1 plans: not without it, nor with --row_budget (which splits them again)")
+    if a.row_budget and int(os.environ.get("WORLD_SIZE", "1")) > 1:
+        ap.error("--row_budget splits micro-batches into passes: not under torchrun (FSDP2 ranks must run the same number of "
+                 "backward passes; sharded ranks have the memory without it)")
     try: fractions = full_ft.snapshot_fractions(a.snapshot_fractions)
     except ValueError as error: ap.error(str(error))
     if a.snapshot_every_steps < 0 or ((fractions or a.snapshot_every_steps) and not a.full_ft):
@@ -561,20 +478,16 @@ def main():
     manifest = read_manifest(a.suite) if a.suite else None
     revision = pinned_revision(a, manifest)
     holdout = manifest["holdout_sources"] if manifest else [s for s in a.holdout.split(",") if s]
-    anchors = read_json(a.anchor).get("targets", {}) if a.anchor else {}
-    if a.anchor: print(f"anchor targets: {len(anchors)} records from {a.anchor}", flush=True)
-    anchor_sources = set(a.anchor_sources.split(",")) if a.anchor_sources else None
 
     tok = load_tokenizer(a.base, revision=revision)
     model = DecisionModel(a.base, tok, dev, lora=None if a.full_ft else a.lora, revision=revision, head_dim=a.head_dim, lora_targets=a.lora_targets,
-                          option_isolation=bool(a.option_isolation), special_embeddings=bool(a.special_embeddings),
                           dtype=torch.bfloat16 if a.weights_dtype == "bf16" else torch.float32, direct_load=bool(a.full_ft))
     if a.checkpointing:
         model.lm.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
     model.lm.config.use_cache = False
     # what this run will save as head.pt; also the architecture a warm start must match
-    meta = Meta(base=a.base, base_revision=revision, lora=0 if a.full_ft else a.lora, head_dim=a.head_dim, option_isolation=bool(a.option_isolation),
-                special_embeddings=bool(a.special_embeddings), weights_dtype=a.weights_dtype, holdout=holdout, weights="full" if a.full_ft else "lora")
+    meta = Meta(base=a.base, base_revision=revision, lora=0 if a.full_ft else a.lora, head_dim=a.head_dim,
+                weights_dtype=a.weights_dtype, holdout=holdout, weights="full" if a.full_ft else "lora")
     init_source = None
     if a.init_from:
         # delta mode (PR #9, Radexito): start from an already trained adapter (or full backbone) + pointer head instead of the
@@ -595,7 +508,7 @@ def main():
     suite_hash = digest(Path(a.suite) / "manifest.json") if manifest else None
     if not rank:
         write_json(out_dir / "training_config.json", {"args": vars(a), "suite_sha256": suite_hash, "base_revision": revision, "init_source": init_source,
-                                                    "ordinal_objective": "ranked_probability_score", "holdout": holdout})
+                                                    "holdout": holdout})
     print(f"{len(reqs)} training requests (holdout={holdout}), questions by type "
           f"{dict(Counter(q['qtype'] for r in reqs for q in materialize(r)['questions']))}")
 
@@ -655,7 +568,7 @@ def main():
             group_records = step_records * (variants / len(chunk))
             try:
                 for part in row_passes(batch, a.row_budget, a.shared_prefix):
-                    loss, terms = batch_loss(model, a, part, dev, anchors, anchor_sources, autocast)
+                    loss, terms = batch_loss(model, a, part, dev, autocast)
                     (loss / group_records).backward()
                     run += terms
             except NonFinite:
@@ -681,7 +594,7 @@ def main():
                 step_seconds.append(round(time.time() - last, 3)); last = time.time()
                 if dev == "mps": empty_cache(dev)   # MPS only: per-step cache release keeps the unified-memory footprint down; on CUDA it would just slow the step
                 if step % 10 == 0:
-                    print(f"ep{ep} step {step}/{steps} loss {run['ce']/run['n']:.3f} kl {run['kl']/max(run['kl_n'],1):.3f} anchor {run['anchor']/max(run['anchor_n'],1):.3f} {(time.time()-t0)/seen:.3f}s/rec", flush=True)
+                    print(f"ep{ep} step {step}/{steps} loss {run['ce']/run['n']:.3f} {(time.time()-t0)/seen:.3f}s/rec", flush=True)
                     run = Counter()
                 if step == steps: break
                 if snapshots and snapshots.due(step):
