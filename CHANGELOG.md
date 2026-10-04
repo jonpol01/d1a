@@ -16,6 +16,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **`d1a.versions`: the newest released checkpoint in one place.** `latest("JohnP1/d1a-e4b-mlx-q8")` gives
+  `JohnP1/d1a-e4b-mlx-q8@v0.4`; the Space takes its default from it. `tests/test_versions.py` fails when `LATEST` and
+  the first row per model of the "Model versions" table below disagree, so a release cannot leave a default behind.
 - **A Hugging Face Space, ready to publish** (`space/`, `space/push.sh`; not hosted yet: a Gradio or ZeroGPU Space needs HF PRO): model routing,
   guardrails, tool-call gating, the PR labeler (paste a GitHub PR link) and zero-shot photo and voice checks on
   D1A-E4B v0.4. One `d1a.media.MediaModel` answers all of them: `MediaModel.probs` now also scores a text-only record

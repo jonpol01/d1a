@@ -19,8 +19,9 @@ import torch
 
 from d1a.api import SystemOneRequest, to_answers, to_record
 from d1a.media import Media, MediaModel
+from d1a.versions import latest
 
-RUN = os.environ.get("D1A_RUN", "JohnP1/d1a-e4b@v0.4")
+RUN = os.environ.get("D1A_RUN") or latest("JohnP1/d1a-e4b")
 SAMPLES = "https://raw.githubusercontent.com/jonpol01/d1a-playground/3fc4715ebd74675821c37f74a25dbde4bfbb2dad/public/samples"
 # ZeroGPU: models go on "cuda" at import time (emulated until a @spaces.GPU call holds a real GPU)
 DEVICE = "cuda" if os.environ.get("SPACE_ID") else "mps" if torch.backends.mps.is_available() else "cpu"
