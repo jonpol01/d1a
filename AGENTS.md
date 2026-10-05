@@ -29,6 +29,21 @@ the question's `<decide>` token. README.md is the user guide; docs/UPSTREAM.md r
 - `tests/test_conformance.py` pins the answers of the committed tiny checkpoint (`tests/golden/tiny-gemma4`). A change
   that moves them on purpose rebuilds it (`tests/golden/build_tiny_gemma4.py`) in the same PR and says why.
 
+## Quality bar (mandatory)
+John, 2026-10-06: every PR and every deploy is checked against the test suite, with numbers; nothing is downgraded or
+stripped off, and new features come with their tests.
+- **Numbers in every PR body**, from the PR's own head:
+  - the unit run and the golden vectors (`tests/test_conformance.py`);
+  - for a change to the model, loading or serving code: real-weight answers and interleaved latency
+    (`scripts/equivalence/real_weights.py --interleave`);
+  - the demo smoke test (`scripts/demo_smoke.mjs` in jonpol01/d1a-playground) and the labeler replay
+    (`runs/labeler-replay`).
+- **No downgrade.** The answers stay identical, or the PR shows they are better on held-out data. Accuracy and
+  calibration never drop, and latency stays within run-to-run noise (measured interleaved, against main).
+- **No stripping.** No endpoint, demo, example, CLI flag or feature disappears silently. A removal updates a failing
+  test on purpose, and the PR says why.
+- **New features ship with their tests** in the same PR.
+
 ## Project board (mandatory)
 Every piece of D1A work is tracked on GitHub Project #14 "D1A" (https://github.com/users/jonpol01/projects/14), and its card
 moves at every step, without being asked:
