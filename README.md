@@ -328,6 +328,7 @@ uv sync --extra serve
 uv run python -m pytest tests/test_unit.py tests/test_system_one.py tests/test_metrics.py tests/test_tiny_checkpoint.py tests/test_versions.py tests/test_feedback.py tests/test_research.py \
     tests/test_conventions.py tests/test_frozen_suites.py tests/test_mlx_export.py -q   # CI's list: UNIT_TESTS in .github/workflows/ci.yml
 python scripts/check_license.py          # license and provenance rules (see CONTRIBUTING.md)
+uv run python scripts/equivalence/metrics.py   # a rewritten module against its last version before the rewrite (api, metrics, benchmark, suite)
 ```
 
 These suites need no model weights (the tokenizer, about 10 MB, is downloaded from the Hub). `tests/test_model.py`, `tests/test_mlx.py` and `tests/test_api.py` need weights or a running server.
