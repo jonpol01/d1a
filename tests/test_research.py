@@ -1,11 +1,10 @@
 # Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); dropped two checks bound to the removed experiments/ registrations; the tests of the removed Modal app and report scripts left; the contrastive generator's tests left with it (paired_flip and the held-out structure guard keep theirs); the d1a.metrics tests rewritten as tests/test_metrics.py; the d1a.benchmark tests rewritten as tests/test_benchmark.py; the d1a.suite tests rewritten as tests/test_suite.py; the d1a.data tests rewritten as tests/test_data.py.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); dropped two checks bound to the removed experiments/ registrations; the tests of the removed Modal app and report scripts left; the contrastive generator's tests left with it (paired_flip and the held-out structure guard keep theirs); the d1a.metrics tests rewritten as tests/test_metrics.py; the d1a.benchmark tests rewritten as tests/test_benchmark.py; the d1a.suite tests rewritten as tests/test_suite.py; the d1a.data tests rewritten as tests/test_data.py; the d1a.train loss and accumulation tests rewritten in tests/test_train.py.
 
 import pytest
 import torch
 
 from d1a.suite import record_digest
-from d1a.train import question_loss
 
 
 def choice_request():
@@ -14,13 +13,6 @@ def choice_request():
         "criteria": {"size": "Wrong size", "damage": "Damaged", "color": "Wrong color"},
         "label": "size", "src": "fixture",
     }}}
-
-
-def test_score_loss_is_proper_at_true_distribution():
-    logits = torch.tensor([0.2, 0.8]).log().requires_grad_()
-    loss = sum(p * question_loss(logits, {"label": y, "qtype": "score"}, "cpu") for y, p in enumerate([0.2, 0.8]))
-    loss.backward()
-    assert logits.grad.abs().max().item() < 1e-6
 
 
 def frozen_request(i=0):
@@ -58,20 +50,6 @@ def test_batched_mask_matches_single_and_pads_are_invisible():
     assert allowed[3, 3] and allowed[4, 4]    # padded rows keep the diagonal, so softmax is finite
     assert not allowed[3, 1:3].any()          # pads belong to no question segment (state stays visible; rows are discarded)
 
-
-def test_uneven_microbatches_have_equal_record_weight():
-    from d1a.train import accumulation_records
-    x = torch.arange(10, dtype=torch.float32)
-    gradients = []
-    for batch, accum in ((8, 1), (3, 3), (2, 4)):
-        w = torch.tensor(1.0, requires_grad=True)
-        for mb, start in enumerate(range(0, len(x), batch)):
-            chunk = x[start:start + batch]
-            ((w * chunk).sum() / accumulation_records(len(x), batch, accum, mb)).backward()
-        gradients.append(w.grad.item())
-    assert gradients[0] == gradients[2]
-    assert accumulation_records(10, 3, 3, 2) == 9
-    assert accumulation_records(10, 3, 3, 3) == 1
 
 def test_remote_predictor_maps_system_one_answers_and_retries(monkeypatch):
     import io, json
