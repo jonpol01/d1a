@@ -46,19 +46,19 @@ def main():
     os.chdir(ROOT)
     if not os.environ.get("PYTORCH_MPS_HIGH_WATERMARK_RATIO"):
         raise SystemExit("set PYTORCH_MPS_HIGH_WATERMARK_RATIO (the 09-26 freeze rule)")
-    from d1a.suite import load_split
+    from d1a.suite import load_split, read_json
     work = Path(tempfile.mkdtemp())
     rows = [{k: v for k, v in r.items() if k != "_meta"} for r in load_split("evals/v7/decision-v7", "development") if r["_meta"]["variant"] == "clean"][: a.records]
     (work / "data.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
     common = ["--data", str(work / "data.jsonl"), "--device", "mps", "--lora", "16", "--batch", "1", "--accum", "4", "--checkpointing", "1", "--seed", "0"]
     old = module_at(a.ref, "d1a/train.py")
     train(new, common + ["--max_steps", "1", "--out", str(work / "probe")])   # capped probe: one step, then the real runs
-    print("probe ok", json.loads((work / "probe" / "training_metrics.json").read_text())["step_seconds"], flush=True)
+    print("probe ok", read_json(work / "probe" / "training_metrics.json")["step_seconds"], flush=True)
     runs = {}
     for name, module in (("main_a", old), ("main_b", old), ("branch", new)):
         out = work / name
         train(module, common + ["--max_steps", str(a.steps), "--out", str(out)])
-        metrics = json.loads((out / "training_metrics.json").read_text())
+        metrics = read_json(out / "training_metrics.json")
         runs[name] = (*weights(out), statistics.median(metrics["step_seconds"]))
         print(f"{name}: median step {runs[name][2]:.2f} s", flush=True)
     report = {"steps": a.steps, "records": len(rows),
