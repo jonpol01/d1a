@@ -16,6 +16,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Self-learning for choice questions (#139). `d1a.feedback`'s `OutcomeCalibrator` fits one temperature per choice
+  question on the outcomes, which changes how sure an answer is but never which option it picks; `gate_choice()` applies
+  the promotion rule to the multi-class log loss. Outcomes name their source (`POST /v1/feedback`'s `src`, or
+  `meta["src"]`): labels merge per question, and a person's (`human`) beats another model's (e.g. `reviewer`) whatever
+  arrived last. `python -m d1a.feedback status|records|calibrate --src` keeps one source. First stream: the PR labeler's
+  type and blast-radius questions, with the review bot's labels as outcomes.
 - Conformance against committed golden vectors (#64): `tests/golden/tiny-gemma4/` holds a tiny Gemma 4 checkpoint
   (weights in git, 556 KB, built by `tests/golden/build_tiny_gemma4.py`) and `golden.json`, with 40 requests and 154
   questions. `tests/test_conformance.py` requires its token ids exactly and every probability to 1e-5, through the model,
