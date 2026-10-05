@@ -24,12 +24,14 @@ We study a small one: D1A-E4B (Gemma~4 E4B, a LoRA adapter and a pointer head), 
 and answers in one forward pass in a median 1.5\,s on a laptop.
 Our central observation is that the usual metric hides what matters. On 921 public agent runs from 83 unseen repositories,
 \emph{knowing how other runs of the same issue fared} already scores AUROC 0.958, so global AUROC mostly measures issue difficulty.
-Ranking runs \emph{of the same issue} (within-issue AUROC) is the harder test: D1A reaches 0.617 zero-shot and 0.661 after a 2.5-hour LoRA on a laptop
-\pending{on more mixed issues; the heuristics reach 0.647 on 662 mixed issues but 0.536 on our 23}.
+Ranking runs \emph{of the same issue} (within-issue AUROC) is the harder test, and on it no scorer we tried is clearly better than another: on 119 test issues
+with mixed outcomes, cheap trajectory heuristics reach 0.622, D1A 0.616 zero-shot and 0.642 after a 2.5-hour LoRA on a laptop
+($+0.020$ over the heuristics, 95\% CI $[-0.053, +0.093]$).
 The same confound inflates learned verifiers evaluated on random splits of runs: on 32{,}340 runs, a text verifier scores AUROC 0.946 under a random split
 and 0.736 on unseen repositories, and its within-issue AUROC falls from 0.643 to 0.493.
 Finally, D1A learns from outcomes through a loop that recalibrates, retrains and promotes a candidate only through a statistical gate;
-in the first round, recalibration halved the calibration error and the gate rejected a worse retrained candidate \pending{rounds 2--3}.
+over three rounds of 300 outcomes, recalibration cut the calibration error from 0.068 to 0.017--0.036, while no retrained candidate was clearly better and
+the gate kept the current model every time.
 All data is public and all code is open.
 \end{abstract}
 
@@ -44,7 +46,7 @@ recognising which issues are easy.
 Verifiers for coding agents already exist (Section~\ref{sec:related}); we do not claim a new kind of verifier. Our contributions are:
 \begin{enumerate}
 \item \textbf{Separating issue difficulty from run quality.} On held-out repositories, an issue prior alone reaches global AUROC 0.958. We report
-within-issue AUROC next to global AUROC for every verifier, and compare cheap heuristics with a small decision model on that measure (Section~\ref{sec:verifier}).
+within-issue AUROC next to global AUROC and find that within issues a small decision model and cheap heuristics are indistinguishable (Section~\ref{sec:verifier}).
 \item \textbf{Split leakage, measured.} On the same runs, random-run splits let a learned verifier score by recognising issues; grouping by issue removes
 the inflation (Section~\ref{sec:leakage}).
 \item \textbf{A local verifier that learns from outcomes}, with a statistical promotion gate, released as a library (\texttt{d1a.feedback})
@@ -88,7 +90,7 @@ The ``+ heuristics'' combinations refit the heuristic weights jointly with D1A's
 
 \begin{table}[h]\centering\small
 \begin{tabular}{lcccc}\toprule
-& AUROC & within-issue AUROC & ECE & Brier \\\midrule
+& AUROC & within-issue (23 issues) & ECE & Brier \\\midrule
 Issue prior (other runs of the same issue) & 0.958 & -- & -- & -- \\\midrule
 Heuristics (logistic regression) & 0.768 & 0.536 & 0.019 & 0.100 \\
 D1A-E4B v0.4 zero-shot, recalibrated & 0.742 & 0.617 & 0.043 & 0.103 \\
@@ -103,8 +105,20 @@ $+0.051\,[+0.002, +0.101]$. Zero-shot D1A before recalibration: ECE 0.632.}\labe
 
 \paragraph{Issue difficulty dominates global AUROC.} Most issues are resolved by all or none of their runs, so a scorer that recognises the issue ranks runs
 well globally without judging any run. Within issues the picture changes (Table~\ref{tab:verifier}): on our 23 mixed test issues the heuristics reach 0.536, D1A 0.617 zero-shot and 0.661 after training.
-These estimates are too noisy to rank the two: on the 662 mixed issues of the leakage study (Section~\ref{sec:leakage}) the heuristics reach 0.647.
-\pending{D1A on $\sim$130 mixed test issues across all shards, with intervals; Gemma-4-agent repeats will add more.}
+Those 23 issues are too few: on 119 mixed-outcome issues from the test repositories of all 80{,}036 runs (952 runs, up to 8 per issue, each issue keeping at least
+one success and one failure), the gap closes (Table~\ref{tab:within}). Within issues, a 4B-class decision model reading the issue, the patch and the end of the run
+does not judge runs better than six trajectory features.
+
+\begin{table}[h]\centering\small
+\begin{tabular}{lcc}\toprule
+Scorer & within-issue AUROC & global AUROC (these runs) \\\midrule
+Heuristics (logistic regression) & 0.622 $[0.569, 0.676]$ & 0.659 \\
+D1A-E4B v0.4 zero-shot & 0.616 $[0.562, 0.666]$ & 0.645 \\
+D1A-E4B + verifier LoRA (r1) & 0.642 $[0.587, 0.698]$ & 0.691 \\\bottomrule
+\end{tabular}
+\caption{119 test issues with mixed outcomes (952 runs, 42\% resolved by construction); 95\% intervals from a bootstrap over issues.
+r1 minus heuristics: $+0.020\,[-0.053, +0.093]$; zero-shot minus heuristics: $-0.006\,[-0.069, +0.061]$.}\label{tab:within}
+\end{table}
 
 \paragraph{Picking one of several runs.} Picking one of 8 recorded runs per issue (97 issues, 23 with mixed outcomes; bootstrap over issues), compared with a random pick
 (14.7\% resolved): zero-shot D1A $+5.9$ points $[+2.2, +10.2]$, heuristics + r1 $+4.9\,[+0.5, +9.3]$, r1 alone $+2.8\,[-1.0, +6.6]$, heuristics
@@ -165,15 +179,17 @@ measured on test repositories.
 Round & outcomes & test AUROC & test ECE & gate \\\midrule
 0 (r1, no feedback) & 0 & 0.808 & 0.068 & -- \\
 1 & 300 & 0.808 & 0.036 & rejected: log loss $+0.026\,[+0.016, +0.058]$ \\
-2 & 600 & \pending{} & \pending{} & \pending{} \\
-3 & 900 & \pending{} & \pending{} & \pending{} \\\bottomrule
+2 & 600 & 0.808 & 0.017 & rejected: $+0.010\,[-0.004, +0.050]$ \\
+3 & 900 & 0.808 & 0.031 & rejected: $-0.007\,[-0.016, +0.014]$ \\\bottomrule
 \end{tabular}
-\caption{The served verifier after each round on test repositories (four runs per issue). Round 1: recalibration on 77 held-out outcomes halved the
-calibration error; the retrained candidate (30 steps on 223 records) was worse, and the gate kept the current model.}\label{tab:rounds}
+\caption{The served verifier after each round on test repositories (four runs per issue). Recalibration on the held-out calibration slices (77, 147 and 210
+outcomes) cut the calibration error; the retrained candidates (30 steps each on the 223, 453 and 690 training records so far) were worse (round 1) or not clearly better (rounds 2--3),
+and the gate kept the current model, so the served AUROC did not change.}\label{tab:rounds}
 \end{table}
 
-One rejected candidate does not show that retraining fails, only that the gate stops a worse model. \pending{candidates with other step counts and learning
-rates, so a rejection is not confounded with under-training.}
+Three rejections do not show that retraining cannot help, only that 30-step updates on a few hundred outcomes did not, and that the gate stops what is not
+clearly better. The gate's power is limited by the dev set (about 7\% resolved): only a sizable log-loss improvement can clear a 95\% interval. Larger outcome
+batches, several candidate settings per round, and a measured minimum detectable effect are the next steps.
 
 \paragraph{Adapting to a new agent.} A verifier trained on one agent meets new agents as they appear, and a fixed reward function falls behind as the policy
 improves~\cite{horizon}. \pending{Gemma-4-31B agent runs from the challenge (repeated runs per task): within-issue AUROC and calibration after
