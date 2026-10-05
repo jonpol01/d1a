@@ -16,7 +16,7 @@ concurrency:
 
 env:
   # Unit tests only: no model weights, no server. The tokenizer (~10 MB) is downloaded from the Hub.
-  UNIT_TESTS: tests/test_unit.py tests/test_versions.py tests/test_feedback.py tests/test_research.py tests/test_conventions.py tests/test_frozen_suites.py tests/test_mlx_export.py
+  UNIT_TESTS: tests/test_unit.py tests/test_system_one.py tests/test_versions.py tests/test_feedback.py tests/test_research.py tests/test_conventions.py tests/test_frozen_suites.py tests/test_mlx_export.py
 
 jobs:
   python:

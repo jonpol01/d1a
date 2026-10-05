@@ -1,94 +1,15 @@
 # Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: Gemma 4 tests (from jonpol01/kev); package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); the tests of the removed Modal app and autoresearch left.
-"""Fast tests with no model weights and no server: API mapping, confidence formulas, mask rule, token sanitizing.
+# Changes for D1A Copyright 2026 John Soliva: Gemma 4 tests (from jonpol01/kev); package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); the tests of the removed Modal app and autoresearch left; the d1a.api tests rewritten as tests/test_system_one.py.
+"""Fast tests with no model weights and no server: mask rule, token sanitizing, loading, training and serving.
 Run: uv run --extra serve python -m pytest tests/test_unit.py -q
 """
-import math
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 import torch
 from transformers.cache_utils import Cache, DynamicLayer, LinearAttentionLayer
-from d1a.api import SystemOneRequest, choice_confidence, render, score_confidence, to_answers, to_record
 from d1a.model import DecisionModel, SPECIAL, branch_mask, encode, user_tokens
-
-
-def test_render_flattens_structured_content():
-    assert render("plain") == "plain"
-    assert render(None) == ""
-    assert render({"what": "A", "not_for": "B"}) == "what: A\nnot_for: B"
-    assert render(["x", "y"]) == "- x\n- y"
-    assert render({"ticket": {"channel": "email", "body": "hi"}}) == "ticket:\n  channel: email\n  body: hi"
-    assert render({"examples": ["a", "b"]}) == "examples:\n  - a\n  - b"
-
-
-def test_to_record_maps_all_three_types():
-    req = SystemOneRequest.model_validate({
-        "state": {"document": "I was charged twice."}, "model": "m",
-        "questions": {
-            "billing": {"type": "noul", "instructions": "About billing?", "criteria": {"true": "Charges", "false": "Not charges"}},
-            "tone": {"type": "choice", "instructions": "Tone?", "criteria": {"calm": None, "angry": "Hostile"}},
-            "urgency": {"type": "score", "instructions": "Urgency?", "criteria": ["can wait", "today"]},
-        }})
-    rec, meta = to_record(req)
-    assert rec["state"] == "document: I was charged twice."
-    assert [q["options"] for q in rec["questions"]] == [["no: Not charges", "yes: Charges"], ["calm", "angry: Hostile"], ["can wait", "today"]]
-    assert [m["type"] for m in meta] == ["noul", "choice", "score"]
-    assert [m["keys"] for m in meta] == [["false", "true"], ["calm", "angry"], ["0", "1"]] and meta[2]["legend"] == {"0": "can wait", "1": "today"}
-
-
-def test_to_answers_shapes_and_formulas():
-    _, meta = to_record(SystemOneRequest.model_validate({"state": "s", "model": "m", "questions": {
-        "n": {"type": "noul", "instructions": "i"},
-        "c": {"type": "choice", "instructions": "i", "criteria": {"a": None, "b": None, "c": None}},
-        "s": {"type": "score", "instructions": "i", "criteria": ["lo", "mid", "hi"]}}}))
-    ans = to_answers([[0.3, 0.7], [0.8, 0.15, 0.05], [0.1, 0.3, 0.6]], meta)
-    assert ans["n"] == {"type": "noul", "noul": 0.7}
-    assert ans["c"]["choice"] == "a" and ans["c"]["probabilities"] == {"a": 0.8, "b": 0.15, "c": 0.05}
-    assert ans["c"]["confidence"] == round((0.8 - 1 / 3) / (1 - 1 / 3), 4)
-    assert ans["s"]["score"] == 1.5 and ans["s"]["probabilities"] == {"0": 0.1, "1": 0.3, "2": 0.6}
-    assert ans["s"]["legend"] == {"0": "lo", "1": "mid", "2": "hi"} and ans["s"]["confidence"] == 0.25   # 1 - (0.1*2 + 0.3*1) / (2/3)
-
-
-@pytest.mark.parametrize("p", [[0.79] + [0.21 / 39] * 39, [1 / 255] * 255])
-def test_to_answers_choice_probabilities_sum_within_typesafe_tolerance(p):
-    meta = [{"id": "target", "type": "choice", "keys": [str(i) for i in range(len(p))]}]
-    served = to_answers([p], meta)["target"]["probabilities"]
-    assert len(served) == len(p) and abs(sum(served.values()) - 1) < 0.02
-
-
-def test_confidence_edge_cases():
-    assert choice_confidence([1.0]) == 1.0
-    assert score_confidence([1.0]) == 1.0          # a one-level score: the SDK allows it, and there is nowhere else to be
-    assert choice_confidence([0.5, 0.5]) == 0.0
-    assert math.isclose(choice_confidence([1.0, 0.0, 0.0]), 1.0)
-    assert score_confidence([0.0, 1.0, 0.0]) == 1.0
-    assert score_confidence([0.0, 0.0, 0.0, 1.0]) == 1.0
-    assert all(score_confidence([1 / L] * L) == 0.0 for L in range(2, 11))     # uniform -> 0
-    assert score_confidence([0.5, 0.0, 0.5]) == 0.0                              # more spread than uniform clips at 0
-    assert score_confidence([2.0, 6.0, 0.0]) == score_confidence([0.25, 0.75, 0.0])  # normalised first, as the adapter does
-    assert choice_confidence([0.0, 0.0]) == 0.0 and score_confidence([0.0, 0.0, 0.0]) == 0.0  # all zeros -> uniform
-
-
-@pytest.mark.parametrize("p,want", [
-    ([0.0, 0.57, 0.43], 0.35), ([0.0, 0.14, 0.86, 0.0, 0.0], 0.89), ([0.0, 0.0, 0.48, 0.52], 0.52),
-    ([0.0, 0.74, 0.26], 0.61), ([0.0, 0.0, 0.0, 1.0], 1.0)])
-def test_score_confidence_matches_typesafe_docs(p, want):
-    """The Score examples on docs.typesafe.ai/primitives/score.md. The docs display probabilities and confidence at two
-    decimals, so the probabilities behind 0.35 / 0.89 were not exactly .43 / .14: equal within that display rounding."""
-    assert abs(round(score_confidence(p), 2) - want) < 0.011
-
-
-@pytest.mark.parametrize("bad", [
-    {"q": {"type": "score", "instructions": "i", "criteria": []}},
-    {"q": {"type": "bogus", "instructions": "i"}},
-    {"q": {"type": "choice", "instructions": "i", "criteria": {f"o{i}": None for i in range(256)}}},
-    {},
-])
-def test_validation_rejects(bad):
-    with pytest.raises(Exception):
-        SystemOneRequest.model_validate({"state": "x", "model": "m", "questions": bad})
 
 
 def test_branch_mask_rule():

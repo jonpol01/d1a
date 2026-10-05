@@ -24,7 +24,7 @@ RULES = [
     ("a checkpoint becomes a model only through d1a.checkpoint (Checkpoint.load picks the torch or MLX implementation)",
      r"MLXDecisionModel\(|merge_lora\(", {"d1a/checkpoint.py", "d1a/mlx_model.py", "tests/test_mlx.py"}),
     ("option keys come from d1a.api.question_keys",
-     r"\[\s*\"false\"\s*,\s*\"true\"\s*\]|\[str\(i\) for i in range\(len\(", {"d1a/api.py", "tests/test_unit.py"}),   # the unit test pins the contract
+     r"\[\s*\"false\"\s*,\s*\"true\"\s*\]|\[str\(i\) for i in range\(len\(", {"d1a/api.py", "tests/test_system_one.py"}),   # its tests pin the contract
     ("the training context is d1a.model.MAX_STATE/MAX_BRANCH/MAX_PACKED, lifted only through d1a.model.training_context (d1a.suite.CONTEXT in manifests), and d1a.model.fits",
      r"(?<![\w.])(>|<=|>=|<)\s*2048\b|\b2048\s*(<|>)|max_(branch|state|packed)\"?\s*[=:]\s*\d{3,}", {"d1a/model.py"}),
     ("the serving / long-state limits (SERVE_MAX_*, ROW_PASS_TOKENS, MAX_TRAIN_STATE) and the pre-64k aliases the frozen suites' builders "
