@@ -20,11 +20,13 @@ every file still substantially similar to its Kev original is listed, and nothin
 D1A's code follows [Semantic Versioning](https://semver.org); model checkpoints are versioned separately as Hugging
 Face tags. To release:
 
-1. Write the release notes by hand in `CHANGELOG.md`: move the *Unreleased* items into a new `## [X.Y.Z] - YYYY-MM-DD`
-   section with a short *What's new* in plain language, then *Added / Changed / Fixed / Removed* with PR links, the
-   checkpoints the release was tested with, and *Upgrade notes* for anything that changes how D1A is used.
+1. Assemble the release notes: `python scripts/release_notes.py assemble X.Y.Z --write` moves every fragment in
+   `changes/` into a new `## [X.Y.Z] - YYYY-MM-DD` section of `CHANGELOG.md` (*Added / Changed / Deprecated / Removed /
+   Fixed / Security*, newest PR first) and deletes the fragments. Then add by hand a short *What's new* in plain language,
+   the checkpoints the release was tested with, and *Upgrade notes* for anything that changes how D1A is used.
 2. Set `version = "X.Y.Z"` in `pyproject.toml` (a unit test fails while the version has no changelog section).
 3. Merge, then tag the merge commit and push the tag: `git tag vX.Y.Z && git push origin vX.Y.Z`.
 
-The release workflow checks that the tag, `pyproject.toml` and `CHANGELOG.md` agree, runs the unit tests, builds the
-wheel and sdist, and publishes a GitHub release whose text is that version's changelog section.
+The release workflow checks that the tag, `pyproject.toml` and `CHANGELOG.md` agree and that no fragment is left in
+`changes/`, runs the unit tests, builds the wheel and sdist, and publishes a GitHub release whose text is that version's
+changelog section.

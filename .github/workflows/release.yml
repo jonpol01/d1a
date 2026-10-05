@@ -1,6 +1,7 @@
 name: release
 
-# Push a vX.Y.Z tag to release. The tag, pyproject.toml and CHANGELOG.md must agree (scripts/release_notes.py --check);
+# Push a vX.Y.Z tag to release. The tag, pyproject.toml and CHANGELOG.md must agree, and every fragment in changes/ must
+# already be assembled into that version's section (scripts/release_notes.py --release-check);
 # the unit tests run again on the tagged commit; the GitHub release text is that version's CHANGELOG.md section,
 # written by hand, and the wheel and sdist are attached.
 on:
@@ -18,7 +19,7 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-      - run: python3 scripts/release_notes.py --check "$GITHUB_REF_NAME"
+      - run: python3 scripts/release_notes.py --release-check "$GITHUB_REF_NAME"
       - run: uv sync --extra serve --extra media
       # the Hugging Face files the unit tests read (pinned tokenizers), kept on GitHub's cache between runs: faster, and a
       # slow or unreachable Hub does not fail CI

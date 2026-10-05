@@ -25,6 +25,8 @@ the question's `<decide>` token. README.md is the user guide; docs/UPSTREAM.md r
 ## Rules
 - A file taken from Kev and changed keeps its "Modified from Kev" header and stays listed in docs/UPSTREAM.md.
 - Do not brand anything "Kev"; product, package, CLI and model names are D1A. `kev-latest` is only a compatibility alias.
+- A change adds a fragment, `changes/<PR number>-<slug>.md` (format in `changes/README.md`), instead of editing
+  CHANGELOG.md; `scripts/release_notes.py assemble` writes the version's section at release.
 - Never load a model or start training in a unit test (tiny random models built or committed under tests/ are fine).
 - `tests/test_conformance.py` pins the answers of the committed tiny checkpoint (`tests/golden/tiny-gemma4`). A change
   that moves them on purpose rebuilds it (`tests/golden/build_tiny_gemma4.py`) in the same PR and says why.
