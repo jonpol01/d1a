@@ -72,6 +72,9 @@ the Apache License 2.0. This file records where D1A's code came from and what D1
   `longdoc_v1_synthetic`, `build_documents_v1`/`_v2`, `freeze_documents_v1`, `label_documents_v1`,
   `build_binding_diagnostic`, and `d1a/transfer_v9.py`) with the tests that only exercised them; the suites stay as data
   pinned by sha256 (`tests/test_frozen_suites.py`), and [removed-tools.md](removed-tools.md) says where to rebuild them.
+  Then `d1a.suite`'s own suite freezer (`python -m d1a.suite`) with `d1a/contrastive.py` and the record generator of
+  `d1a/composition.py` (its rule shapes stay for `d1a.suite.validate_training`; `paired_flip` moved to `d1a/benchmark.py`),
+  and `tests/test_generators.py`.
 - **Rewritten from scratch** (no longer derived): `d1a/calibrate.py`, `scripts/calibrate_checkpoint.py` (now a wrapper
   around it).
 - **Rewritten**: `README.md`, `AGENTS.md`, `NOTICE`, `.gitignore`.
@@ -89,6 +92,7 @@ changes at the top; `scripts/check_license.py` checks that this list and the hea
 d1a/api.py
 d1a/benchmark.py
 d1a/checkpoint.py
+d1a/composition.py
 d1a/cuda_graphs.py
 d1a/fused_qwen35.py
 d1a/metrics.py
@@ -104,7 +108,6 @@ scripts/longdoc_serving.py
 scripts/mlx_parity.py
 tests/test_api.py
 tests/test_conventions.py
-tests/test_generators.py
 tests/test_mlx.py
 tests/test_model.py
 tests/test_research.py
@@ -130,8 +133,6 @@ evals/
 .gitattributes
 .python-version
 LICENSE
-d1a/composition.py
-d1a/contrastive.py
 d1a/data.py
 d1a/device.py
 experiments/sft-v1-lengths.json
