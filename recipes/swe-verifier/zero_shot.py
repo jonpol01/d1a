@@ -86,11 +86,10 @@ def state_of(r, issue_chars, patch_chars, tail_chars):
 
 
 def auroc(y, s):
+    """Mann-Whitney AUROC with tied scores sharing their average rank."""
+    from scipy.stats import rankdata
     y, s = np.asarray(y, bool), np.asarray(s, float)
-    order = np.argsort(s, kind="mergesort"); ranks = np.empty(len(s)); ranks[order] = np.arange(1, len(s) + 1)
-    for v in np.unique(s):   # average ranks for ties
-        idx = s == v; ranks[idx] = ranks[idx].mean()
-    pos = y.sum(); neg = len(y) - pos
+    ranks = rankdata(s); pos = y.sum(); neg = len(y) - pos
     return float((ranks[y].sum() - pos * (pos + 1) / 2) / (pos * neg)) if pos and neg else float("nan")
 
 
