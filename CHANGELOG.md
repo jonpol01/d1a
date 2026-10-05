@@ -110,6 +110,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- `d1a.benchmark` no longer crashes after scoring a suite when an identical-option control (#38) is too long: the
+  first option repeated K times can outgrow the row its question fit in (20 of decision-v2's first 100 on Gemma 4).
+  Such controls are skipped and counted in `identical_options.skipped_overlong`, and the report is written.
 - README: the benchmark example scores `--run runs/d1a-e2b`, where `d1a.train --out runs/d1a-e2b` writes the checkpoint (it named a `checkpoint/` folder that does not exist).
 - `scripts/golden_vectors.py compare` no longer crashes on a one-option question (a choice with one criterion or a
   one-level score), which has no second-best probability to measure a flip margin against.

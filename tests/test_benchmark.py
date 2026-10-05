@@ -283,6 +283,21 @@ def test_identical_option_controls(tmp_path, monkeypatch):
     assert "identical_options" not in report and not (tmp_path / "none" / "identical_options.json").exists()
 
 
+def test_an_overlong_control_is_skipped_not_fatal(tmp_path):
+    """A control repeats its first option K times, so it can be longer than the question it came from: it is skipped and
+    counted, and the suite's report is still written (d1a.benchmark crashed after scoring decision-v2 on E4B)."""
+    def predictor(r):
+        q = next(iter(r["questions"].values()))
+        if q["type"] == "score" and r["_meta"]["id"].startswith("item-0#"):
+            raise ContextOverflow("branch too long: 1012 tokens with a 15-token state (row limit 1024)")
+        keys = question_keys(q["type"], q["criteria"])
+        return {"probabilities": {"reason": {key: 1 / len(keys) for key in keys}}, "latency_ms": 1.0}
+    report, _ = B.evaluate_records([record(0), record(1)], predictor, tmp_path / "out", identical=10)
+    assert report["identical_options"]["n"] == 1 and report["identical_options"]["skipped_overlong"] == 1
+    assert [c["id"] for c in read_json(tmp_path / "out" / "identical_options.json")] == ["item-1#identical:reason"]
+    assert (tmp_path / "out" / "report.json").exists()
+
+
 def test_identical_options_reach_the_model_as_the_same_tokens(monkeypatch):
     """Through the serving path (materialize, encode) a control's options are the same token span, only at different places."""
     from pathlib import Path
