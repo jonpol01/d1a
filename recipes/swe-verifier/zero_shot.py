@@ -162,7 +162,9 @@ def main():
     from sklearn.model_selection import GroupKFold
     X = np.array([[np.log1p(r["patch_lines"]), r["clean_submit"], np.log1p(r["steps"]), np.log1p(r["error_obs"]), r["success_printed"], r["edits_tests"]] for r in out])
     groups = [r["repo"] for r in out]; p_lr = np.zeros(len(out))
-    for tr, te in GroupKFold(n_splits=5).split(X, y, groups):
+    if len(set(groups)) < 2 or len(set(y)) < 2:
+        print("  (too few repositories or outcomes for a cross-validated logistic regression)"); return
+    for tr, te in GroupKFold(n_splits=min(5, len(set(groups)))).split(X, y, groups):
         p_lr[te] = LogisticRegression(max_iter=1000).fit(X[tr], np.array(y)[tr]).predict_proba(X[te])[:, 1]
     ece, brier, _ = calibration(y, p_lr)
     print(f"  logistic regression over the heuristics, CV by repo: AUROC {auroc(y, p_lr):.3f}, ECE {ece:.3f}, Brier {brier:.3f}")
