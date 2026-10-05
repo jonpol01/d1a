@@ -29,6 +29,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `recipe.json` (the recipe, its sha256, the stage and the exact command). `--dry-run` prints the commands.
   `recipes/d1a-e2b.yaml` is the README's E2B run. `d1a.train`'s `parse_args` takes an argument list; PyYAML is now a
   declared dependency.
+- Outcome memory, experimental and off unless set (#149). With `D1A_FEEDBACK_LOG` on, `d1a.serve` keeps each question's
+  pointer-head query in a sidecar beside the log (`<log stem>.queries.jsonl`); the log's lines are unchanged.
+  `python -m d1a.feedback memory-fit <log> --out <file>` fits, per choice question with at least 20 outcomes, a blend of
+  the answer with the outcomes of the k most similar earlier decisions (k, τ, λ chosen on the fit-side groups), and keeps
+  a question only if, replayed in time order on held-out groups, it beats the model with a fitted temperature
+  (`gate_choice`) without lowering top-choice accuracy. `D1A_OUTCOME_MEMORY=<file>` serves those questions from the
+  blend, which can change the chosen option; every other answer, and every answer without it, is unchanged.
 - `python -m d1a.feedback promote <log> --calibrator <file>` (#148): the promotion gate on a live decision log. Whole
   groups (an outcome's optional `group`, e.g. a pull request; `POST /v1/feedback` takes it) go to the fit or the
   held-out side. A calibrator fitted on the fit side replaces the served one for a question only if it passes the gate

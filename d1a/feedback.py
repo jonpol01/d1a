@@ -10,6 +10,7 @@ tests, a maintainer corrected a label, a routed task failed); the outcomes impro
     python -m d1a.feedback status runs/feedback/verifier.jsonl
     python -m d1a.feedback records runs/feedback/verifier.jsonl --out feedback.jsonl     # for d1a.train --data
     python -m d1a.feedback calibrate runs/feedback/verifier.jsonl --out calibrator.json
+    python -m d1a.feedback memory-fit runs/feedback/verifier.jsonl --out memory.json      # d1a.serve's D1A_OUTCOME_MEMORY
 
 The loop has three steps, cheapest first:
 1. recalibrate: an OutcomeCalibrator refits each yes/no question's probability on the outcomes (Platt scaling on the
@@ -27,6 +28,7 @@ replayed. An outcome may name its source in meta["src"] (e.g. "human" for a pers
 model's judgment); each question keeps the label from the most trusted source (PREFER), then the latest.
 """
 import argparse
+import base64
 import hashlib
 import json
 import math
@@ -100,6 +102,26 @@ class FeedbackLog:
     def pending(self):
         done = {e["id"] for e in self.events() if e["kind"] == "outcome"}
         return [e for e in self.events() if e["kind"] == "decision" and e["id"] not in done]
+
+    @property
+    def queries_path(self):
+        """The sidecar beside the log (<stem>.queries.jsonl): each decision's pointer-head queries, kept out of the log so
+        its lines stay as they were."""
+        return self.path.with_name(self.path.stem + ".queries.jsonl")
+
+    def queries(self, did, vectors):
+        """Record decision `did`'s query vectors, q(h_decide) of the pointer head: {question id: 1-d array}."""
+        with open(self.queries_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"id": did, "q": {qid: encode_vector(v) for qid, v in vectors.items()}}) + "\n")
+
+    def query_vectors(self):
+        """{decision id: {question id: float32 array}} from the sidecar."""
+        if not self.queries_path.exists(): return {}
+        out = {}
+        for line in self.queries_path.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                e = json.loads(line); out[e["id"]] = {qid: decode_vector(v) for qid, v in e["q"].items()}
+        return out
 
 
 def records(resolved, src="feedback"):
@@ -278,6 +300,150 @@ def promote(resolved, current=None, share=0.3, min_outcomes=20, **gate_kw):
     return out, report
 
 
+def encode_vector(v):
+    return base64.b64encode(np.asarray(v, "<f4").tobytes()).decode()
+
+
+def decode_vector(s):
+    return np.frombuffer(base64.b64decode(s), "<f4").astype(np.float32)
+
+
+# --- outcome memory (#149) ----------------------------------------------------------------------------------------------
+# A choice question's answer blended with what happened to the most similar earlier decisions: (1-lam) * P + lam * M, M
+# the outcomes of the k nearest stored queries by cosine (centered), weighted by softmax(similarity / tau). It can change
+# the chosen option, unlike a temperature, so it is served only where memory-fit's gate shows it helps.
+
+MEMORY_GRID = {"k": (3, 5, 10, 20), "tau": (0.02, 0.05, 0.1), "lam": (0.0, 0.2, 0.4, 0.6, 0.8)}
+
+
+def _unit(v, center):
+    x = np.asarray(v, np.float64) - center
+    n = np.linalg.norm(x)
+    return x / n if n > 0 else x
+
+
+def memory_probs(keys, x, bank_x, bank_labels, k, tau):
+    """M: {option: weight} over the k most similar stored queries (rows of bank_x, unit vectors) to x, or None without any."""
+    if len(bank_labels) == 0: return None
+    sims = bank_x @ x
+    top = np.argsort(-sims, kind="stable")[:k]
+    w = np.exp((sims[top] - sims[top].max()) / tau); w /= w.sum()
+    m = dict.fromkeys(keys, 0.0)
+    for i, wi in zip(top, w):
+        if bank_labels[i] in m: m[bank_labels[i]] += float(wi)
+    return m
+
+
+def blend(probs, memory, lam):
+    """(1 - lam) * P + lam * M, in P's option order; P itself without a memory."""
+    return dict(probs) if memory is None else {o: (1 - lam) * p + lam * memory[o] for o, p in probs.items()}
+
+
+def memory_rows(resolved, vectors, qid):
+    """One choice question's decisions that have an outcome among the offered options and a stored query, oldest first:
+    {ts, outcome_ts, group, q, probs, label}. Rows whose options differ from the latest decision's are left out."""
+    rows = []
+    for d in resolved:
+        pr, q = _choice_probs(d["answers"].get(qid)), vectors.get(d["id"], {}).get(qid)
+        if pr is not None and q is not None and d["labels"].get(qid) in pr:
+            rows.append({"ts": d["ts"], "outcome_ts": d["outcome_ts"], "group": _group(d), "q": q, "probs": pr, "label": d["labels"][qid]})
+    rows.sort(key=lambda r: r["ts"])
+    keys = list(rows[-1]["probs"]) if rows else []
+    return [r for r in rows if list(r["probs"]) == keys]
+
+
+def prequential(rows, bank, center, k, tau, lam):
+    """What the served policy answers for each row: its memory holds only bank outcomes known before the row was decided."""
+    bx = np.array([_unit(b["q"], center) for b in bank]) if bank else np.zeros((0, 0))
+    known = np.array([b["outcome_ts"] for b in bank])
+    out = []
+    for r in rows:
+        mask = known < r["ts"] if len(bank) else np.zeros(0, bool)
+        m = memory_probs(list(r["probs"]), _unit(r["q"], center), bx[mask], [b["label"] for b, ok in zip(bank, mask) if ok], k, tau) if mask.any() else None
+        out.append(blend(r["probs"], m, lam))
+    return out
+
+
+def _top1(probs, labels):
+    return float(np.mean([max(p, key=p.get) == y for p, y in zip(probs, labels)])) if labels else 0.0
+
+
+def memory_fit(resolved, vectors, share=0.3, min_outcomes=20, grid=MEMORY_GRID, **gate_kw):
+    """Fit and gate the outcome memory per choice question. k, tau and lam are chosen on the fit side's groups
+    (prequentially, from fit-side outcomes only). The policy is then replayed on the held-out groups as d1a.serve would
+    have answered at the time (each decision's memory: every outcome known before it, any group) and promoted only when
+    it beats the checkpoint with a fitted temperature (gate_choice) and its top-choice accuracy does not drop.
+    -> (OutcomeMemory of the promoted questions, {question: report})."""
+    params, report = {}, {}
+    for qid in sorted({q for d in resolved for q in d["labels"]}):
+        rows = memory_rows(resolved, vectors, qid)
+        if len(rows) < min_outcomes or len({r["label"] for r in rows}) < 2: continue
+        fit = [r for r in rows if not held_out(r["group"], share)]
+        test = [r for r in rows if held_out(r["group"], share)]
+        if not fit or not test:
+            report[qid] = {"promote": False, "fit": len(fit), "held_out": len(test), "reasons": ["no outcomes on one side of the split"]}; continue
+        center = np.mean([r["q"] for r in fit], axis=0)
+        loss = lambda c: float(choice_log_loss(prequential(fit, fit, center, *c), [r["label"] for r in fit]).mean())
+        k, tau, lam = min(((k, t, l) for k in grid["k"] for t in grid["tau"] for l in grid["lam"]), key=loss)
+        s = OutcomeCalibrator._fit_s([r["probs"] for r in fit], [r["label"] for r in fit], 1e-3)
+        labels = [r["label"] for r in test]
+        cand, inc = prequential(test, rows, center, k, tau, lam), [_rescale(r["probs"], s) for r in test]
+        g = gate_choice(labels, cand, inc, [r["group"] for r in test], **gate_kw)
+        raw = [r["probs"] for r in test]
+        acc = {"raw": _top1(raw, labels), "temperature": _top1(inc, labels), "memory": _top1(cand, labels)}
+        ll = {name: float(choice_log_loss(ps, labels).mean()) for name, ps in (("raw", raw), ("temperature", inc), ("memory", cand))}
+        right = [(max(r, key=r.get) == y, max(c, key=c.get) == y) for r, c, y in zip(raw, cand, labels)]
+        flips = {"right_to_wrong": sum(a and not b for a, b in right), "wrong_to_right": sum(b and not a for a, b in right)}
+        reasons = g["reasons"] + ([f"top-choice accuracy drops ({acc['temperature']:.3f} -> {acc['memory']:.3f})"] if acc["memory"] < acc["temperature"] else [])
+        report[qid] = {"promote": not reasons and lam > 0, "fit": len(fit), "held_out": len(test), "k": k, "tau": tau, "lam": lam,
+                       "delta_log_loss": g["delta_log_loss"], "ci": g["ci"], "log_loss": ll, "accuracy": acc, "flips": flips,
+                       "reasons": reasons or ([] if lam > 0 else ["lam 0: memory adds nothing"])}
+        if report[qid]["promote"]:
+            params[qid] = {"k": k, "tau": tau, "lam": lam, "keys": list(rows[-1]["probs"]), "center": encode_vector(center),
+                           "bank": [{"q": encode_vector(r["q"]), "label": r["label"], "outcome_ts": r["outcome_ts"]} for r in rows]}
+    return OutcomeMemory(params), report
+
+
+class OutcomeMemory:
+    """d1a.serve's side of the outcome memory: the questions memory-fit promoted, each with its k, tau, lam, center and
+    bank of stored outcomes. Every outcome in the bank is already in the past when a request arrives, so all of it is used."""
+
+    def __init__(self, params=None):
+        self.params = dict(params or {})
+        self._banks = {}
+
+    def _bank(self, qid):
+        if qid not in self._banks:
+            p = self.params[qid]; center = decode_vector(p["center"]).astype(np.float64)
+            self._banks[qid] = (center, np.array([_unit(decode_vector(b["q"]), center) for b in p["bank"]]), [b["label"] for b in p["bank"]])
+        return self._banks[qid]
+
+    def probs(self, qid, probs, q):
+        """The blended {option: probability} for a question with params, matching options and a query; else None."""
+        p = self.params.get(qid)
+        if p is None or q is None or list(probs) != p["keys"]: return None
+        center, bx, labels = self._bank(qid)
+        return blend(probs, memory_probs(p["keys"], _unit(q, center), bx, labels, p["k"], p["tau"]), p["lam"])
+
+    def apply(self, raw, served, queries):
+        """`served` with each promoted choice question answered from the blend of its raw probabilities (replacing any
+        calibration of it); every other answer as it was. The same object when nothing changes."""
+        from .api import answer
+        out = None
+        for qid, ans in raw.items():
+            pr = _choice_probs(ans)
+            b = self.probs(qid, pr, queries.get(qid)) if pr is not None and ans.get("type") == "choice" else None
+            if b is not None:
+                out = out or dict(served)
+                out[qid] = answer(list(b.values()), {"type": "choice", "keys": list(b)})
+        return out if out is not None else served
+
+    def save(self, path): Path(path).write_text(json.dumps({"kind": "d1a-outcome-memory", "params": self.params}) + "\n", encoding="utf-8")
+
+    @classmethod
+    def load(cls, path): return cls(json.loads(Path(path).read_text(encoding="utf-8"))["params"])
+
+
 def _gate(d, groups, suite_deltas, tolerance, n, seed):
     groups = np.arange(len(d)) if groups is None else np.asarray(groups)
     keys = np.unique(groups); idx = {g: np.flatnonzero(groups == g) for g in keys}; rng = np.random.default_rng(seed)
@@ -298,7 +464,10 @@ def main(argv=None):
     pr = sub.add_parser("promote", help="fit on part of the log, gate on the rest, and update the served calibrator only where it passes")
     pr.add_argument("log"); pr.add_argument("--calibrator", required=True, help="the file d1a.serve's D1A_OUTCOME_CALIBRATOR reads")
     pr.add_argument("--min-outcomes", type=int, default=20); pr.add_argument("--held-out", type=float, default=0.3)
-    for x in (s, r, c, pr): x.add_argument("--src", help="only outcomes from this source (meta src, e.g. human or reviewer)")
+    mf = sub.add_parser("memory-fit", help="fit and gate the outcome memory (the query sidecar d1a.serve writes beside the log)")
+    mf.add_argument("log"); mf.add_argument("--out", required=True, help="the file d1a.serve's D1A_OUTCOME_MEMORY reads")
+    mf.add_argument("--min-outcomes", type=int, default=20); mf.add_argument("--held-out", type=float, default=0.3)
+    for x in (s, r, c, pr, mf): x.add_argument("--src", help="only outcomes from this source (meta src, e.g. human or reviewer)")
     a = ap.parse_args(argv)
     log = FeedbackLog(a.log); res = log.resolved(a.src)
     if a.cmd == "status":
@@ -318,6 +487,10 @@ def main(argv=None):
         if any(r["promote"] for r in report.values()):   # written whole and renamed into place: the server never reads half a file
             tmp = path.with_name(path.name + ".tmp"); cal.save(tmp); os.replace(tmp, path)
         print(json.dumps({"promoted": sorted(q for q, r in report.items() if r["promote"]), "report": report}))
+    elif a.cmd == "memory-fit":   # rewritten whole every time: the bank grows with the outcomes, and a question that stops passing stops being served
+        mem, report = memory_fit(res, log.query_vectors(), a.held_out, a.min_outcomes)
+        path = Path(a.out); tmp = path.with_name(path.name + ".tmp"); mem.save(tmp); os.replace(tmp, path)
+        print(json.dumps({"promoted": sorted(mem.params), "report": report}))
     else:
         cal = OutcomeCalibrator().fit(res, a.min_outcomes); cal.save(a.out)
         print(f"wrote {a.out}: " + ", ".join(f"{q} s={v['s']:.3f} (n={v['n']})" if isinstance(v, dict) else f"{q} a={v[0]:.3f} b={v[1]:+.3f} (n={v[2]})"
