@@ -1,3 +1,5 @@
+# Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
+# Changes for D1A Copyright 2026 John Soliva: the converters of the sources only Kev's suite freezer read (trec, dbpedia14, emotion, imdb, amazon, qnli, tweet_offensive, mmlu, paws, sciq, arc, openbookqa, csqa) removed; build() keeps the six default sources.
 """Convert public labelled datasets into TypeSafe-shaped requests, then through api.to_record() so the
 training format is byte-identical to what /v1/systemone feeds the model.
 
@@ -21,15 +23,6 @@ def source_seed(seed, source):
     return int.from_bytes(hashlib.sha256(f"{seed}:{source}".encode()).digest()[:8], "big")
 
 
-# Repos whose main branch is a (no longer supported) loading script; read the Hub's auto-converted parquet branch instead.
-PARQUET_BRANCH = {"CogComp/trec": "refs/convert/parquet"}
-
-
-def dataset_ref(repo):
-    """(repo, revision-to-pin) for a repo id; parquet-branch repos pin that branch's sha, not main."""
-    return repo.partition(":")[0], PARQUET_BRANCH.get(repo.partition(":")[0])
-
-
 class Source(random.Random):
     """One source's sampling context: a seeded RNG (the converters draw everything from it), the dataset revision to pin,
     and the provenance of every row drawn (`origins`, filled by _sample so build() can attach it to each record)."""
@@ -43,7 +36,7 @@ class Source(random.Random):
 def _dataset(repo, split, src):
     """repo may be 'owner/name' or 'owner/name:config'; the Source carries the revision to pin."""
     name, _, config = repo.partition(":")
-    return load_dataset(name, config or None, split=split, revision=src.revision or PARQUET_BRANCH.get(name))
+    return load_dataset(name, config or None, split=split, revision=src.revision)
 
 NONE = "None of the above"
 # "None of the above" options must appear both as the correct answer and as a wrong alternative, with varied
@@ -158,141 +151,10 @@ SOURCES = {"banking77": (_banking, "train", "test"), "boolq": (_boolq, "train", 
            "mnli": (_mnli, "train", "validation_matched"), "sst5": (_sst5, "train", "test"), "yelp": (_yelp, "train", "test")}
 
 
-# Eval-only sources for transfer measurement. Never passed to training; kept out of SOURCES so build() defaults cannot
-# pick them up. Rotten Tomatoes (SST parent) and SNLI (MNLI sibling) are deliberately excluded.
-TREC = {"abbreviation": "Asks what an abbreviation stands for", "entity": "Asks about a thing, object, animal, product, or creative work",
-        "description": "Asks for a definition, description, reason, or manner", "human": "Asks about a person, group, or organisation",
-        "location": "Asks about a place", "number": "Asks for a number, date, count, or other numeric value"}
-EMOTION = {"sadness": None, "joy": None, "love": None, "anger": None, "fear": None, "surprise": None}
-AMAZON = ["1 star: very negative", "2 stars: negative", "3 stars: mixed", "4 stars: positive", "5 stars: very positive"]
-
-
-def _trec(split, n, rng):
-    ds = _dataset("CogComp/trec", split=split, src=rng)
-    keys = list(TREC)
-    return [{"state": _wrap_state(ex["text"], rng), "questions": {"answer_type": {"type": "choice", "instructions": "What kind of answer does this question ask for?",
-             "criteria": dict(TREC), "label": keys[ex["coarse_label"]], "src": "trec"}}} for ex in _sample(ds, n, rng)]
-
-
-def _dbpedia(split, n, rng):
-    ds = _dataset("fancyzhx/dbpedia_14", split=split, src=rng)
-    names = [x.lower().replace(" ", "_") for x in ds.features["label"].names]
-    return [{"state": _wrap_state(" ".join(ex["content"].split()[:200]), rng), "questions": {"category": {"type": "choice", "instructions": "Which category does the subject of this encyclopedia text belong to?",
-             "criteria": {k: None for k in names}, "label": names[ex["label"]], "src": "dbpedia14"}}} for ex in _sample(ds, n, rng)]
-
-
-def _emotion(split, n, rng):
-    ds = _dataset("dair-ai/emotion:split", split=split, src=rng)
-    keys = list(EMOTION)
-    return [{"state": ex["text"], "questions": {"emotion": {"type": "choice", "instructions": "Which emotion does the writer express?",
-             "criteria": dict(EMOTION), "label": keys[ex["label"]], "src": "emotion"}}} for ex in _sample(ds, n, rng)]
-
-
-def _imdb(split, n, rng):
-    ds = _dataset("stanfordnlp/imdb", split=split, src=rng)
-    return [{"state": _wrap_state(" ".join(ex["text"].replace("<br />", " ").split()[:220]), rng), "questions": {"positive": {"type": "noul", "instructions": "Is this movie review positive?",
-             "criteria": {"true": "The reviewer liked the film overall", "false": "The reviewer disliked the film overall"}, "label": ex["label"] == 1, "src": "imdb"}}} for ex in _sample(ds, n, rng)]
-
-
-def _amazon(split, n, rng):
-    ds = _dataset("SetFit/amazon_reviews_multi_en", split=split, src=rng)
-    return [{"state": _wrap_state(" ".join(ex["text"].split()[:220]), rng), "questions": {"stars": {"type": "score", "instructions": "How many stars did this product reviewer give?",
-             "criteria": list(AMAZON), "label": ex["label"], "src": "amazon"}}} for ex in _sample(ds, n, rng)]
-
-
-def _qnli(split, n, rng):
-    ds = _dataset("nyu-mll/glue:qnli", split=split, src=rng)
-    return [{"state": _wrap_state(ex["sentence"], rng), "questions": {"answers": {"type": "noul", "instructions": f'Does the sentence contain the answer to this question: "{ex["question"]}"',
-             "label": ex["label"] == 0, "src": "qnli"}}} for ex in _sample(ds, n, rng)]
-
-
-def _offensive(split, n, rng):
-    ds = _dataset("cardiffnlp/tweet_eval:offensive", split=split, src=rng)
-    return [{"state": ex["text"], "questions": {"offensive": {"type": "noul", "instructions": "Is this post offensive?",
-             "criteria": {"true": "Contains insults, threats, profanity directed at someone, or hateful content", "false": "Not offensive"},
-             "label": ex["label"] == 1, "src": "tweet_offensive"}}} for ex in _sample(ds, n, rng)]
-
-
-def _mmlu(split, n, rng):
-    ds = _dataset("cais/mmlu:all", split=split, src=rng)
-    out = []
-    for ex in _sample(ds, n, rng):
-        keys = ["a", "b", "c", "d"]
-        out.append({"state": {"subject": ex["subject"].replace("_", " "), "question": ex["question"]},
-                    "questions": {"answer": {"type": "choice", "instructions": "Which option correctly answers the question?",
-                                             "criteria": dict(zip(keys, ex["choices"])), "label": keys[ex["answer"]], "src": "mmlu"}}})
-    return out
-
-
-def _paws(split, n, rng):
-    ds = _dataset("google-research-datasets/paws:labeled_final", split=split, src=rng)
-    return [{"state": _wrap_state(ex["sentence1"], rng), "questions": {"paraphrase": {"type": "noul", "instructions": f'Does this sentence mean the same thing: "{ex["sentence2"]}"',
-             "criteria": {"true": "Same meaning, possibly reworded", "false": "Different meaning, even if most words match"}, "label": ex["label"] == 1, "src": "paws"}}}
-            for ex in _sample(ds, n, rng)]
-
-
-def _sciq(split, n, rng):
-    ds = _dataset("allenai/sciq", split=split, src=rng)
-    out = []
-    for ex in _sample(ds, n, rng):
-        options = [ex["correct_answer"], ex["distractor1"], ex["distractor2"], ex["distractor3"]]
-        keys = ["a", "b", "c", "d"]; order = list(range(4)); rng.shuffle(order)
-        crit = {keys[i]: options[j] for i, j in enumerate(order)}
-        out.append({"state": {"passage": ex["support"], "question": ex["question"]} if ex["support"] else {"question": ex["question"]},
-                    "questions": {"answer": {"type": "choice", "instructions": "Which option answers the science question?", "criteria": crit,
-                                             "label": keys[order.index(0)], "src": "sciq"}}})
-    return out
-
-
-def _mcq(ex_q, labels, texts, answer_label, src, rng, state_extra=None):
-    """Knowledge MCQ -> Choice with neutral keys; option order shuffled per record so keys carry no information."""
-    order = list(range(len(texts))); rng.shuffle(order)
-    keys = [f"opt_{i + 1}" for i in range(len(texts))]
-    crit = {keys[i]: texts[j] for i, j in enumerate(order)}
-    label = keys[order.index(labels.index(answer_label))]
-    state = {"question": ex_q}
-    if state_extra: state.update(state_extra)
-    return {"state": state, "questions": {"answer": {"type": "choice", "instructions": "Which option correctly answers the question?", "criteria": crit, "label": label, "src": src}}}
-
-
-def _arc(split, n, rng):
-    ds = _dataset("allenai/ai2_arc:ARC-Challenge", split=split, src=rng)
-    return [_mcq(ex["question"], list(ex["choices"]["label"]), list(ex["choices"]["text"]), ex["answerKey"], "arc", rng) for ex in _sample(ds, n, rng)]
-
-
-def _openbookqa(split, n, rng):
-    ds = _dataset("allenai/openbookqa:main", split=split, src=rng)
-    return [_mcq(ex["question_stem"], list(ex["choices"]["label"]), list(ex["choices"]["text"]), ex["answerKey"], "openbookqa", rng) for ex in _sample(ds, n, rng)]
-
-
-def _csqa(split, n, rng):
-    ds = _dataset("tau/commonsense_qa", split=split, src=rng)
-    return [_mcq(ex["question"], list(ex["choices"]["label"]), list(ex["choices"]["text"]), ex["answerKey"], "csqa", rng) for ex in _sample(ds, n, rng) if ex["answerKey"]]
-
-
-ALL_SOURCES = {**SOURCES, "trec": (_trec, "train", "test"), "dbpedia14": (_dbpedia, "train", "test"), "emotion": (_emotion, "train", "test"),
-               "imdb": (_imdb, "train", "test"), "amazon": (_amazon, "train", "test"), "qnli": (_qnli, "train", "validation"),
-               "tweet_offensive": (_offensive, "train", "test"), "mmlu": (_mmlu, "test", "test"),
-               "paws": (_paws, "train", "test"), "sciq": (_sciq, "train", "test"),
-               "arc": (_arc, "train", "test"), "openbookqa": (_openbookqa, "train", "test"), "csqa": (_csqa, "train", "validation")}
-ALL_REPOS = {**REPOS, "trec": "CogComp/trec", "dbpedia14": "fancyzhx/dbpedia_14", "emotion": "dair-ai/emotion", "imdb": "stanfordnlp/imdb",
-             "amazon": "SetFit/amazon_reviews_multi_en", "qnli": "nyu-mll/glue", "tweet_offensive": "cardiffnlp/tweet_eval", "mmlu": "cais/mmlu",
-             "paws": "google-research-datasets/paws", "sciq": "allenai/sciq",
-             "arc": "allenai/ai2_arc", "openbookqa": "allenai/openbookqa", "csqa": "tau/commonsense_qa"}
-
-# Policy (PLAN.md step 1). A source is trainable or eval-only; suites record both lists and training refuses eval-only
-# sources. MMLU is a knowledge probe and stays eval-only permanently; Emotion/TweetEval are noisy-label honesty checks;
-# QNLI/PAWS/SciQ measure reading transfer. Rotten Tomatoes (SST parent) and SNLI (MNLI sibling) are excluded entirely.
-# Knowledge MCQ (ARC-Challenge, OpenBookQA, CommonsenseQA) is trainable: the hypothesis (PLAN.md, overnight) is that the
-# pointer readout under-uses the base model's knowledge (8B scores 0.65 on 4-way MMLU, below its base-model level) and
-# that a small MCQ mix teaches the head to tap it. MMLU and SciQ stay eval-only; ARC/SciQ are distinct datasets.
-TRAINABLE = ("banking77", "boolq", "agnews", "mnli", "sst5", "yelp", "trec", "dbpedia14", "amazon", "imdb", "arc", "openbookqa", "csqa")
+# Sources training refuses (d1a.train, d1a.suite.validate_training): the frozen suites hold records from these, kept for
+# evaluation only. MMLU is a knowledge probe; Emotion/TweetEval are noisy-label honesty checks; QNLI/PAWS/SciQ measure
+# reading transfer.
 EVAL_ONLY = ("mmlu", "emotion", "tweet_offensive", "qnli", "paws", "sciq")
-assert set(TRAINABLE) | set(EVAL_ONLY) == set(ALL_SOURCES) and not set(TRAINABLE) & set(EVAL_ONLY)
-
-# transfer-v1 (frozen before the policy existed) used these eight; kept so its manifest can be re-derived.
-TRANSFER_SOURCES = {k: ALL_SOURCES[k] for k in ("trec", "dbpedia14", "emotion", "imdb", "amazon", "qnli", "tweet_offensive", "mmlu")}
-TRANSFER_REPOS = {k: ALL_REPOS[k] for k in TRANSFER_SOURCES}
 
 
 def build(n_per_source, split="train", seed=0, exclude=(), only=(), revisions=None, sources=None, repos=None):
