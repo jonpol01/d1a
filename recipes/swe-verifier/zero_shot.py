@@ -113,12 +113,17 @@ def main():
     ap.add_argument("--split", choices=["all", "train", "dev", "test"], default="all", help="only runs whose repository is in this split (split_of)")
     ap.add_argument("--per-issue", type=int, default=0, help="instead of a random sample: up to this many runs of every issue (for best_of_k.py)")
     ap.add_argument("--cut-step", type=int, default=0, help="anytime mode: score each run as it stood after this many agent actions (runs already over are left out)")
+    ap.add_argument("--swegemma", help="score a competition-harness results directory (from_swegemma.py) instead of the public runs")
+    ap.add_argument("--tasks", help="with --swegemma: the tasks.jsonl holding the issues")
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
     rows = []
-    for k in range(a.shards):
+    for k in range(0 if a.swegemma else a.shards):
         rows += pq.read_table(hf_hub_download(DATASET, f"data/train-{k:05d}-of-00012.parquet", repo_type="dataset"),
                               columns=["instance_id", "model_name", "target", "trajectory", "exit_status", "generated_patch"]).to_pylist()
+    if a.swegemma:
+        from from_swegemma import load_runs
+        rows = load_runs(a.swegemma, a.tasks); a.n = len(rows)
     rows = [r for r in rows if a.split == "all" or split_of(r["instance_id"].rsplit("-", 1)[0]) == a.split]
     rng = random.Random(a.seed)
     if a.per_issue:
@@ -140,7 +145,7 @@ def main():
         model = D1A.load(a.run)
     out = []
     for i, r in enumerate(rows):
-        rec = {"run_key": r["run_key"], "instance_id": r["instance_id"], "repo": r["instance_id"].rsplit("-", 1)[0], "model": r["model_name"], "y": bool(r["target"]), **heuristics(r)}
+        rec = {"run_key": r["run_key"], "instance_id": r["instance_id"], "repo": r.get("repo") or r["instance_id"].rsplit("-", 1)[0], "model": r["model_name"], "y": bool(r["target"]), **heuristics(r)}
         if model:
             t0 = time.time(); ans = model.decide(state_of(r, a.issue_chars, a.patch_chars, a.tail_chars), question)["resolved"]
             rec["p_d1a"] = float(ans["noul"]); rec["run"] = a.run; rec["seconds"] = round(time.time() - t0, 2)
