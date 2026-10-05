@@ -166,7 +166,46 @@ def serving(t):
     return 802, 200, "".join(b), "Where D1A runs: one server and one model for text, photos and voice"
 
 
-for name, fn in (("layout", layout), ("model", model), ("forms", forms), ("serving", serving)):
+def learning(t):
+    """5. Self-learning: decide, log, get the outcome, recalibrate, retrain, gate; each stage lights up in turn, and a
+    candidate that passes the gate becomes the next version."""
+    def stage(x, y, w, n, title, sub, color, delay):
+        return (f'<g class="glow" style="animation-delay:{delay:.1f}s"><rect x="{x}" y="{y}" width="{w}" height="64" rx="14" fill="{t["card"]}" stroke="{color}"/></g>'
+                f'<rect x="{x}" y="{y}" width="{w}" height="64" rx="14" fill="{color}" fill-opacity=".1"/>'
+                f'<circle cx="{x + 18}" cy="{y + 18}" r="10" fill="{color}"/>'
+                f'<text x="{x + 18}" y="{y + 22}" text-anchor="middle" font-size="10" class="title" style="fill:#ffffff">{n}</text>'
+                f'<text x="{x + 36}" y="{y + 23}" font-size="12" class="title">{esc(title)}</text>'
+                f'<text x="{x + 14}" y="{y + 44}" font-size="10" class="muted">{esc(sub[0])}</text>'
+                f'<text x="{x + 14}" y="{y + 57}" font-size="10" class="muted">{esc(sub[1])}</text>')
+
+    def arrow(d, label="", lx=0, ly=0, dashed=False):
+        dash = ' stroke-dasharray="3 4"' if dashed else ""
+        return (f'<path d="{d}" fill="none" stroke="{t["muted"]}" stroke-width="1.5" marker-end="url(#arr)"{dash} class="{"" if dashed else "flow"}"/>'
+                + (f'<text x="{lx}" y="{ly}" text-anchor="middle" font-size="9" class="mono muted">{esc(label)}</text>' if label else ""))
+    W, top, bot = 236, 40, 176
+    xs = (14, 283, 552)
+    b = ['<text x="401" y="24" text-anchor="middle" font-size="13" class="title">D1A learns from what actually happened</text>',
+         stage(xs[0], top, W, 1, "Decide", ("answers with a calibrated P", "e.g. P(patch fixes the issue) = 0.83"), C["q"], 0.0),
+         stage(xs[1], top, W, 2, "Log", ("FeedbackLog: the request, the answer", "and the model that gave it (repo@tag)"), C["state"], 1.0),
+         stage(xs[2], top, W, 3, "Outcome", ("the world reports back later:", "tests pass/fail, a label is corrected"), C["opt"], 2.0),
+         stage(xs[2], bot, W, 4, "Recalibrate", ("OutcomeCalibrator refits P on outcomes", "minutes; fixes base-rate drift"), C["amber"], 3.0),
+         stage(xs[1], bot, W, 5, "Retrain", ("a small LoRA update on the", "resolved decisions (d1a.train --data)"), C["lora"], 4.0),
+         stage(xs[0], bot, W, 6, "Gate", ("promote only if held-out log loss drops", "(95% CI < 0) and no frozen suite regresses"), C["decide"], 5.0),
+         arrow(f"M {xs[0] + W} {top + 32} L {xs[1] - 4} {top + 32}"),
+         arrow(f"M {xs[1] + W} {top + 32} L {xs[2] - 4} {top + 32}"),
+         arrow(f"M {xs[2] + W / 2} {top + 64} L {xs[2] + W / 2} {bot - 4}"),
+         arrow(f"M {xs[2]} {bot + 32} L {xs[1] + W + 4} {bot + 32}"),
+         arrow(f"M {xs[1]} {bot + 32} L {xs[0] + W + 4} {bot + 32}"),
+         arrow(f"M {xs[0] + W / 2} {bot} L {xs[0] + W / 2} {top + 68}"),
+         f'<text x="{xs[0] + W / 2 + 12}" y="{(top + 64 + bot) / 2 - 2}" font-size="9" class="mono muted">promote: the next version (d1a.versions)</text>',
+         f'<text x="{xs[0] + W / 2 + 12}" y="{(top + 64 + bot) / 2 + 12}" font-size="9" class="muted">or keep the current model</text>',
+         f'<line x1="14" y1="262" x2="788" y2="262" stroke="{t["border"]}"/>',
+         '<text x="401" y="282" text-anchor="middle" font-size="10" class="muted">Measured on D1A-E4B as a coding-agent verifier, on repositories it never saw:</text>',
+         '<text x="401" y="298" text-anchor="middle" font-size="10" class="mono">recalibrating on outcomes: calibration error 0.63 → 0.04 · training on outcomes: AUROC 0.74 → 0.81</text>']
+    return 802, 314, "".join(b), "Self-learning: decide, log, outcome, recalibrate, retrain, gate, then promote the next version or keep the current one"
+
+
+for name, fn in (("layout", layout), ("model", model), ("forms", forms), ("serving", serving), ("learning", learning)):
     for theme in THEMES:
         w, h, body, label = fn(THEMES[theme])
         (OUT / f"{name}-{theme}.svg").write_text(svg(theme, w, h, body, label), encoding="utf-8")
