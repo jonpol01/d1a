@@ -110,6 +110,7 @@ def main():
     ap.add_argument("--run", default="JohnP1/d1a-e4b-mlx-q8", help="a repo takes its latest version (d1a.versions)"); ap.add_argument("--no-d1a", action="store_true")
     ap.add_argument("--issue-chars", type=int, default=3000); ap.add_argument("--patch-chars", type=int, default=6000); ap.add_argument("--tail-chars", type=int, default=3000)
     ap.add_argument("--split", choices=["all", "train", "dev", "test"], default="all", help="only runs whose repository is in this split (split_of)")
+    ap.add_argument("--mixed-only", action="store_true", help="with --per-issue: only issues whose runs include both outcomes (within-issue evaluation)")
     ap.add_argument("--per-issue", type=int, default=0, help="instead of a random sample: up to this many runs of every issue (for best_of_k.py)")
     ap.add_argument("--cut-step", type=int, default=0, help="anytime mode: score each run as it stood after this many agent actions (runs already over are left out)")
     ap.add_argument("--swegemma", help="score a competition-harness results directory (from_swegemma.py) instead of the public runs")
@@ -128,7 +129,14 @@ def main():
     if a.per_issue:
         by_issue = {}
         for r in rows: by_issue.setdefault(r["instance_id"], []).append(r)
-        rows = [r for iid in sorted(by_issue) for r in rng.sample(by_issue[iid], min(a.per_issue, len(by_issue[iid])))]
+        if a.mixed_only: by_issue = {k: v for k, v in by_issue.items() if 0 < sum(r["target"] for r in v) < len(v)}
+        rows = []
+        for iid in sorted(by_issue):   # with --mixed-only, keep both outcomes in the sample: one success and one failure first, then at random
+            runs = by_issue[iid]; rng.shuffle(runs)
+            if a.mixed_only:
+                keep = {id(next(x for x in runs if x["target"])), id(next(x for x in runs if not x["target"]))}
+                runs.sort(key=lambda r: id(r) not in keep)
+            rows += runs[: a.per_issue]
     else:
         rows = rng.sample(rows, min(a.n, len(rows)))
     for r in rows:   # one id per recorded run, the same in full and --cut-step outputs (budget_sim.py joins on it)
