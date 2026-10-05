@@ -235,11 +235,14 @@ def benchmark(path, run, suite, out):
     if (Path(out) / "report.json").exists():
         return
     arg = ["--data", str(ROOT / "evals/d1a" / suite)] if ":" in suite else ["--suite", str(ROOT / "evals" / suite)]
-    Path(out).mkdir(parents=True, exist_ok=True)
-    with open(Path(out) / "log.txt", "w", encoding="utf-8") as log:
-        code = subprocess.run([sys.executable, "-m", "d1a.benchmark", "--run", run, *arg, "--out", str(out)], cwd=path, stdout=log, stderr=subprocess.STDOUT).returncode
+    out = Path(out)
+    shutil.rmtree(out, ignore_errors=True)   # d1a.benchmark refuses an existing --out (an unfinished run left one)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    log = out.with_name(out.name + ".log")
+    with open(log, "w", encoding="utf-8") as f:
+        code = subprocess.run([sys.executable, "-m", "d1a.benchmark", "--run", run, *arg, "--out", str(out)], cwd=path, stdout=f, stderr=subprocess.STDOUT).returncode
     if code:
-        raise SystemExit(f"d1a.benchmark from {path} failed on {suite}; see {out}/log.txt")
+        raise SystemExit(f"d1a.benchmark from {path} failed on {suite}; see {log}")
 
 
 def suite_records(base_out, head_out):

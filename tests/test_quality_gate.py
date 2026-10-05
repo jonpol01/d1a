@@ -55,6 +55,22 @@ def test_a_suite_must_not_get_worse():
         "suite v7/decision-v7: acc 0.8000 -> 0.7900", "suite v7/decision-v7: ece 0.0500 -> 0.0600", "suite v7/decision-v7: nll 0.5000 -> 0.5100"]
 
 
+def test_a_suite_run_starts_from_an_empty_out(tmp_path, monkeypatch):
+    """d1a.benchmark refuses an existing --out: an unfinished run's folder is cleared, and the log lives beside it."""
+    out = tmp_path / "suites" / "v7_decision-v7" / "base"
+    out.mkdir(parents=True); (out / "rows.json").write_text("[]", encoding="utf-8")   # an unfinished earlier run
+
+    def fake_run(cmd, cwd, stdout, stderr):
+        target = Path(cmd[cmd.index("--out") + 1])
+        assert not target.exists()
+        target.mkdir(); (target / "report.json").write_text("{}", encoding="utf-8")
+        return type("Done", (), {"returncode": 0})()
+    monkeypatch.setattr(gate.subprocess, "run", fake_run)
+    gate.benchmark(tmp_path, "JohnP1/d1a-e2b@v0.2", "v7/decision-v7", out)
+    assert sorted(p.name for p in out.iterdir()) == ["report.json"] and out.with_name("base.log").exists()
+    gate.benchmark(tmp_path, "JohnP1/d1a-e2b@v0.2", "v7/decision-v7", out)   # a finished run is kept, not rerun
+
+
 def test_requests_from_files(tmp_path):
     (tmp_path / "demo.json").write_text(json.dumps([{"demo": "routing", "name": "en: Quick fact", "path": "/v1/systemone", "body": {"state": "s"}}]), encoding="utf-8")
     assert gate.demo_requests(None, tmp_path / "demo.json") == [("demo:routing", "en: Quick fact", "/v1/systemone", {"state": "s"})]
