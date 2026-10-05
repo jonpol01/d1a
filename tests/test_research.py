@@ -1,6 +1,5 @@
 # Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); dropped two checks bound to the removed experiments/ registrations; the tests of the removed Modal app and report scripts left; the contrastive generator's tests left with it (paired_flip and the held-out structure guard keep theirs); the d1a.metrics tests rewritten as tests/test_metrics.py; the d1a.benchmark tests rewritten as tests/test_benchmark.py; the d1a.suite tests rewritten as tests/test_suite.py.
-import random
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); dropped two checks bound to the removed experiments/ registrations; the tests of the removed Modal app and report scripts left; the contrastive generator's tests left with it (paired_flip and the held-out structure guard keep theirs); the d1a.metrics tests rewritten as tests/test_metrics.py; the d1a.benchmark tests rewritten as tests/test_benchmark.py; the d1a.suite tests rewritten as tests/test_suite.py; the d1a.data tests rewritten as tests/test_data.py.
 
 import pytest
 import torch
@@ -30,20 +29,6 @@ def frozen_request(i=0):
     return r
 
 
-def test_source_sampling_does_not_depend_on_other_sources(monkeypatch):
-    from d1a import data
-
-    def convert(split, n, rng):
-        value = rng.randrange(1000000)
-        rng.origins = [{"row": value, "row_sha256": str(value), "text_sha256": str(value)}]
-        return [choice_request()]
-
-    monkeypatch.setattr(data, "SOURCES", {"agnews": (convert, "train", "test"), "mnli": (convert, "train", "test")})
-    alone = data.build(1, only=["mnli"])
-    together = data.build(1)
-    assert alone[0] == next(r for r in together if r["_meta"]["source"] == "mnli")
-
-
 def test_strict_encoding_rejects_truncation():
     from types import SimpleNamespace
     from d1a.model import encode
@@ -59,13 +44,6 @@ def test_strict_encoding_rejects_truncation():
     assert encode(Tokenizer(), rec, max_state=4)["state_truncated"]
     with pytest.raises(ValueError, match="state exceeds"):
         encode(Tokenizer(), rec, max_state=4, strict=True)
-
-
-def test_api_payload_excludes_answers_and_metadata():
-    from d1a.data import api_request
-    clean = api_request(frozen_request())
-    assert set(clean) == {"state", "questions"}
-    assert set(clean["questions"]["reason"]) == {"type", "instructions", "criteria"}
 
 
 def test_batched_mask_matches_single_and_pads_are_invisible():
@@ -94,19 +72,6 @@ def test_uneven_microbatches_have_equal_record_weight():
     assert gradients[0] == gradients[2]
     assert accumulation_records(10, 3, 3, 2) == 9
     assert accumulation_records(10, 3, 3, 3) == 1
-
-def test_none_pair_is_minimal_and_relabelled():
-    from d1a.data import none_pair, materialize
-    req = {"state": "The shoes are the wrong size.", "questions": {"reason": {"type": "choice", "instructions": "Why?",
-           "criteria": {"size": "Wrong size", "damage": "Damaged", "color": "Wrong color"}, "label": "size", "src": "t"}}}
-    present, absent = none_pair(req, random.Random(3))
-    pk, ak = list(present["questions"]["reason"]["criteria"]), list(absent["questions"]["reason"]["criteria"])
-    assert len(pk) == 4 and present["questions"]["reason"]["label"] == "size"
-    assert [k for k in pk if k != "size"] == ak                     # same order, true option removed, nothing else moved
-    assert absent["questions"]["reason"]["label"] == ak[-1] or absent["questions"]["reason"]["label"] in ak
-    assert absent["questions"]["reason"]["label"] not in req["questions"]["reason"]["criteria"]
-    materialize(present); materialize(absent)
-    assert none_pair({"state": "s", "questions": {"q": {"type": "noul", "instructions": "i", "label": True, "src": "t"}}}, random.Random(0)) == []
 
 def test_remote_predictor_maps_system_one_answers_and_retries(monkeypatch):
     import io, json
@@ -156,12 +121,3 @@ def test_rotation_averaging_cancels_a_position_bias():
     assert one["probabilities"]["n"] == pytest.approx(biased(record)["probabilities"]["n"])   # noul untouched
     with pytest.raises(ValueError):
         RotationAveraged(biased, 1)
-
-
-def test_none_pair_leaves_soft_target_questions_alone():
-    import random
-    from d1a.data import none_pair
-    q = {"type": "choice", "criteria": {"a": None, "b": None, "c": None}, "label": "a", "src": "s"}
-    req = {"state": "x", "questions": {"q": q}}
-    assert len(none_pair(req, random.Random(0))) == 2
-    assert none_pair({"state": "x", "questions": {"q": {**q, "target": {"a": 0.5, "b": 0.5}}}}, random.Random(0)) == []
