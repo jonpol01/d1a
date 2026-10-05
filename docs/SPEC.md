@@ -99,8 +99,9 @@ From a question's probabilities p (option order):
 - `choice`: `{"type": "choice", "choice": the key of the first largest p, "confidence": (max p − 1/K) / (1 − 1/K)
   (1 when K = 1), "probabilities": {key: p}}`.
 - `score`: `{"type": "score", "score": Σ level · p, "legend": {index: level text}, "probabilities": {index: p},
-  "confidence": 1 − E|level − mode| / D, floored at 0}`, where mode is the first most likely level and D is that expected
-  distance under a uniform distribution measured from the centre, (L − 1)/2 (1 when L = 1).
+  "confidence": 1 − E|level − mode| / D, floored at 0}`, where mode is the first most likely level and D is the mean
+  distance of the L levels from the centre, (1/L) · Σ |level − (L − 1)/2| (2/3 for three levels; the confidence is 1 when
+  L = 1). For example, three levels with p = [0.5, 0.5, 0]: mode 0, E|level − mode| = 0.5, confidence 1 − 0.5 / (2/3) = 0.25.
 
 Both confidences read p normalised to sum 1 (all zeros as uniform). Every reported number is rounded to 4 decimals.
 The response holds `model` (the request's), `answers` (question id → answer), `usage` (`input_tokens`: the packed sequence's length; `output_tokens`: the tokens of the
