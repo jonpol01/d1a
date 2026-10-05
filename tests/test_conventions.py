@@ -16,7 +16,7 @@ SCANNED = ("d1a", "scripts", "tests")
 
 RULES = [
     ("head.pt is read and written through d1a.checkpoint (Meta, read_meta, write_meta)",
-     r"torch\.(load|save)\([^\n]*head\.pt", {"d1a/checkpoint.py"}),
+     r"torch\.(load|save)\([^\n]*head\.pt", {"d1a/checkpoint.py", "tests/test_checkpoint.py"}),   # the test writes a hostile head.pt by hand
     ("D1A_DTYPE/D1A_MERGE/D1A_ATTN/D1A_LORA_SCALE/D1A_TEMPERATURE/D1A_BACKEND/D1A_CUDA_GRAPHS are read only by LoadOptions.from_env",
      r"environ(\.get)?\(?\[?\s*\"D1A_(DTYPE|MERGE|ATTN|LORA_SCALE|TEMPERATURE|BACKEND|CUDA_GRAPHS)\"", {"d1a/checkpoint.py"}),
     ("whether a checkpoint is a LoRA adapter or full weights, and where its shards are, is d1a.checkpoint.Checkpoint.full / shards (the loader rule)",

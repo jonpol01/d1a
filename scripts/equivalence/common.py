@@ -35,6 +35,8 @@ def exact(value):
     """A comparable form of a result that keeps what == would forgive: types, float bits, key order, array dtypes."""
     if isinstance(value, np.ndarray):
         return ("ndarray", value.dtype.str, exact(value.tolist()))
+    if type(value).__module__.startswith("torch") and hasattr(value, "tolist") and hasattr(value, "dtype"):   # a torch tensor
+        return ("tensor", str(value.dtype), tuple(value.shape), exact(value.float().tolist() if value.is_floating_point() else value.tolist()))
     if isinstance(value, dict):
         return ("dict", [(exact(k), exact(v)) for k, v in value.items()])
     if isinstance(value, (list, tuple)):
