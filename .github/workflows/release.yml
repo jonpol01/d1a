@@ -20,9 +20,15 @@ jobs:
           enable-cache: true
       - run: python3 scripts/release_notes.py --check "$GITHUB_REF_NAME"
       - run: uv sync --extra serve --extra media
-      # the same unit tests as CI: ci.yml's UNIT_TESTS is the one list (a conventions test checks that no test file is listed here)
-      - run: |
-          uv run python -m pytest $(sed -n 's/^ *UNIT_TESTS: *//p' .github/workflows/ci.yml) -q
+      # the Hugging Face files the unit tests read (pinned tokenizers), kept on GitHub's cache between runs: faster, and a
+      # slow or unreachable Hub does not fail CI
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: huggingface-${{ runner.os }}-${{ hashFiles('tests/**/*.py') }}
+          restore-keys: huggingface-${{ runner.os }}-
+      # the same unit tests as CI: every test file except tests/conftest.py's OUTSIDE_UNIT_TESTS
+      - run: uv run python -m pytest tests --unit -q
       - run: uv build
       - run: python3 scripts/release_notes.py "$GITHUB_REF_NAME" > release-notes.md
       - run: gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --title "D1A ${GITHUB_REF_NAME#v}" --notes-file release-notes.md

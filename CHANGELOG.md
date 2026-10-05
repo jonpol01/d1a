@@ -24,6 +24,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- CI runs every test file (`pytest tests --unit`) except the few `tests/conftest.py`'s `OUTSIDE_UNIT_TESTS` lists with
+  why, instead of a list naming each file: a new test file runs without being listed, and two pull requests adding test
+  files no longer conflict on that list. The release runs the same command. CI keeps the Hugging Face cache (the pinned
+  tokenizers the tests read) between runs. `docs/UPSTREAM.md` lists rewritten files one per line.
 - `d1a/api.py` is rewritten in D1A's own code, no longer derived from Kev. The schema, the text the model reads, the
   answers and the validation errors are unchanged: they were checked identical to the previous version on 166,718
   generated requests, distributions and dates. Its tests are rewritten too, as `tests/test_system_one.py`.

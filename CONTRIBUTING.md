@@ -1,6 +1,6 @@
 # Contributing to D1A
 
-Run the unit suites listed in `.github/workflows/ci.yml` and `python scripts/check_license.py` before opening a pull
+Run the unit tests (`uv run python -m pytest tests --unit -q`, as CI does) and `python scripts/check_license.py` before opening a pull
 request. Contributions are accepted under the Apache License 2.0.
 
 ## License and provenance
