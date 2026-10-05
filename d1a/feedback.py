@@ -19,13 +19,18 @@ The loop has three steps, cheapest first:
 2. retrain: records() turns resolved decisions into labelled requests for a small LoRA update (d1a.train --data).
 3. promote: gate() compares a candidate with the current model on held-out outcomes and promotes it only when its log
    loss is better with a bootstrap interval clear of zero and no frozen suite regressed beyond the tolerance.
+   `python -m d1a.feedback promote <log> --calibrator <file>` runs this for the calibrator on a live log: it fits on
+   part of the outcomes (split by meta["group"], e.g. a pull request), gates each question on the rest, and rewrites
+   the file d1a.serve reads only for the questions that pass.
 The log is append-only JSONL (one "decision" or "outcome" event per line), so it can be written by several processes and
 replayed. An outcome may name its source in meta["src"] (e.g. "human" for a person's correction, "reviewer" for another
 model's judgment); each question keeps the label from the most trusted source (PREFER), then the latest.
 """
 import argparse
+import hashlib
 import json
 import math
+import os
 import time
 import uuid
 from pathlib import Path
@@ -88,7 +93,8 @@ class FeedbackLog:
             labels, label_src = {}, {}
             for o in sorted(outcomes[i], key=lambda o: (o.get("meta", {}).get("src") in PREFER, o["ts"])):   # trusted and latest last
                 for qid, label in o["labels"].items(): labels[qid], label_src[qid] = label, o.get("meta", {}).get("src")
-            out.append({**d, "labels": labels, "label_src": label_src, "outcome_ts": max(o["ts"] for o in outcomes[i])})
+            group = next((o["meta"]["group"] for o in reversed(outcomes[i]) if o.get("meta", {}).get("group")), None)
+            out.append({**d, "labels": labels, "label_src": label_src, "group": group, "outcome_ts": max(o["ts"] for o in outcomes[i])})
         return out
 
     def pending(self):
@@ -235,6 +241,43 @@ def gate_choice(labels, probs_candidate, probs_incumbent, groups=None, suite_del
     return _gate(d, groups, suite_deltas, tolerance, n, seed)
 
 
+def held_out(group, share=0.3):
+    """Whether a group (e.g. one pull request: all its decisions together) is on the held-out side; fixed by its name."""
+    return int(hashlib.sha256(str(group).encode()).hexdigest()[:8], 16) / 0xFFFFFFFF < share
+
+
+def _group(d): return d.get("group") or d["id"]
+
+
+def split(resolved, share=0.3):
+    """(fit, held out): each decision goes with its group (outcome meta["group"], else itself), so no group is on both sides."""
+    return [d for d in resolved if not held_out(_group(d), share)], [d for d in resolved if held_out(_group(d), share)]
+
+
+def promote(resolved, current=None, share=0.3, min_outcomes=20, **gate_kw):
+    """The promotion gate run on a live log. Each decision's group (its outcome's meta["group"], else the decision itself)
+    goes to the fit or the held-out side by held_out(); a calibrator fitted on the fit side replaces the current one for a
+    question only if it passes gate()/gate_choice() on the held-out side against the current calibrator (or the raw answers).
+    -> (the calibrator to serve, {question: report}); questions that fail keep the current parameters."""
+    current = current or OutcomeCalibrator()
+    fit, test = split(resolved, share)
+    cand = OutcomeCalibrator().fit(fit, min_outcomes)
+    out, report = OutcomeCalibrator(current.params), {}
+    for qid, params in cand.params.items():
+        if isinstance(params, dict):
+            rows = [d for d in test if _choice_probs(d["answers"].get(qid)) is not None and d["labels"].get(qid) in _choice_probs(d["answers"][qid])]
+            raw = [_choice_probs(d["answers"][qid]) for d in rows]; labels = [d["labels"][qid] for d in rows]
+            g = gate_choice(labels, [cand.probs(qid, p) for p in raw], [current.probs(qid, p) for p in raw], [_group(d) for d in rows], **gate_kw) if rows else None
+        else:
+            rows = [d for d in test if _p_true(d["answers"].get(qid)) is not None and qid in d["labels"]]
+            y = [bool(d["labels"][qid]) for d in rows]; p = [_p_true(d["answers"][qid]) for d in rows]
+            g = gate(y, [cand.p(qid, x) for x in p], [current.p(qid, x) for x in p], [_group(d) for d in rows], **gate_kw) if rows else None
+        ok = bool(g and g["promote"])
+        if ok: out.params[qid] = params
+        report[qid] = {"promote": ok, "fit": len(fit), "held_out": len(rows), **({k: g[k] for k in ("delta_log_loss", "ci", "reasons")} if g else {"reasons": ["no held-out outcomes"]})}
+    return out, report
+
+
 def _gate(d, groups, suite_deltas, tolerance, n, seed):
     groups = np.arange(len(d)) if groups is None else np.asarray(groups)
     keys = np.unique(groups); idx = {g: np.flatnonzero(groups == g) for g in keys}; rng = np.random.default_rng(seed)
@@ -252,7 +295,10 @@ def main(argv=None):
     s = sub.add_parser("status"); s.add_argument("log")
     r = sub.add_parser("records"); r.add_argument("log"); r.add_argument("--out", required=True)
     c = sub.add_parser("calibrate"); c.add_argument("log"); c.add_argument("--out", required=True); c.add_argument("--min-outcomes", type=int, default=20)
-    for x in (s, r, c): x.add_argument("--src", help="only outcomes from this source (meta src, e.g. human or reviewer)")
+    pr = sub.add_parser("promote", help="fit on part of the log, gate on the rest, and update the served calibrator only where it passes")
+    pr.add_argument("log"); pr.add_argument("--calibrator", required=True, help="the file d1a.serve's D1A_OUTCOME_CALIBRATOR reads")
+    pr.add_argument("--min-outcomes", type=int, default=20); pr.add_argument("--held-out", type=float, default=0.3)
+    for x in (s, r, c, pr): x.add_argument("--src", help="only outcomes from this source (meta src, e.g. human or reviewer)")
     a = ap.parse_args(argv)
     log = FeedbackLog(a.log); res = log.resolved(a.src)
     if a.cmd == "status":
@@ -266,6 +312,12 @@ def main(argv=None):
     elif a.cmd == "records":
         recs = records(res, a.src or "feedback"); Path(a.out).write_text("".join(json.dumps(x) + "\n" for x in recs), encoding="utf-8")
         print(f"wrote {len(recs)} labelled requests to {a.out}")
+    elif a.cmd == "promote":
+        path = Path(a.calibrator); current = OutcomeCalibrator.load(path) if path.exists() else None
+        cal, report = promote(res, current, a.held_out, a.min_outcomes)
+        if any(r["promote"] for r in report.values()):   # written whole and renamed into place: the server never reads half a file
+            tmp = path.with_name(path.name + ".tmp"); cal.save(tmp); os.replace(tmp, path)
+        print(json.dumps({"promoted": sorted(q for q, r in report.items() if r["promote"]), "report": report}))
     else:
         cal = OutcomeCalibrator().fit(res, a.min_outcomes); cal.save(a.out)
         print(f"wrote {a.out}: " + ", ".join(f"{q} s={v['s']:.3f} (n={v['n']})" if isinstance(v, dict) else f"{q} a={v[0]:.3f} b={v[1]:+.3f} (n={v[2]})"

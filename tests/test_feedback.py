@@ -1,7 +1,8 @@
+import json
 import numpy as np
 
 from d1a.data import materialize
-from d1a.feedback import FeedbackLog, OutcomeCalibrator, choice_log_loss, choice_pairs, gate, gate_choice, log_loss, pairs, records
+from d1a.feedback import FeedbackLog, OutcomeCalibrator, choice_log_loss, choice_pairs, gate, gate_choice, held_out, log_loss, main, pairs, promote, records, split
 
 Q = {"resolved": {"type": "noul", "instr": "Does the patch fix the issue?", "criteria": {"true": "fixes it", "false": "does not"}}}
 
@@ -67,6 +68,33 @@ def test_choice_temperature_fixes_overconfidence_keeps_the_choice_and_passes_the
     assert OutcomeCalibrator.load(tmp_path / "c.json").apply(held[0]["answers"]) == cal.apply(held[0]["answers"])
 
 
+def test_promote_updates_the_served_calibrator_only_where_held_out_groups_confirm_it(tmp_path, capsys):
+    """`d1a.feedback promote` on a live log: whole groups (two decisions per pull request) go to one side; a question twice
+    as sure as it should be gets a calibrator that passes the gate on the held-out groups and is written for the server,
+    while a question that is already calibrated keeps no parameters, and a log with nothing to promote leaves the file alone."""
+    log = FeedbackLog(tmp_path / "f.jsonl"); rng = np.random.default_rng(3); opts = list(CQ["blast"]["criteria"])
+    Q2 = {**CQ, "type": {"type": "choice", "instructions": "Change type.", "criteria": {"bug": "fix", "docs": "docs", "feature": "new"}}}
+    for i in range(1000):
+        z = rng.normal(0, 1.5, 4); truth = np.exp(z) / np.exp(z).sum(); sure = np.exp(2 * z) / np.exp(2 * z).sum()
+        zt = rng.normal(0, 1.5, 3); pt = np.exp(zt) / np.exp(zt).sum()            # "type" is calibrated as it is
+        did = log.decision(f"pr {i // 2}", Q2, {"blast": {"probabilities": dict(zip(opts, map(float, sure)))},
+                                                 "type": {"probabilities": dict(zip(["bug", "docs", "feature"], map(float, pt)))}}, run="r@v0.4")
+        log.outcome(did, {"blast": str(rng.choice(opts, p=truth)), "type": str(rng.choice(["bug", "docs", "feature"], p=pt))},
+                    {"src": "reviewer", "group": f"pr{i // 2}"})
+    res = log.resolved()
+    fit, test = split(res)
+    assert {d["group"] for d in fit}.isdisjoint({d["group"] for d in test}) and len(fit) + len(test) == 1000 and 200 < len(test) < 400
+    cal, report = promote(res)
+    assert report["blast"]["promote"] and "blast" in cal.params and abs(cal.params["blast"]["s"] - 0.5) < 0.12
+    assert not report.get("type", {}).get("promote") and "type" not in cal.params
+    path = tmp_path / "served.json"
+    main(["promote", str(tmp_path / "f.jsonl"), "--calibrator", str(path)])
+    assert json.loads(capsys.readouterr().out)["promoted"] == ["blast"] and OutcomeCalibrator.load(path).params["blast"] == cal.params["blast"]
+    empty = FeedbackLog(tmp_path / "g.jsonl"); empty.outcome(empty.decision("s", CQ, {"blast": {"probabilities": {o: 0.25 for o in opts}}}, run="r"), {"blast": "broad"})
+    main(["promote", str(tmp_path / "g.jsonl"), "--calibrator", str(tmp_path / "untouched.json")])
+    assert not (tmp_path / "untouched.json").exists()
+
+
 def test_a_human_label_beats_a_later_reviewer_label_per_question(tmp_path):
     """Outcomes merge per question: a person's label wins over another model's whatever arrived last, the reviewer's still
     fills the questions the person left alone, records() carry each label's source, and src= keeps one source only."""
@@ -103,10 +131,10 @@ def test_serve_logs_decisions_accepts_outcomes_and_applies_a_reloaded_calibrator
     expected = round(OutcomeCalibrator({"resolved": [1.0, -2.0, 50]}).p("resolved", 0.8), 4)
     assert body["answers"]["resolved"]["noul"] == expected < 0.8 and body["decision_id"]
     with TestClient(serve.app) as client:
-        assert client.post("/v1/feedback", json={"decision_id": body["decision_id"], "labels": {"resolved": False}, "src": "human"}).json() == {"ok": True}
+        assert client.post("/v1/feedback", json={"decision_id": body["decision_id"], "labels": {"resolved": False}, "src": "human", "group": "psf/requests#1"}).json() == {"ok": True}
     (d,) = serve.LEARNING.log.resolved()
     assert d["id"] == body["decision_id"] and d["labels"] == {"resolved": False} and d["run"] == "JohnP1/d1a-e4b-mlx-q8@v0.4"
-    assert d["label_src"] == {"resolved": "human"}
+    assert d["label_src"] == {"resolved": "human"} and d["group"] == "psf/requests#1"
     assert d["answers"]["resolved"]["noul"] == 0.8 and d["meta"]["served"]["resolved"]["noul"] == expected   # the model's P is logged, the served one beside it
     assert d["questions"]["resolved"]["type"] == "noul"
     for i in range(30):                                                        # recalibrating on the live log fits the model's P, not the served one
