@@ -101,6 +101,16 @@ python -m d1a.feedback calibrate runs/feedback/verifier.jsonl --out cal.json    
 python -m d1a.feedback records runs/feedback/verifier.jsonl --out feedback.jsonl # data for a small LoRA update
 ```
 
+**As a service.** `d1a.serve` runs the loop for any client: with `D1A_FEEDBACK_LOG` set, every answer carries a `decision_id` and is logged, and `POST /v1/feedback` records what actually happened; with `D1A_OUTCOME_CALIBRATOR` set, yes/no answers go through the latest calibrator, re-read whenever the file changes, so recalibrating needs no restart.
+
+```bash
+D1A_FEEDBACK_LOG=runs/feedback/verifier.jsonl D1A_OUTCOME_CALIBRATOR=runs/feedback/cal.json \
+  uv run --extra serve python -m d1a.serve --run JohnP1/d1a-e4b-mlx-q8@v0.4 --port 8009
+curl -s localhost:8009/v1/feedback -H 'content-type: application/json' \
+  -d '{"decision_id": "<from the answer>", "labels": {"resolved": true}}'
+python -m d1a.feedback calibrate runs/feedback/verifier.jsonl --out runs/feedback/cal.json   # picked up on the next request
+```
+
 `gate()` decides whether the retrained candidate replaces the current model: lower held-out log loss with a 95% bootstrap interval (over repositories, for example) entirely below zero, and no frozen suite more than a point worse. Otherwise the current model stays.
 
 **Measured first on a coding-agent verifier**: D1A-E4B reads an issue, an agent's patch and the end of its run, and answers "does this patch resolve the issue?", tested on 921 agent runs from 83 repositories it never saw (public SWE-agent runs, [nebius/SWE-agent-trajectories](https://huggingface.co/datasets/nebius/SWE-agent-trajectories), CC-BY-4.0):
