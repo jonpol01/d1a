@@ -1,0 +1,8765 @@
+{
+ "format": "d1a-golden",
+ "version": 1,
+ "run": "tests/golden/tiny-gemma4/checkpoint",
+ "base": "tests/golden/tiny-gemma4/base",
+ "backend": "torch",
+ "dtype": "float32",
+ "device": "cpu",
+ "d1a_commit": "e44f9000e53515b285e840834b97ded81acad16c",
+ "torch": "2.13.0",
+ "platform": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
+ "records": [
+  {
+   "id": "tiny:0",
+   "kind": "tiny",
+   "request": {
+    "state": "billing it was",
+    "questions": {
+     "q0": {
+      "type": "choice",
+      "instructions": "customer arrived",
+      "criteria": {
+       "the": null,
+       "which": null,
+       "wrong": "help",
+       "box": null,
+       "team": null,
+       "size": "late"
+      }
+     },
+     "q1": {
+      "type": "choice",
+      "instructions": "late",
+      "criteria": {
+       "it": "yes help which",
+       "twice": null,
+       "shipping": "shipping charged customer billing"
+      }
+     },
+     "q2": {
+      "type": "noul",
+      "instructions": "customer yes charged",
+      "criteria": {
+       "true": "please",
+       "false": "bad help order"
+      }
+     },
+     "q3": {
+      "type": "score",
+      "instructions": "help was",
+      "criteria": [
+       "refund how",
+       "shipping was again",
+       "which",
+       "again"
+      ]
+     }
+    }
+   },
+   "input": {
+    "state": "billing it was",
+    "questions": [
+     {
+      "instr": "customer arrived",
+      "options": [
+       "the",
+       "which",
+       "wrong: help",
+       "box",
+       "team",
+       "size: late"
+      ]
+     },
+     {
+      "instr": "late",
+      "options": [
+       "it: yes help which",
+       "twice",
+       "shipping: shipping charged customer billing"
+      ]
+     },
+     {
+      "instr": "customer yes charged",
+      "options": [
+       "no: bad help order",
+       "yes: please"
+      ]
+     },
+     {
+      "instr": "help was",
+      "options": [
+       "refund how",
+       "shipping was again",
+       "which",
+       "again"
+      ]
+     }
+    ]
+   },
+   "ids": [
+    2,
+    4,
+    16,
+    32,
+    33,
+    5,
+    10,
+    28,
+    6,
+    9,
+    7,
+    6,
+    14,
+    7,
+    6,
+    29,
+    1,
+    36,
+    7,
+    6,
+    27,
+    7,
+    6,
+    15,
+    7,
+    6,
+    30,
+    1,
+    25,
+    7,
+    8,
+    5,
+    25,
+    6,
+    32,
+    1,
+    23,
+    36,
+    14,
+    7,
+    6,
+    13,
+    7,
+    6,
+    17,
+    1,
+    17,
+    12,
+    10,
+    16,
+    7,
+    8,
+    5,
+    10,
+    23,
+    12,
+    6,
+    22,
+    1,
+    21,
+    36,
+    24,
+    7,
+    6,
+    23,
+    1,
+    35,
+    7,
+    8,
+    5,
+    36,
+    33,
+    6,
+    18,
+    20,
+    7,
+    6,
+    17,
+    33,
+    34,
+    7,
+    6,
+    14,
+    7,
+    6,
+    34,
+    7,
+    8
+   ],
+   "questions": [
+    {
+     "qid": "q0",
+     "type": "choice",
+     "keys": [
+      "the",
+      "which",
+      "wrong",
+      "box",
+      "team",
+      "size"
+     ],
+     "label": null,
+     "probs": [
+      0.0889831930398941,
+      0.1586584448814392,
+      0.1833067536354065,
+      0.1856500208377838,
+      0.23357242345809937,
+      0.14982911944389343
+     ]
+    },
+    {
+     "qid": "q1",
+     "type": "choice",
+     "keys": [
+      "it",
+      "twice",
+      "shipping"
+     ],
+     "label": null,
+     "probs": [
+      0.35317716002464294,
+      0.33788901567459106,
+      0.30893388390541077
+     ]
+    },
+    {
+     "qid": "q2",
+     "type": "noul",
+     "keys": [
+      "false",
+      "true"
+     ],
+     "label": null,
+     "probs": [
+      0.48441222310066223,
+      0.5155876874923706
+     ]
+    },
+    {
+     "qid": "q3",
+     "type": "score",
+     "keys": [
+      "0",
+      "1",
+      "2",
+      "3"
+     ],
+     "label": null,
+     "probs": [
+      0.25381016731262207,
+      0.2917209267616272,
+      0.18767575919628143,
+      0.2667931616306305
+     ]
+    }
+   ]
+  },
+  {
+   "id": "tiny:1",
+   "kind": "tiny",
+   "request": {
+    "state": "lost help the again angry please shipping shipping today was order shipping lost angry angry which it please box size refund order is customer yes box today lost please charged",
+    "questions": {
+     "q0": {
+      "type": "choice",
+      "instructions": "it late again",
+      "criteria": {
+       "is": null,
+       "shipping": "customer wrong shipping again",
+       "damaged": "today",
+       "wrong": null,
+       "which": null,
+       "help": "angry box box",
+       "again": null
+      }
+     },
+     "q1": {
+      "type": "score",
+      "instructions": "which arrived again yes wrong",
+      "criteria": [
+       "damaged shipping",
+       "today late today",
+       "which",
+       "size"
+      ]
+     },
+     "q2": {
+      "type": "noul",
+      "instructions": "wrong arrived which"
+     }
+    }
+   },
+   "input": {
+    "state": "lost help the again angry please shipping shipping today was order shipping lost angry angry which it please box size refund order is customer yes box today lost please charged",
+    "questions": [
+     {
+      "instr": "it late again",
+      "options": [
+       "is",
+       "shipping: customer wrong shipping again",
+       "damaged: today",
+       "wrong",
+       "which",
+       "help: angry box box",
+       "again"
+      ]
+     },
+     {
+      "instr": "which arrived again yes wrong",
+      "options": [
+       "damaged shipping",
+       "today late today",
+       "which",
+       "size"
+      ]
+     },
+     {
+      "instr": "wrong arrived which",
+      "options": [
+       "no",
+       "yes"
+      ]
+     }
+    ]
+   },
+   "ids": [
+    2,
+    4,
+    26,
+    36,
+    9,
+    34,
+    19,
+    35,
+    17,
+    17,
+    37,
+    33,
+    24,
+    17,
+    26,
+    19,
+    19,
+    14,
+    32,
+    35,
+    27,
+    30,
+    18,
+    24,
+    11,
+    10,
+    23,
+    27,
+    37,
+    26,
+    35,
+    12,
+    5,
+    32,
+    25,
+    34,
+    6,
+    11,
+    7,
+    6,
+    17,
+    1,
+    10,
+    29,
+    17,
+    34,
+    7,
+    6,
+    31,
+    1,
+    37,
+    7,
+    6,
+    29,
+    7,
+    6,
+    14,
+    7,
+    6,
+    36,
+    1,
+    19,
+    27,
+    27,
+    7,
+    6,
+    34,
+    7,
+    8,
+    5,
+    14,
+    28,
+    34,
+    23,
+    29,
+    6,
+    31,
+    17,
+    7,
+    6,
+    37,
+    25,
+    37,
+    7,
+    6,
+    14,
+    7,
+    6,
+    30,
+    7,
+    8,
+    5,
+    29,
+    28,
+    14,
+    6,
+    22,
+    7,
+    6,
+    23,
+    7,
+    8
+   ],
+   "questions": [
+    {
+     "qid": "q0",
+     "type": "choice",
+     "keys": [
+      "is",
+      "shipping",
+      "damaged",
+      "wrong",
+      "which",
+      "help",
+      "again"
+     ],
+     "label": null,
+     "probs": [
+      0.12653914093971252,
+      0.1653987318277359,
+      0.20486600697040558,
+      0.13006870448589325,
+      0.12576135993003845,
+      0.1036343201994896,
+      0.1437317579984665
+     ]
+    },
+    {
+     "qid": "q1",
+     "type": "score",
+     "keys": [
+      "0",
+      "1",
+      "2",
+      "3"
+     ],
+     "label": null,
+     "probs": [
+      0.3310128450393677,
+      0.2567901611328125,
+      0.22809362411499023,
+      0.18410329520702362
+     ]
+    },
+    {
+     "qid": "q2",
+     "type": "noul",
+     "keys": [
+      "false",
+      "true"
+     ],
+     "label": null,
+     "probs": [
+      0.6475858092308044,
+      0.35241416096687317
+     ]
+    }
+   ]
+  },
+  {
+   "id": "tiny:2",
+   "kind": "tiny",
+   "request": {
+    "state": "how late shipping",
+    "questions": {
+     "q0": {
+      "type": "choice",
+      "instructions": "charged box bad today twice",
+      "criteria": {
+       "how": null,
+       "no": null,
+       "team": null,
+       "refund": "damaged team"
+      }
+     },
+     "q1": {
+      "type": "noul",
+      "instructions": "bad",
+      "criteria": {
+       "true": "size",
+       "false": "billing lost"
+      }
+     },
+     "q2": {
+      "type": "choice",
+      "instructions": "damaged team please refund box",
+      "criteria": {
+       "yes": "how please",
+       "no": "refund order the",
+       "lost": "lost charged",
+       "how": "again how",
+       "refund": null
+      }
+     },
+     "q3": {
+      "type": "noul",
+      "instructions": "refund yes"
+     }
+    }
+   },
+   "input": {
+    "state": "how late shipping",
+    "questions": [
+     {
+      "instr": "charged box bad today twice",
+      "options": [
+       "how",
+       "no",
+       "team",
+       "refund: damaged team"
+      ]
+     },
+     {
+      "instr": "bad",
+      "options": [
+       "no: billing lost",
+       "yes: size"
+      ]
+     },
+     {
+      "instr": "damaged team please refund box",
+      "options": [
+       "yes: how please",
+       "no: refund order the",
+       "lost: lost charged",
+       "how: again how",
+       "refund"
+      ]
+     },
+     {
+      "instr": "refund yes",
+      "options": [
+       "no",
+       "yes"
+      ]
+     }
+    ]
+   },
+   "ids": [
+    2,
+    4,
+    20,
+    25,
+    17,
+    5,
+    12,
+    27,
+    21,
+    37,
+    13,
+    6,
+    20,
+    7,
+    6,
+    22,
+    7,
+    6,
+    15,
+    7,
+    6,
+    18,
+    1,
+    31,
+    15,
+    7,
+    8,
+    5,
+    21,
+    6,
+    22,
+    1,
+    16,
+    26,
+    7,
+    6,
+    23,
+    1,
+    30,
+    7,
+    8,
+    5,
+    31,
+    15,
+    35,
+    18,
+    27,
+    6,
+    23,
+    1,
+    20,
+    35,
+    7,
+    6,
+    22,
+    1,
+    18,
+    24,
+    9,
+    7,
+    6,
+    26,
+    1,
+    26,
+    12,
+    7,
+    6,
+    20,
+    1,
+    34,
+    20,
+    7,
+    6,
+    18,
+    7,
+    8,
+    5,
+    18,
+    23,
+    6,
+    22,
+    7,
+    6,
+    23,
+    7,
+    8
+   ],
+   "questions": [
+    {
+     "qid": "q0",
+     "type": "choice",
+     "keys": [
+      "how",
+      "no",
+      "team",
+      "refund"
+     ],
+     "label": null,
+     "probs": [
+      0.3407115936279297,
+      0.2981969714164734,
+      0.23919859528541565,
+      0.12189283967018127
+     ]
+    },
+    {
+     "qid": "q1",
+     "type": "noul",
+     "keys": [
+      "false",
+      "true"
+     ],
+     "label": null,
+     "probs": [
+      0.4579971730709076,
+      0.5420029163360596
+     ]
+    },
+    {
+     "qid": "q2",
+     "type": "choice",
+     "keys": [
+      "yes",
+      "no",
+      "lost",
+      "how",
+      "refund"
+     ],
+     "label": null,
+     "probs": [
+      0.15805098414421082,
+      0.286422461271286,
+      0.22031399607658386,
+      0.11051628738641739,
+      0.22469618916511536
+     ]
+    },
+    {
+     "qid": "q3",
+     "type": "noul",
+     "keys": [
+      "false",
+      "true"
+     ],
+     "label": null,
+     "probs": [
+      0.6337732672691345,
+      0.3662266731262207
+     ]
+    }
+   ]
+  },
+  {
+   "id": "tiny:3",
+   "kind": "tiny",
+   "request": {
+    "state": "charged help help",
+    "questions": {
+     "q0": {
+      "type": "choice",
+      "instructions": "billing was late the was late",
+      "criteria": {
+       "no": "charged shipping lost",
+       "help": null,
+       "is": null,
+       "was": "size",
+       "how": null,
+       "team": "how today bad"
+      }
+     },
+     "q1": {
+      "type": "noul",
+      "instructions": "refund which wrong size wrong"
+     },
+     "q2": {
+      "type": "choice",
+      "instructions": "charged",
+      "criteria": {
+       "order": null
+      }
+     },
+     "q3": {
+      "type": "choice",
+      "instructions": "bad yes team which",
+      "criteria": {
+       "customer": null,
+       "damaged": "was box charged team",
+       "please": "charged"
+      }
+     }
+    }
+   },
+   "input": {
+    "state": "charged help help",
+    "questions": [
+     {
+      "instr": "billing was late the was late",
+      "options": [
+       "no: charged shipping lost",
+       "help",
+       "is",
+       "was: size",
+       "how",
+       "team: how today bad"
+      ]
+     },
+     {
+      "instr": "refund which wrong size wrong",
+      "options": [
+       "no",
+       "yes"
+      ]
+     },
+     {
+      "instr": "charged",
+      "options": [
+       "order"
+      ]
+     },
+     {
+      "instr": "bad yes team which",
+      "options": [
+       "customer",
+       "damaged: was box charged team",
+       "please: charged"
+      ]
+     }
+    ]
+   },
+   "ids": [
+    2,
+    4,
+    12,
+    36,
+    36,
+    5,
+    16,
+    33,
+    25,
+    9,
+    33,
+    25,
+    6,
+    22,
+    1,
+    12,
+    17,
+    26,
+    7,
+    6,
+    36,
+    7,
+    6,
+    11,
+    7,
+    6,
+    33,
+    1,
+    30,
+    7,
+    6,
+    20,
+    7,
+    6,
+    15,
+    1,
+    20,
+    37,
+    21,
+    7,
+    8,
+    5,
+    18,
+    14,
+    29,
+    30,
+    29,
+    6,
+    22,
+    7,
+    6,
+    23,
+    7,
+    8,
+    5,
+    12,
+    6,
+    24,
+    7,
+    8,
+    5,
+    21,
+    23,
+    15,
+    14,
+    6,
+    10,
+    7,
+    6,
+    31,
+    1,
+    33,
+    27,
+    12,
+    15,
+    7,
+    6,
+    35,
+    1,
+    12,
+    7,
+    8
+   ],
+   "questions": [
+    {
+     "qid": "q0",
+     "type": "choice",
+     "keys": [
+      "no",
+      "help",
+      "is",
+      "was",
+      "how",
+      "team"
+     ],
+     "label": null,
+     "probs": [
+      0.1971120834350586,
+      0.18966655433177948,
+      0.14798970520496368,
+      0.17971718311309814,
+      0.11081772297620773,
+      0.1746966689825058
+     ]
+    },
+    {
+     "qid": "q1",
+     "type": "noul",
+     "keys": [
+      "false",
+      "true"
+     ],
+     "label": null,
+     "probs": [
+      0.6333149075508118,
+      0.36668506264686584
+     ]
+    },
+    {
+     "qid": "q2",
+     "type": "choice",
+     "keys": [
+      "order"
+     ],
+     "label": null,
+     "probs": [
+      1.0
+     ]
+    },
+    {
+     "qid": "q3",
+     "type": "choice",
+     "keys": [
+      "customer",
+      "damaged",
+      "please"
+     ],
+     "label": null,
+     "probs": [
+      0.15364275872707367,
+      0.513396680355072,
+      0.3329605460166931
+     ]
+    }
+   ]
+  },
+  {
+   "id": "tiny:4",
+   "kind": "tiny",
+   "request": {
+    "state": "it lost",
+    "questions": {
+     "q0": {
+      "type": "choice",
+      "instructions": "no",
+      "criteria": {
+       "help": "today arrived order",
+       "twice": null,
+       "late": null,
+       "how": "lost",
+       "is": null,
+       "today": null,
+       "angry": "team"
+      }
+     }
+    }
+   },
+   "input": {
+    "state": "it lost",
+    "questions": [
+     {
+      "instr": "no",
+      "options": [
+       "help: today arrived order",
+       "twice",
+       "late",
+       "how: lost",
+       "is",
+       "today",
+       "angry: team"
+      ]
+     }
+    ]
+   },
+   "ids": [
+    2,
+    4,
+    32,
+    26,
+    5,
+    22,
+    6,
+    36,
+    1,
+    37,
+    28,
+    24,
+    7,
+    6,
+    13,
+    7,
+    6,
+    25,
+    7,
+    6,
+    20,
+    1,
+    26,
+    7,
+    6,
+    11,
+    7,
+    6,
+    37,
+    7,
+    6,
+    19,
+    1,
+    15,
+    7,
+    8
+   ],
+   "questions": [
+    {
+     "qid": "q0",
+     "type": "choice",
+     "keys": [
+      "help",
+      "twice",
+      "late",
+      "how",
+      "is",
+      "today",
+      "angry"
+     ],
+     "label": null,
+     "probs": [
+      0.15351933240890503,
+      0.1616007387638092,
+      0.11358247697353363,
+      0.13807202875614166,
+      0.15387170016765594,
+      0.13006268441677094,
+      0.14929109811782837
+     ]
+    }
+   ]
+  },
+  {
+   "id": "tiny:5",
+   "kind": "tiny",
+   "request": {
+    "state": "size",
+    "questions": {
+     "q0": {
+      "type": "noul",
+      "instructions": "again",
+      "criteria": {
+       "true": "lost no",
+       "false": "charged team how"
+      }
+     },
+     "q1": {
+      "type": "noul",
+      "instructions": "angry shipping refund box lost help"
+     }
+    }
+   },
+   "input": {
+    "state": "size",
+    "questions": [
+     {
+      "instr": "again",
+      "options": [
+       "no: charged team how",
+       "yes: lost no"
+      ]
+     },
+     {
+      "instr": "angry shipping refund box lost help",
+      "options": [
+       "no",
+       "yes"
+      ]
+     }
+    ]
+   },
+   "ids": [
+    2,
+    4,
+    30,
+    5,
+    34,
+    6,
+    22,
+    1,
+    12,
+    15,
+    20,
+    7,
+    6,
+    23,
+    1,
+    26,
+    22,
+    7,
+    8,
+    5,
+    19,
+    17,
+    18,
+    27,
+    26,
+    36,
+    6,
+    22,
+    7,
+    6,
+    23,
+    7,
+    8
+   ],
+   "questions": [
+    {
+     "qid": "q0",
+     "type": "noul",
+     "keys": [
+      "false",
+      "true"
+     ],
+     "label": null,
+     "probs": [
+      0.6270480155944824,
+      0.37295201420783997
+     ]
+    },
+    {
+     "qid": "q1",
+     "type": "noul",
+     "keys": [
+      "false",
+      "true"
+     ],
+     "label": null,
+     "probs": [
+      0.5360273122787476,
+      0.46397265791893005
+     ]
+    }
+   ]
+  },
+  {
+   "id": "tiny:6",
+   "kind": "tiny",
+   "request": {
+    "state": "order charged",
+    "questions": {
+     "q0": {
+      "type": "score",
+      "instructions": "team",
+      "criteria": [
+       "billing size shipping"
+      ]
+     },
+     "q1": {
+      "type": "score",
+      "instructions": "yes box",
+      "criteria": [
+       "lost",
+       "billing",
+       "bad"
+      ]
+     },
+     "q2": {
+      "type": "noul",
+      "instructions": "late size again today",
+      "criteria": {
+       "true": "lost was bad",
+       "false": "no again"
+      }
+     }
+    }
+   },
+   "input": {
+    "state": "order charged",
+    "questions": [
+     {
+      "instr": "team",
+      "options": [
+       "billing size shipping"
+      ]
+     },
+     {
+      "instr": "yes box",
+      "options": [
+       "lost",
+       "billing",
+       "bad"
+      ]
+     },
+     {
+      "instr": "late size again today",
+      "options": [
+       "no: no again",
+       "yes: lost was bad"
+      ]
+     }
+    ]
+   },
+   "ids": [
+    2,
+    4,
+    24,
+    12,
+    5,
+    15,
+    6,
+    16,
+    30,
+    17,
+    7,
+    8,
+    5,
+    23,
+    27,
+    6,
+    26,
+    7,
+    6,
+    16,
+    7,
+    6,
+    21,
+    7,
+    8,
+    5,
+    25,
+    30,
+    34,
+    37,
+    6,
+    22,
+    1,
+    22,
+    34,
+    7,
+    6,
+    23,
+    1,
+    26,
+    33,
+    21,
+    7,
+    8
+   ],
+   "questions": [
+    {
+     "qid": "q0",
+     "type": "score",
+     "keys": [
+      "0"
+     ],
+     "label": null,
+     "probs": [
+      1.0
+     ]
+    },
+    {
+     "qid": "q1",
+     "type": "score",
+     "keys": [
+      "0",
+      "1",
+      "2"
+     ],
+     "label": null,
+     "probs": [
+      0.27861523628234863,
+      0.22099314630031586,
+      0.5003916621208191
+     ]
+    },
+    {
+     "qid": "q2",
+     "type": "noul",
+     "keys": [
+      "false",
+      "true"
+     ],
+     "label": null,
+     "probs": [
+      0.5040451884269714,
+      0.49595487117767334
+     ]
+    }
+   ]
+  },
+  {
+   "id": "tiny:7",
+   "kind": "tiny",
+   "request": {
+    "state": "box charged no billing",
+    "questions": {
+     "q0": {
+      "type": "choice",
+      "instructions": "wrong twice charged",
+      "criteria": {
+       "team": "late size lost",
+       "angry": "no customer",
+       "refund": "was order order",
+       "the": null
+      }
+     },
+     "q1": {
+      "type": "noul",
+      "instructions": "lost box is late yes",
+      "criteria": {
+       "true": "charged",
+       "false": "again"
+      }
+     }
+    }
+   },
+   "input": {
+    "state": "box charged no billing",
+    "questions": [
+     {
+      "instr": "wrong twice charged",
+      "options": [
+       "team: late size lost",
+       "angry: no customer",
+       "refund: was order order",
+       "the"
+      ]
+     },
+     {
+      "instr": "lost box is late yes",
+      "options": [
+       "no: again",
+       "yes: charged"
+      ]
+     }
+    ]
+   },
+   "ids": [
+    2,
+    4,
+    27,
+    12,
+    22,
+    16,
+    5,
+    29,
+    13,
+    12,
+    6,
+    15,
+    1,
+    25,
+    30,
+    26,
+    7,
+    6,
+    19,
+    1,
+    22,
+    10,
+    7,
+    6,
+    18,
+    1,
+    33,
+    24,
+    24,
+    7,
+    6,
+    9,
+    7,
+    8,
+    5,
+    26,
+    27,
+    11,
+    25,
+    23,
+    6,
+    22,
+    1,
+    34,
+    7,
+    6,
+    23,
+    1,
+    12,
+    7,
+    8
+   ],
+   "questions": [
+    {
+     "qid": "q0",
+     "type": "choice",
+     "keys": [
+      "team",
+      "angry",
+      "refund",
+      "the"
+     ],
+     "label": null,
+     "probs": [
+      0.17361046373844147,
+      0.24667483568191528,
+      0.2788817882537842,
+      0.30083292722702026
+     ]
+    },
+    {
+     "qid": "q1",
+     "type": "noul",
+     "keys": [
+      "false",
+      "true"
+     ],
+     "label": null,
+     "probs": [
+      0.6083959341049194,
+      0.39160412549972534
+     ]
+    }
+   ]
+  },
+  {
+   "id": "tiny:8",
+   "kind": "tiny",
+   "request": {
+    "state": "no size billing no damaged is please how the late late bad the damaged please which wrong team was shipping damaged no order wrong it size team bad team",
+    "questions": {
+     "q0": {
+      "type": "score",
+      "instructions": "is late twice which",
+      "criteria": [
+       "arrived",
+       "please"
+      ]
+     }
+    }
+   },
+   "input": {
+    "state": "no size billing no damaged is please how the late late bad the damaged please which wrong team was shipping damaged no order wrong it size team bad team",
+    "questions": [
+     {
+      "instr": "is late twice which",
+      "options": [
+       "arrived",
+       "please"
+      ]
+     }
+    ]
+   },
+   "ids": [
+    2,
+    4,
+    22,
+    30,
+    16,
+    22,
+    31,
+    11,
+    35,
+    20,
+    9,
+    25,
+    25,
+    21,
+    9,
+    31,
+    35,
+    14,
+    29,
+    15,
+    33,
+    17,
+    31,
+    22,
+    24,
+    29,
+    32,
+    30,
+    15,
+    21,
+    15,
+    5,
+    11,
+    25,
+    13,
+    14,
+    6,
+    28,
+    7,
+    6,
+    35,
+    7,
+    8
+   ],
+   "questions": [
+    {
+     "qid": "q0",
+     "type": "score",
+     "keys": [
+      "0",
+      "1"
+     ],
+     "label": null,
+     "probs": [
+      0.5015904307365417,
+      0.4984096586704254
+     ]
+    }
+   ]
+  },
+  {
+   "id": "tiny:9",
+   "kind": "tiny",
+   "request": {
+    "state": "refund team",
+    "questions": {
+     "q0": {
+      "type": "choice",
+      "instructions": "the wrong shipping damaged which",
+      "criteria": {
+       "late": null,
+       "wrong": "how",
+       "yes": null
+      }
+     }
+    }
+   },
+   "input": {
+    "state": "refund team",
+    "questions": [
+     {
+      "instr": "the wrong shipping damaged which",
+      "options": [
+       "late",
+       "wrong: how",
+       "yes"
+      ]
+     }
+    ]
+   },
+   "ids": [
+    2,
+    4,
+    18,
+    15,
+    5,
+    9,
+    29,
+    17,
+    31,
+    14,
+    6,
+    25,
+    7,
+    6,
+    29,
+    1,
+    20,
+    7,
+    6,
+    23,
+    7,
+    8
+   ],
+   "questions": [
+    {
+     "qid": "q0",
+     "type": "choice",
+     "keys": [
+      "late",
+      "wrong",
+      "yes"
+     ],
+     "label": null,
+     "probs": [
+      0.2561030983924866,
+      0.44119396805763245,
+      0.302702933549881
+     ]
+    }
+   ]
+  },
+  {
+   "id": "tiny:10",
+   "kind": "tiny",
+   "request": {
+    "state": "billing which",
+    "questions": {
+     "q0": {
+      "type": "choice",
+      "instructions": "was twice",
+      "criteria": {
+       "charged": null,
+       "was": "bad bad please was",
+       "arrived": "yes late no it",
+       "bad": null,
+       "the": null,
+       "refund": "box angry the",
+       "yes": null
+      }
+     },
+     "q1": {
+      "type": "noul",
+      "instructions": "please order"
+     },
+     "q2": {
+      "type": "noul",
+      "instructions": "billing angry angry team which"
+     },
+     "q3": {
+      "type": "choice",
+      "instructions": "twice team shipping was",
+      "criteria": {
+       "late": null,
+       "shipping": "team lost twice",
+       "which": null,
+       "yes": "was",
+       "team": "refund"
+      }
+     },
+     "q4": {
+      "type": "score",
+      "instructions": "charged billing refund",
+      "criteria": [
+       "twice billing team",
+       "lost help",
+       "team charged the",
+       "is lost",
+       "size wrong again"
+      ]
+     },
+     "q5": {
+      "type": "choice",
+      "instructions": "refund",
+      "criteria": {
+       "the": "order please team please",
+       "is": null,
+       "no": null,
+       "lost": null,
+       "arrived": "which team twice help"
+      }
+     }
+    }
+   },
+   "input": {
+    "state": "billing which",
+    "questions": [
+     {
+      "instr": "was twice",
+      "options": [
+       "charged",
+       "was: bad bad please was",
+       "arrived: yes late no it",
+       "bad",
+       "the",
+       "refund: box angry the",
+       "yes"
+      ]
+     },
+     {
+      "instr": "please order",
+      "options": [
+       "no",
+       "yes"
+      ]
+     },
+     {
+      "instr": "billing angry angry team which",
+      "options": [
+       "no",
+       "yes"
+      ]
+     },
+     {
+      "instr": "twice team shipping was",
+      "options": [
+       "late",
+       "shipping: team lost twice",
+       "which",
+       "yes: was",
+       "team: refund"
+      ]
+     },
+     {
+      "instr": "charged billing refund",
+      "options": [
+       "twice billing team",
+       "lost help",
+       "team charged the",
+       "is lost",
+       "size wrong again"
+      ]
+     },
+     {
+      "instr": "refund",
+      "options": [
+       "the: order please team please",
+       "is",
+       "no",
+       "lost",
+       "arrived: which team twice help"
+      ]
+     }
+    ]
+   },
+   "ids": [
+    2,
+    4,
+    16,
+    14,
+    5,
+    33,
+    13,
+    6,
+    12,
+    7,
+    6,
+    33,
+    1,
+    21,
+    21,
+    35,
+    33,
+    7,
+    6,
+    28,
+    1,
+    23,
+    25,
+    22,
+    32,
+    7,
+    6,
+    21,
+    7,
+    6,
+    9,
+    7,
+    6,
+    18,
+    1,
+    27,
+    19,
+    9,
+    7,
+    6,
+    23,
+    7,
+    8,
+    5,
+    35,
+    24,
+    6,
+    22,
+    7,
+    6,
+    23,
+    7,
+    8,
+    5,
+    16,
+    19,
+    19,
+    15,
+    14,
+    6,
+    22,
+    7,
+    6,
+    23,
+    7,
+    8,
+    5,
+    13,
+    15,
+    17,
+    33,
+    6,
+    25,
+    7,
+    6,
+    17,
+    1,
+    15,
+    26,
+    13,
+    7,
+    6,
+    14,
+    7,
+    6,
+    23,
+    1,
+    33,
+    7,
+    6,
+    15,
+    1,
+    18,
+    7,
+    8,
+    5,
+    12,
+    16,
+    18,
+    6,
+    13,
+    16,
+    15,
+    7,
+    6,
+    26,
+    36,
+    7,
+    6,
+    15,
+    12,
+    9,
+    7,
+    6,
+    11,
+    26,
+    7,
+    6,
+    30,
+    29,
+    34,
+    7,
+    8,
+    5,
+    18,
+    6,
+    9,
+    1,
+    24,
+    35,
+    15,
+    35,
+    7,
+    6,
+    11,
+    7,
+    6,
+    22,
+    7,
+    6,
+    26,
+    7,
+    6,
+    28,
+    1,
+    14,
+    15,
+    13,
+    36,
+    7,
+    8
+   ],
+   "questions": [
+    {
+     "qid": "q0",
+     "type": "choice",
+     "keys": [
+      "charged",
+      "was",
+      "arrived",
+      "bad",
+      "the",
+      "refund",
+      "yes"
+     ],
+     "label": null,
+     "probs": [
+      0.14806997776031494,
+      0.10095127671957016,
+      0.13981708884239197,
+      0.18548254668712616,
+      0.0983324721455574,
+      0.13103093206882477,
+      0.19631575047969818
+     ]
+    },
+    {
+     "qid": "q1",
+     "type": "noul",
+     "keys": [
+      "false",
+      "true"
+     ],
+     "label": null,
+     "probs": [
+      0.47955164313316345,
+      0.5204483270645142
+     ]
+    },
+    {
+     "qid": "q2",
+     "type": "noul",
+     "keys": [
+      "false",
+      "true"
+     ],
+     "label": null,
+     "probs": [
+      0.5724058151245117,
+      0.42759421467781067
+     ]
+    },
+    {
+     "qid": "q3",
+     "type": "choice",
+     "keys": [
+      "late",
+      "shipping",
+      "which",
+      "yes",
+      "team"
+     ],
+     "label": null,
+     "probs": [
+      0.13755200803279877,
+      0.17385779321193695,
+      0.18598486483097076,
+      0.20330314338207245,
+      0.2993021011352539
+     ]
+    },
+    {
+     "qid": "q4",
+     "type": "score",
+     "keys": [
+      "0",
+      "1",
+      "2",
+      "3",
+      "4"
+     ],
+     "label": null,
+     "probs": [
+      0.2433268278837204,
+      0.08171042054891586,
+      0.21494987607002258,
+      0.34347113966941833,
+      0.1165417954325676
+     ]
+    },
+    {
+     "qid": "q5",
+     "type": "choice",
+     "keys": [
+      "the",
+      "is",
+      "no",
+      "lost",
+      "arrived"
+     ],
+     "label": null,
+     "probs": [
+      0.2081885188817978,
+      0.22084307670593262,
+      0.22408196330070496,
+      0.10934033989906311,
+      0.2375461310148239
+     ]
+    }
+   ]
+  },
+  {
+   "id": "tiny:11",
+   "kind": "tiny",
+   "request": {
+    "state": "order",
+    "questions": {
+     "q0": {
+      "type": "score",
+      "instructions": "damaged",
+      "criteria": [
+       "late",
+       "again size order",
+       "help which arrived"
+      ]
+     },
+     "q1": {
+      "type": "choice",
+      "instructions": "bad help bad box",
+      "criteria": {
+       "today": "was no"
+      }
+     }
+    }
+   },
+   "input": {
+    "state": "order",
+    "questions": [
+     {
+      "instr": "damaged",
+      "options": [
+       "late",
+       "again size order",
+       "help which arrived"
+      ]
+     },
+     {
+      "instr": "bad help bad box",
+      "options": [
+       "today: was no"
+      ]
+     }
+    ]
+   },
+   "ids": [
+    2,
+    4,
+    24,
+    5,
+    31,
+    6,
+    25,
+    7,
+    6,
+    34,
+    30,
+    24,
+    7,
+    6,
+    36,
+    14,
+    28,
+    7,
+    8,
+    5,
+    21,
+    36,
+    21,
+    27,
+    6,
+    37,
+    1,
+    33,
+    22,
+    7,
+    8
+   ],
+   "questions": [
+    {
+     "qid": "q0",
+     "type": "score",
+     "keys": [
+      "0",
+      "1",
+      "2"
+     ],
+     "label": null,
+     "probs": [
+      0.41957658529281616,
+      0.30221760272979736,
+      0.27820584177970886
+     ]
+    },
+    {
+     "qid": "q1",
+     "type": "choice",
+     "keys": [
+      "today"
+     ],
+     "label": null,
+     "probs": [
+      1.0
+     ]
+    }
+   ]
+  },
+  {
+   "id": "tiny:12",
+   "kind": "tiny",
+   "request": {
+    "state": "damaged how how shipping how wrong was",
+    "questions": {
+     "q0": {
+      "type": "score",
+      "instructions": "again team",
+      "criteria": [
+       "damaged arrived yes",
+       "the twice"
+      ]
+     },
+     "q1": {
+      "type": "score",
+      "instructions": "charged charged",
+      "criteria": [
+       "refund which lost"
+      ]
+     },
+     "q2": {
+      "type": "noul",
+      "instructions": "shipping billing help late customer today",
+      "criteria": {
+       "true": "refund",
+       "false": "wrong"
+      }
+     },
+     "q3": {
+      "type": "score",
+      "instructions": "bad shipping late was again",
+      "criteria": [
+       "was the",
+       "shipping how"
+      ]
+     }
+    }
+   },
+   "input": {
+    "state": "damaged how how shipping how wrong was",
+    "questions": [
+     {
+      "instr": "again team",
+      "options": [
+       "damaged arrived yes",
+       "the twice"
+      ]
+     },
+     {
+      "instr": "charged charged",
+      "options": [
+       "refund which lost"
+      ]
+     },
+     {
+      "instr": "shipping billing help late customer today",
+      "options": [
+       "no: wrong",
+       "yes: refund"
+      ]
+     },
+     {
+      "instr": "bad shipping late was again",
+      "options": [
+       "was the",
+       "shipping how"
+      ]
+     }
+    ]
+   },
+   "ids": [
+    2,
+    4,
+    31,
+    20,
+    20,
+    17,
+    20,
+    29,
+    33,
+    5,
+    34,
+    15,
+    6,
+    31,
+    28,
+    23,
+    7,
+    6,
+    9,
+    13,
+    7,
+    8,
+    5,
+    12,
+    12,
+    6,
+    18,
+    14,
+    26,
+    7,
+    8,
+    5,
+    17,
+    16,
+    36,
+    25,
+    10,
+    37,
+    6,
+    22,
+    1,
+    29,
+    7,
+    6,
+    23,
+    1,
+    18,
+    7,
+    8,
+    5,
+    21,
+    17,
+    25,
+    33,
+    34,
+    6,
+    33,
+    9,
+    7,
+    6,
+    17,
+    20,
+    7,
+    8
+   ],
+   "questions": [
+    {
+     "qid": "q0",
+     "type": "score",
+     "keys": [
+      "0",
+      "1"
+     ],
+     "label": null,
+     "probs": [
+      0.5434294939041138,
+      0.45657050609588623
+     ]
+    },
+    {
+     "qid": "q1",
+     "type": "score",
+     "keys": [
+      "0"
+     ],
+     "label": null,
+     "probs": [
+      1.0
+     ]
+    },
+    {
+     "qid": "q2",
+     "type": "noul",
+     "keys": [
+      "false",
+      "true"
+     ],
+     "label": null,
+     "probs": [
+      0.5155038237571716,
+      0.484496146440506
+     ]
+    },
+    {
+     "qid": "q3",
+     "type": "score",
+     "keys": [
+      "0",
+      "1"
+     ],
+     "label": null,
+     "probs": [
+      0.4746586084365845,
+      0.5253413915634155
+     ]
+    }
+   ]
+  },
+  {
+   "id": "tiny:13",
+   "kind": "tiny",
+   "request": {
+    "state": "it order shipping",
+    "questions": {
+     "q0": {
+      "type": "choice",
+      "instructions": "is today the customer team",
+      "criteria": {
+       "billing": "which lost",
+       "bad": null,
+       "is": null,
+       "it": null,
+       "box": null
+      }
+     },
+     "q1": {
+      "type": "noul",
+      "instructions": "yes yes",
+      "criteria": {
+       "true": "is",
+       "false": "arrived twice please"
+      }
+     },
+     "q2": {
+      "type": "score",
+      "instructions": "which team yes was again",
+      "criteria": [
+       "help shipping help",
+       "no is",
+       "size",
+       "bad twice bad",
+       "the yes"
+      ]
+     },
+     "q3": {
+      "type": "score",
+      "instructions": "order late arrived box billing team",
+      "criteria": [
+       "today shipping",
+       "team",
+       "the",
+       "no"
+      ]
+     },
+     "q4": {
+      "type": "noul",
+      "instructions": "how damaged was no team size",
+      "criteria": {
+       "true": "again the refund",
+       "false": "size order twice"
+      }
+     }
+    }
+   },
+   "input": {
+    "state": "it order shipping",
+    "questions": [
+     {
+      "instr": "is today the customer team",
+      "options": [
+       "billing: which lost",
+       "bad",
+       "is",
+       "it",
+       "box"
+      ]
+     },
+     {
+      "instr": "yes yes",
+      "options": [
+       "no: arrived twice please",
+       "yes: is"
+      ]
+     },
+     {
+      "instr": "which team yes was again",
+      "options": [
+       "help shipping help",
+       "no is",
+       "size",
+       "bad twice bad",
+       "the yes"
+      ]
+     },
+     {
+      "instr": "order late arrived box billing team",
+      "options": [
+       "today shipping",
+       "team",
+       "the",
+       "no"
+      ]
+     },
+     {
+      "instr": "how damaged was no team size",
+      "options": [
+       "no: size order twice",
+       "yes: again the refund"
+      ]
+     }
+    ]
+   },
+   "ids": [
+    2,
+    4,
+    32,
+    24,
+    17,
+    5,
+    11,
+    37,
+    9,
+    10,
+    15,
+    6,
+    16,
+    1,
+    14,
+    26,
+    7,
+    6,
+    21,
+    7,
+    6,
+    11,
+    7,
+    6,
+    32,
+    7,
+    6,
+    27,
+    7,
+    8,
+    5,
+    23,
+    23,
+    6,
+    22,
+    1,
+    28,
+    13,
+    35,
+    7,
+    6,
+    23,
+    1,
+    11,
+    7,
+    8,
+    5,
+    14,
+    15,
+    23,
+    33,
+    34,
+    6,
+    36,
+    17,
+    36,
+    7,
+    6,
+    22,
+    11,
+    7,
+    6,
+    30,
+    7,
+    6,
+    21,
+    13,
+    21,
+    7,
+    6,
+    9,
+    23,
+    7,
+    8,
+    5,
+    24,
+    25,
+    28,
+    27,
+    16,
+    15,
+    6,
+    37,
+    17,
+    7,
+    6,
+    15,
+    7,
+    6,
+    9,
+    7,
+    6,
+    22,
+    7,
+    8,
+    5,
+    20,
+    31,
+    33,
+    22,
+    15,
+    30,
+    6,
+    22,
+    1,
+    30,
+    24,
+    13,
+    7,
+    6,
+    23,
+    1,
+    34,
+    9,
+    18,
+    7,
+    8
+   ],
+   "questions": [
+    {
+     "qid": "q0",
+     "type": "choice",
+     "keys": [
+      "billing",
+      "bad",
+      "is",
+      "it",
+      "box"
+     ],
+     "label": null,
+     "probs": [
+      0.1958829015493393,
+      0.27363649010658264,
+      0.17802025377750397,
+      0.1627509891986847,
+      0.18970930576324463
+     ]
+    },
+    {
+     "qid": "q1",
+     "type": "noul",
+     "keys": [
+      "false",
+      "true"
+     ],
+     "label": null,
+     "probs": [
+      0.6050509810447693,
+      0.3949490785598755
+     ]
+    },
+    {
+     "qid": "q2",
+     "type": "score",
+     "keys": [
+      "0",
+      "1",
+      "2",
+      "3",
+      "4"
+     ],
+     "label": null,
+     "probs": [
+      0.28845682740211487,
+      0.21395201981067657,
+      0.21532538533210754,
+      0.18493977189064026,
+      0.09732590615749359
+     ]
+    },
+    {
+     "qid": "q3",
+     "type": "score",
+     "keys": [
+      "0",
+      "1",
+      "2",
+      "3"
+     ],
+     "label": null,
+     "probs": [
+      0.32958608865737915,
+      0.15683352947235107,
+      0.21616320312023163,
+      0.29741716384887695
+     ]
+    },
+    {
+     "qid": "q4",
+     "type": "noul",
+     "keys": [
+      "false",
+      "true"
+     ],
+     "label": null,
+     "probs": [
+      0.4881296753883362,
+      0.5118703246116638
+     ]
+    }
+   ]
+  },
+  {
+   "id": "tiny:14",
+   "kind": "tiny",
+   "request": {
+    "state": "billing no wrong please",
+    "questions": {
+     "q0": {
+      "type": "choice",
+      "instructions": "how help shipping order",
+      "criteria": {
+       "shipping": null,
+       "is": "charged again help",
+       "size": "damaged",
+       "twice": "today customer",
+       "charged": "size angry charged which",
+       "order": "it"
+      }
+     },
+     "q1": {
+      "type": "score",
+      "instructions": "late billing yes please refund",
+      "criteria": [
+       "please refund",
+       "no",
+       "customer please please",
+       "team the which"
+      ]
+     },
+     "q2": {
+      "type": "noul",
+      "instructions": "wrong bad twice the"
+     },
+     "q3": {
+      "type": "noul",
+      "instructions": "arrived yes",
+      "criteria": {
+       "true": "shipping",
+       "false": "twice"
+      }
+     },
+     "q4": {
+      "type": "noul",
+      "instructions": "shipping lost",
+      "criteria": {
+       "true": "late refund lost",
+       "false": "box please customer"
+      }
+     }
+    }
+   },
+   "input": {
+    "state": "billing no wrong please",
+    "questions": [
+     {
+      "instr": "how help shipping order",
+      "options": [
+       "shipping",
+       "is: charged again help",
+       "size: damaged",
+       "twice: today customer",
+       "charged: size angry charged which",
+       "order: it"
+      ]
+     },
+     {
+      "instr": "late billing yes please refund",
+      "options": [
+       "please refund",
+       "no",
+       "customer please please",
+       "team the which"
+      ]
+     },
+     {
+      "instr": "wrong bad twice the",
+      "options": [
+       "no",
+       "yes"
+      ]
+     },
+     {
+      "instr": "arrived yes",
+      "options": [
+       "no: twice",
+       "yes: shipping"
+      ]
+     },
+     {
+      "instr": "shipping lost",
+      "options": [
+       "no: box please customer",
+       "yes: late refund lost"
+      ]
+     }
+    ]
+   },
+   "ids": [
+    2,
+    4,
+    16,
+    22,
+    29,
+    35,
+    5,
+    20,
+    36,
+    17,
+    24,
+    6,
+    17,
+    7,
+    6,
+    11,
+    1,
+    12,
+    34,
+    36,
+    7,
+    6,
+    30,
+    1,
+    31,
+    7,
+    6,
+    13,
+    1,
+    37,
+    10,
+    7,
+    6,
+    12,
+    1,
+    30,
+    19,
+    12,
+    14,
+    7,
+    6,
+    24,
+    1,
+    32,
+    7,
+    8,
+    5,
+    25,
+    16,
+    23,
+    35,
+    18,
+    6,
+    35,
+    18,
+    7,
+    6,
+    22,
+    7,
+    6,
+    10,
+    35,
+    35,
+    7,
+    6,
+    15,
+    9,
+    14,
+    7,
+    8,
+    5,
+    29,
+    21,
+    13,
+    9,
+    6,
+    22,
+    7,
+    6,
+    23,
+    7,
+    8,
+    5,
+    28,
+    23,
+    6,
+    22,
+    1,
+    13,
+    7,
+    6,
+    23,
+    1,
+    17,
+    7,
+    8,
+    5,
+    17,
+    26,
+    6,
+    22,
+    1,
+    27,
+    35,
+    10,
+    7,
+    6,
+    23,
+    1,
+    25,
+    18,
+    26,
+    7,
+    8
+   ],
+   "questions": [
+    {
+     "qid": "q0",
+     "type": "choice",
+     "keys": [
+      "shipping",
+      "is",
+      "size",
+      "twice",
+      "charged",
+      "order"
+     ],
+     "label": null,
+     "probs": [
+      0.1611230969429016,
+      0.15118224918842316,
+      0.26903843879699707,
+      0.10872700810432434,
+      0.1812858134508133,
+      0.12864339351654053
+     ]
+    },
+    {
+     "qid": "q1",
+     "type": "score",
+     "keys": [
+      "0",
+      "1",
+      "2",
+      "3"
+     ],
+     "label": null,
+     "probs": [
+      0.1879933774471283,
+      0.310678094625473,
+      0.18488848209381104,
+      0.31644004583358765
+     ]
+    },
+    {
+     "qid": "q2",
+     "type": "noul",
+     "keys": [
+      "false",
+      "true"
+     ],
+     "label": null,
+     "probs": [
+      0.319106787443161,
+      0.6808932423591614
+     ]
+    },
+    {
+     "qid": "q3",
+     "type": "noul",
+     "keys": [
+      "false",
+      "true"
+     ],
+     "label": null,
+     "probs": [
+      0.46919554471969604,
+      0.530804455280304
+     ]
+    },
+    {
+     "qid": "q4",
+     "type": "noul",
+     "keys": [
+      "false",
+      "true"
+     ],
+     "label": null,
+     "probs": [
+      0.6003356575965881,
+      0.39966440200805664
+     ]
+    }
+   ]
+  },
+  {
+   "id": "tiny:15",
+   "kind": "tiny",
+   "request": {
+    "state": "the charged",
+    "questions": {
+     "q0": {
+      "type": "noul",
+      "instructions": "again size size was"
+     },
+     "q1": {
+      "type": "choice",
+      "instructions": "was size arrived which twice order",
+      "criteria": {
+       "wrong": null,
+       "late": "yes was refund",
+       "it": "is box bad damaged",
+       "again": null
+      }
+     },
+     "q2": {
+      "type": "noul",
+      "instructions": "please damaged"
+     }
+    }
+   },
+   "input": {
+    "state": "the charged",
+    "questions": [
+     {
+      "instr": "again size size was",
+      "options": [
+       "no",
+       "yes"
+      ]
+     },
+     {
+      "instr": "was size arrived which twice order",
+      "options": [
+       "wrong",
+       "late: yes was refund",
+       "it: is box bad damaged",
+       "again"
+      ]
+     },
+     {
+      "instr": "please damaged",
+      "options": [
+       "no",
+       "yes"
+      ]
+     }
+    ]
+   },
+   "ids": [
+    2,
+    4,
+    9,
+    12,
+    5,
+    34,
+    30,
+    30,
+    33,
+    6,
+    22,
+    7,
+    6,
+    23,
+    7,
+    8,
+    5,
+    33,
+    30,
+    28,
+    14,
+    13,
+    24,
+    6,
+    29,
+    7,
+    6,
+    25,
+    1,
+    23,
+    33,
+    18,
+    7,
+    6,
+    32,
+    1,
+    11,
+    27,
+    21,
+    31,
+    7,
+    6,
+    34,
+    7,
+    8,
+    5,
+    35,
+    31,
+    6,
+    22,
+    7,
+    6,
+    23,
+    7,
+    8
+   ],
+   "questions": [
+    {
+     "qid": "q0",
+     "type": "noul",
+     "keys": [
+      "false",
+      "true"
+     ],
+     "label": null,
+     "probs": [
+      0.6218518018722534,
+      0.3781481385231018
+     ]
+    },
+    {
+     "qid": "q1",
+     "type": "choice",
+     "keys": [
+      "wrong",
+      "late",
+      "it",
+      "again"
+     ],
+     "label": null,
+     "probs": [
+      0.336609810590744,
+      0.31734558939933777,
+      0.17662419378757477,
+      0.16942037642002106
+     ]
+    },
+    {
+     "qid": "q2",
+     "type": "noul",
+     "keys": [
+      "false",
+      "true"
+     ],
+     "label": null,
+     "probs": [
+      0.7100641131401062,
+      0.289935827255249
+     ]
+    }
+   ]
+  },
+  {
+   "id": "tiny:16",
+   "kind": "tiny",
+   "request": {
+    "state": "charged",
+    "questions": {
+     "q0": {
+      "type": "score",
+      "instructions": "lost size was late twice",
+      "criteria": [
+       "shipping twice",
+       "late",
+       "damaged",
+       "order bad"
+      ]
+     },
+     "q1": {
+      "type": "noul",
+      "instructions": "shipping"
+     },
+     "q2": {
+      "type": "score",
+      "instructions": "no size is the charged damaged",
+      "criteria": [
+       "wrong billing yes"
+      ]
+     },
+     "q3": {
+      "type": "score",
+      "instructions": "box damaged refund damaged late",
+      "criteria": [
+       "order today",
+       "again is",
+       "shipping how please"
+      ]
+     },
+     "q4": {
+      "type": "score",
+      "instructions": "no how damaged the please order",
+      "criteria": [
+       "again damaged"
+      ]
+     }
+    }
+   },
+   "input": {
+    "state": "charged",
+    "questions": [
+     {
+      "instr": "lost size was late twice",
+      "options": [
+       "shipping twice",
+       "late",
+       "damaged",
+       "order bad"
+      ]
+     },
+     {
+      "instr": "shipping",
+      "options": [
+       "no",
+       "yes"
+      ]
+     },
+     {
+      "instr": "no size is the charged damaged",
+      "options": [
+       "wrong billing yes"
+      ]
+     },
+     {
+      "instr": "box damaged refund damaged late",
+      "options": [
+       "order today",
+       "again is",
+       "shipping how please"
+      ]
+     },
+     {
+      "instr": "no how damaged the please order",
+      "options": [
+       "again damaged"
+      ]
+     }
+    ]
+   },
+   "ids": [
+    2,
+    4,
+    12,
+    5,
+    26,
+    30,
+    33,
+    25,
+    13,
+    6,
+    17,
+    13,
+    7,
+    6,
+    25,
+    7,
+    6,
+    31,
+    7,
+    6,
+    24,
+    21,
+    7,
+    8,
+    5,
+    17,
+    6,
+    22,
+    7,
+    6,
+    23,
+    7,
+    8,
+    5,
+    22,
+    30,
+    11,
+    9,
+    12,
+    31,
+    6,
+    29,
+    16,
+    23,
+    7,
+    8,
+    5,
+    27,
+    31,
+    18,
+    31,
+    25,
+    6,
+    24,
+    37,
+    7,
+    6,
+    34,
+    11,
+    7,
+    6,
+    17,
+    20,
+    35,
+    7,
+    8,
+    5,
+    22,
+    20,
+    31,
+    9,
+    35,
+    24,
+    6,
+    34,
+    31,
+    7,
+    8
+   ],
+   "questions": [
+    {
+     "qid": "q0",
+     "type": "score",
+     "keys": [
+      "0",
+      "1",
+      "2",
+      "3"
+     ],
+     "label": null,
+     "probs": [
+      0.18978986144065857,
+      0.22573383152484894,
+      0.2051880657672882,
+      0.3792882263660431
+     ]
+    },
+    {
+     "qid": "q1",
+     "type": "noul",
+     "keys": [
+      "false",
+      "true"
+     ],
+     "label": null,
+     "probs": [
+      0.5821969509124756,
+      0.417803019285202
+     ]
+    },
+    {
+     "qid": "q2",
+     "type": "score",
+     "keys": [
+      "0"
+     ],
+     "label": null,
+     "probs": [
+      1.0
+     ]
+    },
+    {
+     "qid": "q3",
+     "type": "score",
+     "keys": [
+      "0",
+      "1",
+      "2"
+     ],
+     "label": null,
+     "probs": [
+      0.4071751534938812,
+      0.34253090620040894,
+      0.25029388070106506
+     ]
+    },
+    {
+     "qid": "q4",
+     "type": "score",
+     "keys": [
+      "0"
+     ],
+     "label": null,
+     "probs": [
+      1.0
+     ]
+    }
+   ]
+  },
+  {
+   "id": "tiny:17",
+   "kind": "tiny",
+   "request": {
+    "state": "today bad how",
+    "questions": {
+     "q0": {
+      "type": "score",
+      "instructions": "it customer shipping arrived",
+      "criteria": [
+       "which refund",
+       "team",
+       "box which again"
+      ]
+     },
+     "q1": {
+      "type": "choice",
+      "instructions": "customer bad order",
+      "criteria": {
+       "refund": null,
+       "it": "today",
+       "today": null,
+       "lost": "again again",
+       "yes": null,
+       "is": null,
+       "no": "billing"
+      }
+     },
+     "q2": {
+      "type": "noul",
+      "instructions": "please yes is refund"
+     }
+    }
+   },
+   "input": {
+    "state": "today bad how",
+    "questions": [
+     {
+      "instr": "it customer shipping arrived",
+      "options": [
+       "which refund",
+       "team",
+       "box which again"
+      ]
+     },
+     {
+      "instr": "customer bad order",
+      "options": [
+       "refund",
+       "it: today",
+       "today",
+       "lost: again again",
+       "yes",
+       "is",
+       "no: billing"
+      ]
+     },
+     {
+      "instr": "please yes is refund",
+      "options": [
+       "no",
+       "yes"
+      ]
+     }
+    ]
+   },
+   "ids": [
+    2,
+    4,
+    37,
+    21,
+    20,
+    5,
+    32,
+    10,
+    17,
+    28,
+    6,
+    14,
+    18,
+    7,
+    6,
+    15,
+    7,
+    6,
+    27,
+    14,
+    34,
+    7,
+    8,
+    5,
+    10,
+    21,
+    24,
+    6,
+    18,
+    7,
+    6,
+    32,
+    1,
+    37,
+    7,
+    6,
+    37,
+    7,
+    6,
+    26,
+    1,
+    34,
+    34,
+    7,
+    6,
+    23,
+    7,
+    6,
+    11,
+    7,
+    6,
+    22,
+    1,
+    16,
+    7,
+    8,
+    5,
+    35,
+    23,
+    11,
+    18,
+    6,
+    22,
+    7,
+    6,
+    23,
+    7,
+    8
+   ],
+   "questions": [
+    {
+     "qid": "q0",
+     "type": "score",
+     "keys": [
+      "0",
+      "1",
+      "2"
+     ],
+     "label": null,
+     "probs": [
+      0.21436570584774017,
+      0.45210301876068115,
+      0.3335312604904175
+     ]
+    },
+    {
+     "qid": "q1",
+     "type": "choice",
+     "keys": [
+      "refund",
+      "it",
+      "today",
+      "lost",
+      "yes",
+      "is",
+      "no"
+     ],
+     "label": null,
+     "probs": [
+      0.167449951171875,
+      0.08911849558353424,
+      0.12874479591846466,
+      0.123362697660923,
+      0.22706304490566254,
+      0.15618407726287842,
+      0.10807696729898453
+     ]
+    },
+    {
+     "qid": "q2",
+     "type": "noul",
+     "keys": [
+      "false",
+      "true"
+     ],
+     "label": null,
+     "probs": [
+      0.5541675090789795,
+      0.4458325207233429
+     ]
+    }
+   ]
+  },
+  {
+   "id": "tiny:18",
+   "kind": "tiny",
+   "request": {
+    "state": "yes team charged",
+    "questions": {
+     "q0": {
+      "type": "choice",
+      "instructions": "box lost refund refund",
+      "criteria": {
+       "yes": "lost it",
+       "team": null
+      }
+     },
+     "q1": {
+      "type": "score",
+      "instructions": "team no",
+      "criteria": [
+       "late",
+       "it",
+       "billing team which",
+       "is which",
+       "angry charged today"
+      ]
+     },
+     "q2": {
+      "type": "choice",
+      "instructions": "size the box size charged",
+      "criteria": {
+       "no": "angry",
+       "team": null,
+       "it": "damaged billing again billing",
+       "was": "shipping",
+       "today": "today again",
+       "damaged": "today"
+      }
+     },
+     "q3": {
+      "type": "noul",
+      "instructions": "damaged again",
+      "criteria": {
+       "true": "today",
+       "false": "today yes refund"
+      }
+     },
+     "q4": {
+      "type": "choice",
+      "instructions": "which twice again again",
+      "criteria": {
+       "charged": "today is billing no"
+      }
+     }
+    }
+   },
+   "input": {
+    "state": "yes team charged",
+    "questions": [
+     {
+      "instr": "box lost refund refund",
+      "options": [
+       "yes: lost it",
+       "team"
+      ]
+     },
+     {
+      "instr": "team no",
+      "options": [
+       "late",
+       "it",
+       "billing team which",
+       "is which",
+       "angry charged today"
+      ]
+     },
+     {
+      "instr": "size the box size charged",
+      "options": [
+       "no: angry",
+       "team",
+       "it: damaged billing again billing",
+       "was: shipping",
+       "today: today again",
+       "damaged: today"
+      ]
+     },
+     {
+      "instr": "damaged again",
+      "options": [
+       "no: today yes refund",
+       "yes: today"
+      ]
+     },
+     {
+      "instr": "which twice again again",
+      "options": [
+       "charged: today is billing no"
+      ]
+     }
+    ]
+   },
+   "ids": [
+    2,
+    4,
+    23,
+    15,
+    12,
+    5,
+    27,
+    26,
+    18,
+    18,
+    6,
+    23,
+    1,
+    26,
+    32,
+    7,
+    6,
+    15,
+    7,
+    8,
+    5,
+    15,
+    22,
+    6,
+    25,
+    7,
+    6,
+    32,
+    7,
+    6,
+    16,
+    15,
+    14,
+    7,
+    6,
+    11,
+    14,
+    7,
+    6,
+    19,
+    12,
+    37,
+    7,
+    8,
+    5,
+    30,
+    9,
+    27,
+    30,
+    12,
+    6,
+    22,
+    1,
+    19,
+    7,
+    6,
+    15,
+    7,
+    6,
+    32,
+    1,
+    31,
+    16,
+    34,
+    16,
+    7,
+    6,
+    33,
+    1,
+    17,
+    7,
+    6,
+    37,
+    1,
+    37,
+    34,
+    7,
+    6,
+    31,
+    1,
+    37,
+    7,
+    8,
+    5,
+    31,
+    34,
+    6,
+    22,
+    1,
+    37,
+    23,
+    18,
+    7,
+    6,
+    23,
+    1,
+    37,
+    7,
+    8,
+    5,
+    14,
+    13,
+    34,
+    34,
+    6,
+    12,
+    1,
+    37,
+    11,
+    16,
+    22,
+    7,
+    8
+   ],
+   "questions": [
+    {
+     "qid": "q0",
+     "type": "choice",
+     "keys": [
+      "yes",
+      "team"
+     ],
+     "label": null,
+     "probs": [
+      0.4276454448699951,
+      0.5723545551300049
+     ]
+    },
+    {
+     "qid": "q1",
+     "type": "score",
+     "keys": [
+      "0",
+      "1",
+      "2",
+      "3",
+      "4"
+     ],
+     "label": null,
+     "probs": [
+      0.1718606799840927,
+      0.1365160346031189,
+      0.19828754663467407,
+      0.2534202039241791,
+      0.23991550505161285
+     ]
+    },
+    {
+     "qid": "q2",
+     "type": "choice",
+     "keys": [
+      "no",
+      "team",
+      "it",
+      "was",
+      "today",
+      "damaged"
+     ],
+     "label": null,
+     "probs": [
+      0.12854890525341034,
+      0.2677365243434906,
+      0.1828986406326294,
+      0.17135433852672577,
+      0.1490822285413742,
+      0.10037940740585327
+     ]
+    },
+    {
+     "qid": "q3",
+     "type": "noul",
+     "keys": [
+      "false",
+      "true"
+     ],
+     "label": null,
+     "probs": [
+      0.6354949474334717,
+      0.36450502276420593
+     ]
+    },
+    {
+     "qid": "q4",
+     "type": "choice",
+     "keys": [
+      "charged"
+     ],
+     "label": null,
+     "probs": [
+      1.0
+     ]
+    }
+   ]
+  },
+  {
+   "id": "tiny:19",
+   "kind": "tiny",
+   "request": {
+    "state": "lost please size",
+    "questions": {
+     "q0": {
+      "type": "score",
+      "instructions": "lost again box yes",
+      "criteria": [
+       "bad bad today"
+      ]
+     },
+     "q1": {
+      "type": "choice",
+      "instructions": "help lost please is",
+      "criteria": {
+       "help": null,
+       "which": null
+      }
+     },
+     "q2": {
+      "type": "choice",
+      "instructions": "which twice",
+      "criteria": {
+       "customer": "it yes",
+       "no": "damaged shipping charged",
+       "which": null,
+       "help": "refund the",
+       "the": null
+      }
+     },
+     "q3": {
+      "type": "noul",
+      "instructions": "again"
+     },
+     "q4": {
+      "type": "noul",
+      "instructions": "refund refund refund"
+     }
+    }
+   },
+   "input": {
+    "state": "lost please size",
+    "questions": [
+     {
+      "instr": "lost again box yes",
+      "options": [
+       "bad bad today"
+      ]
+     },
+     {
+      "instr": "help lost please is",
+      "options": [
+       "help",
+       "which"
+      ]
+     },
+     {
+      "instr": "which twice",
+      "options": [
+       "customer: it yes",
+       "no: damaged shipping charged",
+       "which",
+       "help: refund the",
+       "the"
+      ]
+     },
+     {
+      "instr": "again",
+      "options": [
+       "no",
+       "yes"
+      ]
+     },
+     {
+      "instr": "refund refund refund",
+      "options": [
+       "no",
+       "yes"
+      ]
+     }
+    ]
+   },
+   "ids": [
+    2,
+    4,
+    26,
+    35,
+    30,
+    5,
+    26,
+    34,
+    27,
+    23,
+    6,
+    21,
+    21,
+    37,
+    7,
+    8,
+    5,
+    36,
+    26,
+    35,
+    11,
+    6,
+    36,
+    7,
+    6,
+    14,
+    7,
+    8,
+    5,
+    14,
+    13,
+    6,
+    10,
+    1,
+    32,
+    23,
+    7,
+    6,
+    22,
+    1,
+    31,
+    17,
+    12,
+    7,
+    6,
+    14,
+    7,
+    6,
+    36,
+    1,
+    18,
+    9,
+    7,
+    6,
+    9,
+    7,
+    8,
+    5,
+    34,
+    6,
+    22,
+    7,
+    6,
+    23,
+    7,
+    8,
+    5,
+    18,
+    18,
+    18,
+    6,
+    22,
+    7,
+    6,
+    23,
+    7,
+    8
+   ],
+   "questions": [
+    {
+     "qid": "q0",
+     "type": "score",
+     "keys": [
+      "0"
+     ],
+     "label": null,
+     "probs": [
+      1.0
+     ]
+    },
+    {
+     "qid": "q1",
+     "type": "choice",
+     "keys": [
+      "help",
+      "which"
+     ],
+     "label": null,
+     "probs": [
+      0.557296872138977,
+      0.44270312786102295
+     ]
+    },
+    {
+     "qid": "q2",
+     "type": "choice",
+     "keys": [
+      "customer",
+      "no",
+      "which",
+      "help",
+      "the"
+     ],
+     "label": null,
+     "probs": [
+      0.21894070506095886,
+      0.24379076063632965,
+      0.15792018175125122,
+      0.14835980534553528,
+      0.2309884876012802
+     ]
+    },
+    {
+     "qid": "q3",
+     "type": "noul",
+     "keys": [
+      "false",
+      "true"
+     ],
+     "label": null,
+     "probs": [
+      0.6326174736022949,
+      0.36738255620002747
+     ]
+    },
+    {
+     "qid": "q4",
+     "type": "noul",
+     "keys": [
+      "false",
+      "true"
+     ],
+     "label": null,
+     "probs": [
+      0.6699262261390686,
+      0.330073744058609
+     ]
+    }
+   ]
+  },
+  {
+   "id": "tiny:20",
+   "kind": "tiny",
+   "request": {
+    "state": "no help today how late no bad size box it again bad again which box team was yes was again it twice bad how help charged the size refund wrong today customer yes box lost how",
+    "questions": {
+     "q0": {
+      "type": "score",
+      "instructions": "lost",
+      "criteria": [
+       "how yes angry"
+      ]
+     },
+     "q1": {
+      "type": "noul",
+      "instructions": "it late today is",
+      "criteria": {
+       "true": "angry today",
+       "false": "shipping"
+      }
+     },
+     "q2": {
+      "type": "score",
+      "instructions": "team lost help it size",
+      "criteria": [
+       "the",
+       "lost was",
+       "angry",
+       "wrong box"
+      ]
+     },
+     "q3": {
+      "type": "noul",
+      "instructions": "bad wrong lost arrived box"
+     },
+     "q4": {
+      "type": "choice",
+      "instructions": "charged angry refund charged no",
+      "criteria": {
+       "again": null,
+       "how": "the",
+       "twice": "customer",
+       "billing": "bad refund",
+       "please": null,
+       "wrong": null,
+       "team": null
+      }
+     },
+     "q5": {
+      "type": "score",
+      "instructions": "how",
+      "criteria": [
+       "was",
+       "refund"
+      ]
+     }
+    }
+   },
+   "input": {
+    "state": "no help today how late no bad size box it again bad again which box team was yes was again it twice bad how help charged the size refund wrong today customer yes box lost how",
+    "questions": [
+     {
+      "instr": "lost",
+      "options": [
+       "how yes angry"
+      ]
+     },
+     {
+      "instr": "it late today is",
+      "options": [
+       "no: shipping",
+       "yes: angry today"
+      ]
+     },
+     {
+      "instr": "team lost help it size",
+      "options": [
+       "the",
+       "lost was",
+       "angry",
+       "wrong box"
+      ]
+     },
+     {
+      "instr": "bad wrong lost arrived box",
+      "options": [
+       "no",
+       "yes"
+      ]
+     },
+     {
+      "instr": "charged angry refund charged no",
+      "options": [
+       "again",
+       "how: the",
+       "twice: customer",
+       "billing: bad refund",
+       "please",
+       "wrong",
+       "team"
+      ]
+     },
+     {
+      "instr": "how",
+      "options": [
+       "was",
+       "refund"
+      ]
+     }
+    ]
+   },
+   "ids": [
+    2,
+    4,
+    22,
+    36,
+    37,
+    20,
+    25,
+    22,
+    21,
+    30,
+    27,
+    32,
+    34,
+    21,
+    34,
+    14,
+    27,
+    15,
+    33,
+    23,
+    33,
+    34,
+    32,
+    13,
+    21,
+    20,
+    36,
+    12,
+    9,
+    30,
+    18,
+    29,
+    37,
+    10,
+    23,
+    27,
+    26,
+    20,
+    5,
+    26,
+    6,
+    20,
+    23,
+    19,
+    7,
+    8,
+    5,
+    32,
+    25,
+    37,
+    11,
+    6,
+    22,
+    1,
+    17,
+    7,
+    6,
+    23,
+    1,
+    19,
+    37,
+    7,
+    8,
+    5,
+    15,
+    26,
+    36,
+    32,
+    30,
+    6,
+    9,
+    7,
+    6,
+    26,
+    33,
+    7,
+    6,
+    19,
+    7,
+    6,
+    29,
+    27,
+    7,
+    8,
+    5,
+    21,
+    29,
+    26,
+    28,
+    27,
+    6,
+    22,
+    7,
+    6,
+    23,
+    7,
+    8,
+    5,
+    12,
+    19,
+    18,
+    12,
+    22,
+    6,
+    34,
+    7,
+    6,
+    20,
+    1,
+    9,
+    7,
+    6,
+    13,
+    1,
+    10,
+    7,
+    6,
+    16,
+    1,
+    21,
+    18,
+    7,
+    6,
+    35,
+    7,
+    6,
+    29,
+    7,
+    6,
+    15,
+    7,
+    8,
+    5,
+    20,
+    6,
+    33,
+    7,
+    6,
+    18,
+    7,
+    8
+   ],
+   "questions": [
+    {
+     "qid": "q0",
+     "type": "score",
+     "keys": [
+      "0"
+     ],
+     "label": null,
+     "probs": [
+      1.0
+     ]
+    },
+    {
+     "qid": "q1",
+     "type": "noul",
+     "keys": [
+      "false",
+      "true"
+     ],
+     "label": null,
+     "probs": [
+      0.4922589659690857,
+      0.5077410340309143
+     ]
+    },
+    {
+     "qid": "q2",
+     "type": "score",
+     "keys": [
+      "0",
+      "1",
+      "2",
+      "3"
+     ],
+     "label": null,
+     "probs": [
+      0.17640632390975952,
+      0.3928471505641937,
+      0.25178641080856323,
+      0.17896011471748352
+     ]
+    },
+    {
+     "qid": "q3",
+     "type": "noul",
+     "keys": [
+      "false",
+      "true"
+     ],
+     "label": null,
+     "probs": [
+      0.7184891700744629,
+      0.2815108001232147
+     ]
+    },
+    {
+     "qid": "q4",
+     "type": "choice",
+     "keys": [
+      "again",
+      "how",
+      "twice",
+      "billing",
+      "please",
+      "wrong",
+      "team"
+     ],
+     "label": null,
+     "probs": [
+      0.14394696056842804,
+      0.15899233520030975,
+      0.13156262040138245,
+      0.1240442767739296,
+      0.19756931066513062,
+      0.12011446803808212,
+      0.12377001345157623
+     ]
+    },
+    {
+     "qid": "q5",
+     "type": "score",
+     "keys": [
+      "0",
+      "1"
+     ],
+     "label": null,
+     "probs": [
+      0.5717920660972595,
+      0.4282078742980957
+     ]
+    }
+   ]
+  },
+  {
+   "id": "tiny:21",
+   "kind": "tiny",
+   "request": {
+    "state": "bad the angry yes shipping",
+    "questions": {
+     "q0": {
+      "type": "choice",
+      "instructions": "it again box",
+      "criteria": {
+       "today": null,
+       "yes": "no angry customer billing",
+       "arrived": "team which",
+       "it": null,
+       "help": "please",
+       "shipping": "billing",
+       "again": "the no was"
+      }
+     },
+     "q1": {
+      "type": "score",
+      "instructions": "refund size shipping the refund order",
+      "criteria": [
+       "lost",
+       "late",
+       "again"
+      ]
+     },
+     "q2": {
+      "type": "noul",
+      "instructions": "today size again please wrong",
+      "criteria": {
+       "true": "please",
+       "false": "no it"
+      }
+     },
+     "q3": {
+      "type": "choice",
+      "instructions": "angry angry charged customer angry",
+      "criteria": {
+       "box": "late"
+      }
+     },
+     "q4": {
+      "type": "score",
+      "instructions": "how",
+      "criteria": [
+       "twice angry",
+       "again team",
+       "bad",
+       "it",
+       "bad it"
+      ]
+     }
+    }
+   },
+   "input": {
+    "state": "bad the angry yes shipping",
+    "questions": [
+     {
+      "instr": "it again box",
+      "options": [
+       "today",
+       "yes: no angry customer billing",
+       "arrived: team which",
+       "it",
+       "help: please",
+       "shipping: billing",
+       "again: the no was"
+      ]
+     },
+     {
+      "instr": "refund size shipping the refund order",
+      "options": [
+       "lost",
+       "late",
+       "again"
+      ]
+     },
+     {
+      "instr": "today size again please wrong",
+      "options": [
+       "no: no it",
+       "yes: please"
+      ]
+     },
+     {
+      "instr": "angry angry charged customer angry",
+      "options": [
+       "box: late"
+      ]
+     },
+     {
+      "instr": "how",
+      "options": [
+       "twice angry",
+       "again team",
+       "bad",
+       "it",
+       "bad it"
+      ]
+     }
+    ]
+   },
+   "ids": [
+    2,
+    4,
+    21,
+    9,
+    19,
+    23,
+    17,
+    5,
+    32,
+    34,
+    27,
+    6,
+    37,
+    7,
+    6,
+    23,
+    1,
+    22,
+    19,
+    10,
+    16,
+    7,
+    6,
+    28,
+    1,
+    15,
+    14,
+    7,
+    6,
+    32,
+    7,
+    6,
+    36,
+    1,
+    35,
+    7,
+    6,
+    17,
+    1,
+    16,
+    7,
+    6,
+    34,
+    1,
+    9,
+    22,
+    33,
+    7,
+    8,
+    5,
+    18,
+    30,
+    17,
+    9,
+    18,
+    24,
+    6,
+    26,
+    7,
+    6,
+    25,
+    7,
+    6,
+    34,
+    7,
+    8,
+    5,
+    37,
+    30,
+    34,
+    35,
+    29,
+    6,
+    22,
+    1,
+    22,
+    32,
+    7,
+    6,
+    23,
+    1,
+    35,
+    7,
+    8,
+    5,
+    19,
+    19,
+    12,
+    10,
+    19,
+    6,
+    27,
+    1,
+    25,
+    7,
+    8,
+    5,
+    20,
+    6,
+    13,
+    19,
+    7,
+    6,
+    34,
+    15,
+    7,
+    6,
+    21,
+    7,
+    6,
+    32,
+    7,
+    6,
+    21,
+    32,
+    7,
+    8
+   ],
+   "questions": [
+    {
+     "qid": "q0",
+     "type": "choice",
+     "keys": [
+      "today",
+      "yes",
+      "arrived",
+      "it",
+      "help",
+      "shipping",
+      "again"
+     ],
+     "label": null,
+     "probs": [
+      0.16562870144844055,
+      0.14637884497642517,
+      0.14554263651371002,
+      0.12501022219657898,
+      0.1302676945924759,
+      0.1510145217180252,
+      0.1361573338508606
+     ]
+    },
+    {
+     "qid": "q1",
+     "type": "score",
+     "keys": [
+      "0",
+      "1",
+      "2"
+     ],
+     "label": null,
+     "probs": [
+      0.36989250779151917,
+      0.2590404152870178,
+      0.3710671067237854
+     ]
+    },
+    {
+     "qid": "q2",
+     "type": "noul",
+     "keys": [
+      "false",
+      "true"
+     ],
+     "label": null,
+     "probs": [
+      0.4749627113342285,
+      0.5250372886657715
+     ]
+    },
+    {
+     "qid": "q3",
+     "type": "choice",
+     "keys": [
+      "box"
+     ],
+     "label": null,
+     "probs": [
+      1.0
+     ]
+    },
+    {
+     "qid": "q4",
+     "type": "score",
+     "keys": [
+      "0",
+      "1",
+      "2",
+      "3",
+      "4"
+     ],
+     "label": null,
+     "probs": [
+      0.13481591641902924,
+      0.17563852667808533,
+      0.22476521134376526,
+      0.1824684739112854,
+      0.2823118567466736
+     ]
+    }
+   ]
+  },
+  {
+   "id": "tiny:22",
+   "kind": "tiny",
+   "request": {
+    "state": "size wrong box",
+    "questions": {
+     "q0": {
+      "type": "noul",
+      "instructions": "was"
+     },
+     "q1": {
+      "type": "noul",
+      "instructions": "box billing late"
+     },
+     "q2": {
+      "type": "choice",
+      "instructions": "late no customer no the bad",
+      "criteria": {
+       "angry": "is how order"
+      }
+     },
+     "q3": {
+      "type": "choice",
+      "instructions": "yes which charged",
+      "criteria": {
+       "box": "arrived it damaged please",
+       "refund": "lost was",
+       "how": "team arrived refund"
+      }
+     },
+     "q4": {
+      "type": "score",
+      "instructions": "twice bad it angry",
+      "criteria": [
+       "angry customer refund",
+       "late",
+       "twice how"
+      ]
+     }
+    }
+   },
+   "input": {
+    "state": "size wrong box",
+    "questions": [
+     {
+      "instr": "was",
+      "options": [
+       "no",
+       "yes"
+      ]
+     },
+     {
+      "instr": "box billing late",
+      "options": [
+       "no",
+       "yes"
+      ]
+     },
+     {
+      "instr": "late no customer no the bad",
+      "options": [
+       "angry: is how order"
+      ]
+     },
+     {
+      "instr": "yes which charged",
+      "options": [
+       "box: arrived it damaged please",
+       "refund: lost was",
+       "how: team arrived refund"
+      ]
+     },
+     {
+      "instr": "twice bad it angry",
+      "options": [
+       "angry customer refund",
+       "late",
+       "twice how"
+      ]
+     }
+    ]
+   },
+   "ids": [
+    2,
+    4,
+    30,
+    29,
+    27,
+    5,
+    33,
+    6,
+    22,
+    7,
+    6,
+    23,
+    7,
+    8,
+    5,
+    27,
+    16,
+    25,
+    6,
+    22,
+    7,
+    6,
+    23,
+    7,
+    8,
+    5,
+    25,
+    22,
+    10,
+    22,
+    9,
+    21,
+    6,
+    19,
+    1,
+    11,
+    20,
+    24,
+    7,
+    8,
+    5,
+    23,
+    14,
+    12,
+    6,
+    27,
+    1,
+    28,
+    32,
+    31,
+    35,
+    7,
+    6,
+    18,
+    1,
+    26,
+    33,
+    7,
+    6,
+    20,
+    1,
+    15,
+    28,
+    18,
+    7,
+    8,
+    5,
+    13,
+    21,
+    32,
+    19,
+    6,
+    19,
+    10,
+    18,
+    7,
+    6,
+    25,
+    7,
+    6,
+    13,
+    20,
+    7,
+    8
+   ],
+   "questions": [
+    {
+     "qid": "q0",
+     "type": "noul",
+     "keys": [
+      "false",
+      "true"
+     ],
+     "label": null,
+     "probs": [
+      0.5232442021369934,
+      0.476755827665329
+     ]
+    },
+    {
+     "qid": "q1",
+     "type": "noul",
+     "keys": [
+      "false",
+      "true"
+     ],
+     "label": null,
+     "probs": [
+      0.7788278460502625,
+      0.22117218375205994
+     ]
+    },
+    {
+     "qid": "q2",
+     "type": "choice",
+     "keys": [
+      "angry"
+     ],
+     "label": null,
+     "probs": [
+      1.0
+     ]
+    },
+    {
+     "qid": "q3",
+     "type": "choice",
+     "keys": [
+      "box",
+      "refund",
+      "how"
+     ],
+     "label": null,
+     "probs": [
+      0.23933981359004974,
+      0.2648402750492096,
+      0.49581992626190186
+     ]
+    },
+    {
+     "qid": "q4",
+     "type": "score",
+     "keys": [
+      "0",
+      "1",
+      "2"
+     ],
+     "label": null,
+     "probs": [
+      0.3697519302368164,
+      0.3243807852268219,
+      0.3058672249317169
+     ]
+    }
+   ]
+  },
+  {
+   "id": "tiny:23",
+   "kind": "tiny",
+   "request": {
+    "state": "no wrong size please order refund refund box lost billing twice lost size arrived team order",
+    "questions": {
+     "q0": {
+      "type": "score",
+      "instructions": "is order which angry charged",
+      "criteria": [
+       "shipping box lost"
+      ]
+     },
+     "q1": {
+      "type": "choice",
+      "instructions": "arrived billing",
+      "criteria": {
+       "again": null,
+       "was": null,
+       "size": null
+      }
+     },
+     "q2": {
+      "type": "choice",
+      "instructions": "which billing again lost",
+      "criteria": {
+       "angry": null,
+       "was": "billing"
+      }
+     }
+    }
+   },
+   "input": {
+    "state": "no wrong size please order refund refund box lost billing twice lost size arrived team order",
+    "questions": [
+     {
+      "instr": "is order which angry charged",
+      "options": [
+       "shipping box lost"
+      ]
+     },
+     {
+      "instr": "arrived billing",
+      "options": [
+       "again",
+       "was",
+       "size"
+      ]
+     },
+     {
+      "instr": "which billing again lost",
+      "options": [
+       "angry",
+       "was: billing"
+      ]
+     }
+    ]
+   },
+   "ids": [
+    2,
+    4,
+    22,
+    29,
+    30,
+    35,
+    24,
+    18,
+    18,
+    27,
+    26,
+    16,
+    13,
+    26,
+    30,
+    28,
+    15,
+    24,
+    5,
+    11,
+    24,
+    14,
+    19,
+    12,
+    6,
+    17,
+    27,
+    26,
+    7,
+    8,
+    5,
+    28,
+    16,
+    6,
+    34,
+    7,
+    6,
+    33,
+    7,
+    6,
+    30,
+    7,
+    8,
+    5,
+    14,
+    16,
+    34,
+    26,
+    6,
+    19,
+    7,
+    6,
+    33,
+    1,
+    16,
+    7,
+    8
+   ],
+   "questions": [
+    {
+     "qid": "q0",
+     "type": "score",
+     "keys": [
+      "0"
+     ],
+     "label": null,
+     "probs": [
+      1.0
+     ]
+    },
+    {
+     "qid": "q1",
+     "type": "choice",
+     "keys": [
+      "again",
+      "was",
+      "size"
+     ],
+     "label": null,
+     "probs": [
+      0.3786301910877228,
+      0.3491785526275635,
+      0.27219122648239136
+     ]
+    },
+    {
+     "qid": "q2",
+     "type": "choice",
+     "keys": [
+      "angry",
+      "was"
+     ],
+     "label": null,
+     "probs": [
+      0.43723538517951965,
+      0.562764585018158
+     ]
+    }
+   ]
+  },
+  {
+   "id": "tiny:24",
+   "kind": "tiny",
+   "request": {
+    "state": "billing refund",
+    "questions": {
+     "q0": {
+      "type": "noul",
+      "instructions": "box team"
+     },
+     "q1": {
+      "type": "noul",
+      "instructions": "customer today twice"
+     },
+     "q2": {
+      "type": "noul",
+      "instructions": "twice arrived was was angry",
+      "criteria": {
+       "true": "billing order arrived",
+       "false": "bad was shipping"
+      }
+     },
+     "q3": {
+      "type": "noul",
+      "instructions": "shipping yes help was order"
+     },
+     "q4": {
+      "type": "choice",
+      "instructions": "team",
+      "criteria": {
+       "late": "billing charged late it"
+      }
+     }
+    }
+   },
+   "input": {
+    "state": "billing refund",
+    "questions": [
+     {
+      "instr": "box team",
+      "options": [
+       "no",
+       "yes"
+      ]
+     },
+     {
+      "instr": "customer today twice",
+      "options": [
+       "no",
+       "yes"
+      ]
+     },
+     {
+      "instr": "twice arrived was was angry",
+      "options": [
+       "no: bad was shipping",
+       "yes: billing order arrived"
+      ]
+     },
+     {
+      "instr": "shipping yes help was order",
+      "options": [
+       "no",
+       "yes"
+      ]
+     },
+     {
+      "instr": "team",
+      "options": [
+       "late: billing charged late it"
+      ]
+     }
+    ]
+   },
+   "ids": [
+    2,
+    4,
+    16,
+    18,
+    5,
+    27,
+    15,
+    6,
+    22,
+    7,
+    6,
+    23,
+    7,
+    8,
+    5,
+    10,
+    37,
+    13,
+    6,
+    22,
+    7,
+    6,
+    23,
+    7,
+    8,
+    5,
+    13,
+    28,
+    33,
+    33,
+    19,
+    6,
+    22,
+    1,
+    21,
+    33,
+    17,
+    7,
+    6,
+    23,
+    1,
+    16,
+    24,
+    28,
+    7,
+    8,
+    5,
+    17,
+    23,
+    36,
+    33,
+    24,
+    6,
+    22,
+    7,
+    6,
+    23,
+    7,
+    8,
+    5,
+    15,
+    6,
+    25,
+    1,
+    16,
+    12,
+    25,
+    32,
+    7,
+    8
+   ],
+   "questions": [
+    {
+     "qid": "q0",
+     "type": "noul",
+     "keys": [
+      "false",
+      "true"
+     ],
+     "label": null,
+     "probs": [
+      0.5106546878814697,
+      0.4893453121185303
+     ]
+    },
+    {
+     "qid": "q1",
+     "type": "noul",
+     "keys": [
+      "false",
+      "true"
+     ],
+     "label": null,
+     "probs": [
+      0.41713711619377136,
+      0.5828628540039062
+     ]
+    },
+    {
+     "qid": "q2",
+     "type": "noul",
+     "keys": [
+      "false",
+      "true"
+     ],
+     "label": null,
+     "probs": [
+      0.568047285079956,
+      0.4319526255130768
+     ]
+    },
+    {
+     "qid": "q3",
+     "type": "noul",
+     "keys": [
+      "false",
+      "true"
+     ],
+     "label": null,
+     "probs": [
+      0.5137684345245361,
+      0.4862314760684967
+     ]
+    },
+    {
+     "qid": "q4",
+     "type": "choice",
+     "keys": [
+      "late"
+     ],
+     "label": null,
+     "probs": [
+      1.0
+     ]
+    }
+   ]
+  },
+  {
+   "id": "tiny:25",
+   "kind": "tiny",
+   "request": {
+    "state": "no angry refund is it order help the shipping billing",
+    "questions": {
+     "q0": {
+      "type": "score",
+      "instructions": "box help customer",
+      "criteria": [
+       "lost",
+       "please team was",
+       "arrived",
+       "charged",
+       "bad"
+      ]
+     },
+     "q1": {
+      "type": "score",
+      "instructions": "is help damaged size help please",
+      "criteria": [
+       "wrong",
+       "help wrong box"
+      ]
+     },
+     "q2": {
+      "type": "noul",
+      "instructions": "again it late customer"
+     },
+     "q3": {
+      "type": "noul",
+      "instructions": "which size yes is no lost"
+     }
+    }
+   },
+   "input": {
+    "state": "no angry refund is it order help the shipping billing",
+    "questions": [
+     {
+      "instr": "box help customer",
+      "options": [
+       "lost",
+       "please team was",
+       "arrived",
+       "charged",
+       "bad"
+      ]
+     },
+     {
+      "instr": "is help damaged size help please",
+      "options": [
+       "wrong",
+       "help wrong box"
+      ]
+     },
+     {
+      "instr": "again it late customer",
+      "options": [
+       "no",
+       "yes"
+      ]
+     },
+     {
+      "instr": "which size yes is no lost",
+      "options": [
+       "no",
+       "yes"
+      ]
+     }
+    ]
+   },
+   "ids": [
+    2,
+    4,
+    22,
+    19,
+    18,
+    11,
+    32,
+    24,
+    36,
+    9,
+    17,
+    16,
+    5,
+    27,
+    36,
+    10,
+    6,
+    26,
+    7,
+    6,
+    35,
+    15,
+    33,
+    7,
+    6,
+    28,
+    7,
+    6,
+    12,
+    7,
+    6,
+    21,
+    7,
+    8,
+    5,
+    11,
+    36,
+    31,
+    30,
+    36,
+    35,
+    6,
+    29,
+    7,
+    6,
+    36,
+    29,
+    27,
+    7,
+    8,
+    5,
+    34,
+    32,
+    25,
+    10,
+    6,
+    22,
+    7,
+    6,
+    23,
+    7,
+    8,
+    5,
+    14,
+    30,
+    23,
+    11,
+    22,
+    26,
+    6,
+    22,
+    7,
+    6,
+    23,
+    7,
+    8
+   ],
+   "questions": [
+    {
+     "qid": "q0",
+     "type": "score",
+     "keys": [
+      "0",
+      "1",
+      "2",
+      "3",
+      "4"
+     ],
+     "label": null,
+     "probs": [
+      0.21860665082931519,
+      0.1750127077102661,
+      0.18729571998119354,
+      0.16204702854156494,
+      0.25703784823417664
+     ]
+    },
+    {
+     "qid": "q1",
+     "type": "score",
+     "keys": [
+      "0",
+      "1"
+     ],
+     "label": null,
+     "probs": [
+      0.4975861608982086,
+      0.5024139285087585
+     ]
+    },
+    {
+     "qid": "q2",
+     "type": "noul",
+     "keys": [
+      "false",
+      "true"
+     ],
+     "label": null,
+     "probs": [
+      0.727496862411499,
+      0.272503137588501
+     ]
+    },
+    {
+     "qid": "q3",
+     "type": "noul",
+     "keys": [
+      "false",
+      "true"
+     ],
+     "label": null,
+     "probs": [
+      0.5985825657844543,
+      0.40141743421554565
+     ]
+    }
+   ]
+  },
+  {
+   "id": "tiny:26",
+   "kind": "tiny",
+   "request": {
+    "state": "again the it refund charged how which wrong angry it",
+    "questions": {
+     "q0": {
+      "type": "score",
+      "instructions": "billing the bad",
+      "criteria": [
+       "billing lost arrived",
+       "again customer"
+      ]
+     }
+    }
+   },
+   "input": {
+    "state": "again the it refund charged how which wrong angry it",
+    "questions": [
+     {
+      "instr": "billing the bad",
+      "options": [
+       "billing lost arrived",
+       "again customer"
+      ]
+     }
+    ]
+   },
+   "ids": [
+    2,
+    4,
+    34,
+    9,
+    32,
+    18,
+    12,
+    20,
+    14,
+    29,
+    19,
+    32,
+    5,
+    16,
+    9,
+    21,
+    6,
+    16,
+    26,
+    28,
+    7,
+    6,
+    34,
+    10,
+    7,
+    8
+   ],
+   "questions": [
+    {
+     "qid": "q0",
+     "type": "score",
+     "keys": [
+      "0",
+      "1"
+     ],
+     "label": null,
+     "probs": [
+      0.5194595456123352,
+      0.48054039478302
+     ]
+    }
+   ]
+  },
+  {
+   "id": "tiny:27",
+   "kind": "tiny",
+   "request": {
+    "state": "size arrived yes yes customer please which it help again twice wrong today please refund shipping was arrived box it shipping order billing box wrong order charged wrong size how bad lost damaged size damaged please size refund today twice box",
+    "questions": {
+     "q0": {
+      "type": "score",
+      "instructions": "please late how",
+      "criteria": [
+       "lost customer billing",
+       "please was today",
+       "team"
+      ]
+     },
+     "q1": {
+      "type": "choice",
+      "instructions": "billing team",
+      "criteria": {
+       "which": null
+      }
+     },
+     "q2": {
+      "type": "score",
+      "instructions": "team twice charged",
+      "criteria": [
+       "how today customer",
+       "today arrived"
+      ]
+     },
+     "q3": {
+      "type": "noul",
+      "instructions": "wrong shipping"
+     },
+     "q4": {
+      "type": "choice",
+      "instructions": "lost help the how no angry",
+      "criteria": {
+       "twice": null,
+       "angry": null,
+       "customer": "refund was again",
+       "yes": null
+      }
+     },
+     "q5": {
+      "type": "noul",
+      "instructions": "help shipping customer",
+      "criteria": {
+       "true": "angry please",
+       "false": "please"
+      }
+     }
+    }
+   },
+   "input": {
+    "state": "size arrived yes yes customer please which it help again twice wrong today please refund shipping was arrived box it shipping order billing box wrong order charged wrong size how bad lost damaged size damaged please size refund today twice box",
+    "questions": [
+     {
+      "instr": "please late how",
+      "options": [
+       "lost customer billing",
+       "please was today",
+       "team"
+      ]
+     },
+     {
+      "instr": "billing team",
+      "options": [
+       "which"
+      ]
+     },
+     {
+      "instr": "team twice charged",
+      "options": [
+       "how today customer",
+       "today arrived"
+      ]
+     },
+     {
+      "instr": "wrong shipping",
+      "options": [
+       "no",
+       "yes"
+      ]
+     },
+     {
+      "instr": "lost help the how no angry",
+      "options": [
+       "twice",
+       "angry",
+       "customer: refund was again",
+       "yes"
+      ]
+     },
+     {
+      "instr": "help shipping customer",
+      "options": [
+       "no: please",
+       "yes: angry please"
+      ]
+     }
+    ]
+   },
+   "ids": [
+    2,
+    4,
+    30,
+    28,
+    23,
+    23,
+    10,
+    35,
+    14,
+    32,
+    36,
+    34,
+    13,
+    29,
+    37,
+    35,
+    18,
+    17,
+    33,
+    28,
+    27,
+    32,
+    17,
+    24,
+    16,
+    27,
+    29,
+    24,
+    12,
+    29,
+    30,
+    20,
+    21,
+    26,
+    31,
+    30,
+    31,
+    35,
+    30,
+    18,
+    37,
+    13,
+    27,
+    5,
+    35,
+    25,
+    20,
+    6,
+    26,
+    10,
+    16,
+    7,
+    6,
+    35,
+    33,
+    37,
+    7,
+    6,
+    15,
+    7,
+    8,
+    5,
+    16,
+    15,
+    6,
+    14,
+    7,
+    8,
+    5,
+    15,
+    13,
+    12,
+    6,
+    20,
+    37,
+    10,
+    7,
+    6,
+    37,
+    28,
+    7,
+    8,
+    5,
+    29,
+    17,
+    6,
+    22,
+    7,
+    6,
+    23,
+    7,
+    8,
+    5,
+    26,
+    36,
+    9,
+    20,
+    22,
+    19,
+    6,
+    13,
+    7,
+    6,
+    19,
+    7,
+    6,
+    10,
+    1,
+    18,
+    33,
+    34,
+    7,
+    6,
+    23,
+    7,
+    8,
+    5,
+    36,
+    17,
+    10,
+    6,
+    22,
+    1,
+    35,
+    7,
+    6,
+    23,
+    1,
+    19,
+    35,
+    7,
+    8
+   ],
+   "questions": [
+    {
+     "qid": "q0",
+     "type": "score",
+     "keys": [
+      "0",
+      "1",
+      "2"
+     ],
+     "label": null,
+     "probs": [
+      0.41492846608161926,
+      0.2390483021736145,
+      0.34602323174476624
+     ]
+    },
+    {
+     "qid": "q1",
+     "type": "choice",
+     "keys": [
+      "which"
+     ],
+     "label": null,
+     "probs": [
+      1.0
+     ]
+    },
+    {
+     "qid": "q2",
+     "type": "score",
+     "keys": [
+      "0",
+      "1"
+     ],
+     "label": null,
+     "probs": [
+      0.5669355988502502,
+      0.43306440114974976
+     ]
+    },
+    {
+     "qid": "q3",
+     "type": "noul",
+     "keys": [
+      "false",
+      "true"
+     ],
+     "label": null,
+     "probs": [
+      0.6009824275970459,
+      0.3990175426006317
+     ]
+    },
+    {
+     "qid": "q4",
+     "type": "choice",
+     "keys": [
+      "twice",
+      "angry",
+      "customer",
+      "yes"
+     ],
+     "label": null,
+     "probs": [
+      0.2498624324798584,
+      0.22702954709529877,
+      0.23756876587867737,
+      0.28553926944732666
+     ]
+    },
+    {
+     "qid": "q5",
+     "type": "noul",
+     "keys": [
+      "false",
+      "true"
+     ],
+     "label": null,
+     "probs": [
+      0.613795816898346,
+      0.38620418310165405
+     ]
+    }
+   ]
+  },
+  {
+   "id": "tiny:28",
+   "kind": "tiny",
+   "request": {
+    "state": "late bad was help twice billing bad how lost damaged again size",
+    "questions": {
+     "q0": {
+      "type": "noul",
+      "instructions": "which was team"
+     },
+     "q1": {
+      "type": "choice",
+      "instructions": "charged which yes wrong order is",
+      "criteria": {
+       "please": null,
+       "help": "billing",
+       "it": "help angry",
+       "customer": "yes bad lost",
+       "the": "please team",
+       "box": "shipping"
+      }
+     },
+     "q2": {
+      "type": "choice",
+      "instructions": "billing",
+      "criteria": {
+       "was": null,
+       "wrong": null,
+       "damaged": "no bad refund box"
+      }
+     }
+    }
+   },
+   "input": {
+    "state": "late bad was help twice billing bad how lost damaged again size",
+    "questions": [
+     {
+      "instr": "which was team",
+      "options": [
+       "no",
+       "yes"
+      ]
+     },
+     {
+      "instr": "charged which yes wrong order is",
+      "options": [
+       "please",
+       "help: billing",
+       "it: help angry",
+       "customer: yes bad lost",
+       "the: please team",
+       "box: shipping"
+      ]
+     },
+     {
+      "instr": "billing",
+      "options": [
+       "was",
+       "wrong",
+       "damaged: no bad refund box"
+      ]
+     }
+    ]
+   },
+   "ids": [
+    2,
+    4,
+    25,
+    21,
+    33,
+    36,
+    13,
+    16,
+    21,
+    20,
+    26,
+    31,
+    34,
+    30,
+    5,
+    14,
+    33,
+    15,
+    6,
+    22,
+    7,
+    6,
+    23,
+    7,
+    8,
+    5,
+    12,
+    14,
+    23,
+    29,
+    24,
+    11,
+    6,
+    35,
+    7,
+    6,
+    36,
+    1,
+    16,
+    7,
+    6,
+    32,
+    1,
+    36,
+    19,
+    7,
+    6,
+    10,
+    1,
+    23,
+    21,
+    26,
+    7,
+    6,
+    9,
+    1,
+    35,
+    15,
+    7,
+    6,
+    27,
+    1,
+    17,
+    7,
+    8,
+    5,
+    16,
+    6,
+    33,
+    7,
+    6,
+    29,
+    7,
+    6,
+    31,
+    1,
+    22,
+    21,
+    18,
+    27,
+    7,
+    8
+   ],
+   "questions": [
+    {
+     "qid": "q0",
+     "type": "noul",
+     "keys": [
+      "false",
+      "true"
+     ],
+     "label": null,
+     "probs": [
+      0.60908043384552,
+      0.3909195363521576
+     ]
+    },
+    {
+     "qid": "q1",
+     "type": "choice",
+     "keys": [
+      "please",
+      "help",
+      "it",
+      "customer",
+      "the",
+      "box"
+     ],
+     "label": null,
+     "probs": [
+      0.17267164587974548,
+      0.22777651250362396,
+      0.1923055201768875,
+      0.11099404841661453,
+      0.13132037222385406,
+      0.16493189334869385
+     ]
+    },
+    {
+     "qid": "q2",
+     "type": "choice",
+     "keys": [
+      "was",
+      "wrong",
+      "damaged"
+     ],
+     "label": null,
+     "probs": [
+      0.493582546710968,
+      0.27228909730911255,
+      0.2341284304857254
+     ]
+    }
+   ]
+  },
+  {
+   "id": "tiny:29",
+   "kind": "tiny",
+   "request": {
+    "state": "box customer twice today it angry no",
+    "questions": {
+     "q0": {
+      "type": "choice",
+      "instructions": "yes yes box is how order",
+      "criteria": {
+       "which": "please is",
+       "again": "arrived refund today no",
+       "shipping": null,
+       "bad": "size charged"
+      }
+     },
+     "q1": {
+      "type": "choice",
+      "instructions": "billing late",
+      "criteria": {
+       "which": "is box",
+       "shipping": "refund billing arrived order",
+       "angry": "team",
+       "twice": "was",
+       "customer": null
+      }
+     },
+     "q2": {
+      "type": "choice",
+      "instructions": "wrong twice again team is",
+      "criteria": {
+       "charged": "no it again which",
+       "yes": null,
+       "wrong": "was yes shipping",
+       "late": "again today order",
+       "billing": "shipping",
+       "damaged": "please"
+      }
+     },
+     "q3": {
+      "type": "noul",
+      "instructions": "how"
+     },
+     "q4": {
+      "type": "noul",
+      "instructions": "help bad help please which"
+     },
+     "q5": {
+      "type": "noul",
+      "instructions": "charged team team box",
+      "criteria": {
+       "true": "again it",
+       "false": "late team box"
+      }
+     }
+    }
+   },
+   "input": {
+    "state": "box customer twice today it angry no",
+    "questions": [
+     {
+      "instr": "yes yes box is how order",
+      "options": [
+       "which: please is",
+       "again: arrived refund today no",
+       "shipping",
+       "bad: size charged"
+      ]
+     },
+     {
+      "instr": "billing late",
+      "options": [
+       "which: is box",
+       "shipping: refund billing arrived order",
+       "angry: team",
+       "twice: was",
+       "customer"
+      ]
+     },
+     {
+      "instr": "wrong twice again team is",
+      "options": [
+       "charged: no it again which",
+       "yes",
+       "wrong: was yes shipping",
+       "late: again today order",
+       "billing: shipping",
+       "damaged: please"
+      ]
+     },
+     {
+      "instr": "how",
+      "options": [
+       "no",
+       "yes"
+      ]
+     },
+     {
+      "instr": "help bad help please which",
+      "options": [
+       "no",
+       "yes"
+      ]
+     },
+     {
+      "instr": "charged team team box",
+      "options": [
+       "no: late team box",
+       "yes: again it"
+      ]
+     }
+    ]
+   },
+   "ids": [
+    2,
+    4,
+    27,
+    10,
+    13,
+    37,
+    32,
+    19,
+    22,
+    5,
+    23,
+    23,
+    27,
+    11,
+    20,
+    24,
+    6,
+    14,
+    1,
+    35,
+    11,
+    7,
+    6,
+    34,
+    1,
+    28,
+    18,
+    37,
+    22,
+    7,
+    6,
+    17,
+    7,
+    6,
+    21,
+    1,
+    30,
+    12,
+    7,
+    8,
+    5,
+    16,
+    25,
+    6,
+    14,
+    1,
+    11,
+    27,
+    7,
+    6,
+    17,
+    1,
+    18,
+    16,
+    28,
+    24,
+    7,
+    6,
+    19,
+    1,
+    15,
+    7,
+    6,
+    13,
+    1,
+    33,
+    7,
+    6,
+    10,
+    7,
+    8,
+    5,
+    29,
+    13,
+    34,
+    15,
+    11,
+    6,
+    12,
+    1,
+    22,
+    32,
+    34,
+    14,
+    7,
+    6,
+    23,
+    7,
+    6,
+    29,
+    1,
+    33,
+    23,
+    17,
+    7,
+    6,
+    25,
+    1,
+    34,
+    37,
+    24,
+    7,
+    6,
+    16,
+    1,
+    17,
+    7,
+    6,
+    31,
+    1,
+    35,
+    7,
+    8,
+    5,
+    20,
+    6,
+    22,
+    7,
+    6,
+    23,
+    7,
+    8,
+    5,
+    36,
+    21,
+    36,
+    35,
+    14,
+    6,
+    22,
+    7,
+    6,
+    23,
+    7,
+    8,
+    5,
+    12,
+    15,
+    15,
+    27,
+    6,
+    22,
+    1,
+    25,
+    15,
+    27,
+    7,
+    6,
+    23,
+    1,
+    34,
+    32,
+    7,
+    8
+   ],
+   "questions": [
+    {
+     "qid": "q0",
+     "type": "choice",
+     "keys": [
+      "which",
+      "again",
+      "shipping",
+      "bad"
+     ],
+     "label": null,
+     "probs": [
+      0.24508321285247803,
+      0.22835186123847961,
+      0.33099862933158875,
+      0.1955663114786148
+     ]
+    },
+    {
+     "qid": "q1",
+     "type": "choice",
+     "keys": [
+      "which",
+      "shipping",
+      "angry",
+      "twice",
+      "customer"
+     ],
+     "label": null,
+     "probs": [
+      0.1726786196231842,
+      0.20072238147258759,
+      0.19835463166236877,
+      0.21064986288547516,
+      0.21759448945522308
+     ]
+    },
+    {
+     "qid": "q2",
+     "type": "choice",
+     "keys": [
+      "charged",
+      "yes",
+      "wrong",
+      "late",
+      "billing",
+      "damaged"
+     ],
+     "label": null,
+     "probs": [
+      0.16441071033477783,
+      0.16734860837459564,
+      0.18726004660129547,
+      0.1324513554573059,
+      0.19480277597904205,
+      0.15372644364833832
+     ]
+    },
+    {
+     "qid": "q3",
+     "type": "noul",
+     "keys": [
+      "false",
+      "true"
+     ],
+     "label": null,
+     "probs": [
+      0.512495219707489,
+      0.4875047504901886
+     ]
+    },
+    {
+     "qid": "q4",
+     "type": "noul",
+     "keys": [
+      "false",
+      "true"
+     ],
+     "label": null,
+     "probs": [
+      0.6001841425895691,
+      0.3998158276081085
+     ]
+    },
+    {
+     "qid": "q5",
+     "type": "noul",
+     "keys": [
+      "false",
+      "true"
+     ],
+     "label": null,
+     "probs": [
+      0.5140615701675415,
+      0.4859384298324585
+     ]
+    }
+   ]
+  },
+  {
+   "id": "tiny:30",
+   "kind": "tiny",
+   "request": {
+    "state": "how",
+    "questions": {
+     "q0": {
+      "type": "score",
+      "instructions": "box billing",
+      "criteria": [
+       "the",
+       "no wrong",
+       "billing refund",
+       "is it is",
+       "help team"
+      ]
+     },
+     "q1": {
+      "type": "noul",
+      "instructions": "arrived bad"
+     },
+     "q2": {
+      "type": "choice",
+      "instructions": "order charged the again shipping twice",
+      "criteria": {
+       "damaged": "angry angry",
+       "size": null,
+       "today": "no how late",
+       "is": "help arrived",
+       "the": "no size billing"
+      }
+     }
+    }
+   },
+   "input": {
+    "state": "how",
+    "questions": [
+     {
+      "instr": "box billing",
+      "options": [
+       "the",
+       "no wrong",
+       "billing refund",
+       "is it is",
+       "help team"
+      ]
+     },
+     {
+      "instr": "arrived bad",
+      "options": [
+       "no",
+       "yes"
+      ]
+     },
+     {
+      "instr": "order charged the again shipping twice",
+      "options": [
+       "damaged: angry angry",
+       "size",
+       "today: no how late",
+       "is: help arrived",
+       "the: no size billing"
+      ]
+     }
+    ]
+   },
+   "ids": [
+    2,
+    4,
+    20,
+    5,
+    27,
+    16,
+    6,
+    9,
+    7,
+    6,
+    22,
+    29,
+    7,
+    6,
+    16,
+    18,
+    7,
+    6,
+    11,
+    32,
+    11,
+    7,
+    6,
+    36,
+    15,
+    7,
+    8,
+    5,
+    28,
+    21,
+    6,
+    22,
+    7,
+    6,
+    23,
+    7,
+    8,
+    5,
+    24,
+    12,
+    9,
+    34,
+    17,
+    13,
+    6,
+    31,
+    1,
+    19,
+    19,
+    7,
+    6,
+    30,
+    7,
+    6,
+    37,
+    1,
+    22,
+    20,
+    25,
+    7,
+    6,
+    11,
+    1,
+    36,
+    28,
+    7,
+    6,
+    9,
+    1,
+    22,
+    30,
+    16,
+    7,
+    8
+   ],
+   "questions": [
+    {
+     "qid": "q0",
+     "type": "score",
+     "keys": [
+      "0",
+      "1",
+      "2",
+      "3",
+      "4"
+     ],
+     "label": null,
+     "probs": [
+      0.19482757151126862,
+      0.22216232120990753,
+      0.14304618537425995,
+      0.23874501883983612,
+      0.20121899247169495
+     ]
+    },
+    {
+     "qid": "q1",
+     "type": "noul",
+     "keys": [
+      "false",
+      "true"
+     ],
+     "label": null,
+     "probs": [
+      0.4879626929759979,
+      0.5120373368263245
+     ]
+    },
+    {
+     "qid": "q2",
+     "type": "choice",
+     "keys": [
+      "damaged",
+      "size",
+      "today",
+      "is",
+      "the"
+     ],
+     "label": null,
+     "probs": [
+      0.13891640305519104,
+      0.2475433051586151,
+      0.1938178986310959,
+      0.23170344531536102,
+      0.18801894783973694
+     ]
+    }
+   ]
+  },
+  {
+   "id": "tiny:31",
+   "kind": "tiny",
+   "request": {
+    "state": "it it",
+    "questions": {
+     "q0": {
+      "type": "score",
+      "instructions": "size refund team shipping bad",
+      "criteria": [
+       "bad",
+       "charged",
+       "box today how",
+       "angry",
+       "it"
+      ]
+     },
+     "q1": {
+      "type": "score",
+      "instructions": "lost angry lost billing it angry",
+      "criteria": [
+       "no today"
+      ]
+     },
+     "q2": {
+      "type": "score",
+      "instructions": "today",
+      "criteria": [
+       "customer",
+       "how"
+      ]
+     },
+     "q3": {
+      "type": "score",
+      "instructions": "box again",
+      "criteria": [
+       "charged",
+       "today box wrong",
+       "the damaged damaged",
+       "twice customer order"
+      ]
+     },
+     "q4": {
+      "type": "score",
+      "instructions": "please twice size order",
+      "criteria": [
+       "customer lost team"
+      ]
+     }
+    }
+   },
+   "input": {
+    "state": "it it",
+    "questions": [
+     {
+      "instr": "size refund team shipping bad",
+      "options": [
+       "bad",
+       "charged",
+       "box today how",
+       "angry",
+       "it"
+      ]
+     },
+     {
+      "instr": "lost angry lost billing it angry",
+      "options": [
+       "no today"
+      ]
+     },
+     {
+      "instr": "today",
+      "options": [
+       "customer",
+       "how"
+      ]
+     },
+     {
+      "instr": "box again",
+      "options": [
+       "charged",
+       "today box wrong",
+       "the damaged damaged",
+       "twice customer order"
+      ]
+     },
+     {
+      "instr": "please twice size order",
+      "options": [
+       "customer lost team"
+      ]
+     }
+    ]
+   },
+   "ids": [
+    2,
+    4,
+    32,
+    32,
+    5,
+    30,
+    18,
+    15,
+    17,
+    21,
+    6,
+    21,
+    7,
+    6,
+    12,
+    7,
+    6,
+    27,
+    37,
+    20,
+    7,
+    6,
+    19,
+    7,
+    6,
+    32,
+    7,
+    8,
+    5,
+    26,
+    19,
+    26,
+    16,
+    32,
+    19,
+    6,
+    22,
+    37,
+    7,
+    8,
+    5,
+    37,
+    6,
+    10,
+    7,
+    6,
+    20,
+    7,
+    8,
+    5,
+    27,
+    34,
+    6,
+    12,
+    7,
+    6,
+    37,
+    27,
+    29,
+    7,
+    6,
+    9,
+    31,
+    31,
+    7,
+    6,
+    13,
+    10,
+    24,
+    7,
+    8,
+    5,
+    35,
+    13,
+    30,
+    24,
+    6,
+    10,
+    26,
+    15,
+    7,
+    8
+   ],
+   "questions": [
+    {
+     "qid": "q0",
+     "type": "score",
+     "keys": [
+      "0",
+      "1",
+      "2",
+      "3",
+      "4"
+     ],
+     "label": null,
+     "probs": [
+      0.27982407808303833,
+      0.13384006917476654,
+      0.2012615203857422,
+      0.19197823107242584,
+      0.19309604167938232
+     ]
+    },
+    {
+     "qid": "q1",
+     "type": "score",
+     "keys": [
+      "0"
+     ],
+     "label": null,
+     "probs": [
+      1.0
+     ]
+    },
+    {
+     "qid": "q2",
+     "type": "score",
+     "keys": [
+      "0",
+      "1"
+     ],
+     "label": null,
+     "probs": [
+      0.5873945951461792,
+      0.4126054346561432
+     ]
+    },
+    {
+     "qid": "q3",
+     "type": "score",
+     "keys": [
+      "0",
+      "1",
+      "2",
+      "3"
+     ],
+     "label": null,
+     "probs": [
+      0.3705228567123413,
+      0.14172382652759552,
+      0.21391387283802032,
+      0.27383947372436523
+     ]
+    },
+    {
+     "qid": "q4",
+     "type": "score",
+     "keys": [
+      "0"
+     ],
+     "label": null,
+     "probs": [
+      1.0
+     ]
+    }
+   ]
+  },
+  {
+   "id": "tiny:32",
+   "kind": "tiny",
+   "request": {
+    "state": "late late no wrong angry late how customer order bad help it which please bad billing angry order yes please arrived team arrived the wrong lost size yes arrived",
+    "questions": {
+     "q0": {
+      "type": "score",
+      "instructions": "again angry",
+      "criteria": [
+       "help",
+       "billing team",
+       "again help damaged"
+      ]
+     },
+     "q1": {
+      "type": "score",
+      "instructions": "which is was",
+      "criteria": [
+       "it lost",
+       "today box",
+       "team charged"
+      ]
+     },
+     "q2": {
+      "type": "choice",
+      "instructions": "late",
+      "criteria": {
+       "wrong": null,
+       "bad": "the today team order"
+      }
+     },
+     "q3": {
+      "type": "score",
+      "instructions": "box charged customer again which",
+      "criteria": [
+       "is",
+       "wrong wrong twice",
+       "no customer",
+       "angry late arrived",
+       "billing"
+      ]
+     }
+    }
+   },
+   "input": {
+    "state": "late late no wrong angry late how customer order bad help it which please bad billing angry order yes please arrived team arrived the wrong lost size yes arrived",
+    "questions": [
+     {
+      "instr": "again angry",
+      "options": [
+       "help",
+       "billing team",
+       "again help damaged"
+      ]
+     },
+     {
+      "instr": "which is was",
+      "options": [
+       "it lost",
+       "today box",
+       "team charged"
+      ]
+     },
+     {
+      "instr": "late",
+      "options": [
+       "wrong",
+       "bad: the today team order"
+      ]
+     },
+     {
+      "instr": "box charged customer again which",
+      "options": [
+       "is",
+       "wrong wrong twice",
+       "no customer",
+       "angry late arrived",
+       "billing"
+      ]
+     }
+    ]
+   },
+   "ids": [
+    2,
+    4,
+    25,
+    25,
+    22,
+    29,
+    19,
+    25,
+    20,
+    10,
+    24,
+    21,
+    36,
+    32,
+    14,
+    35,
+    21,
+    16,
+    19,
+    24,
+    23,
+    35,
+    28,
+    15,
+    28,
+    9,
+    29,
+    26,
+    30,
+    23,
+    28,
+    5,
+    34,
+    19,
+    6,
+    36,
+    7,
+    6,
+    16,
+    15,
+    7,
+    6,
+    34,
+    36,
+    31,
+    7,
+    8,
+    5,
+    14,
+    11,
+    33,
+    6,
+    32,
+    26,
+    7,
+    6,
+    37,
+    27,
+    7,
+    6,
+    15,
+    12,
+    7,
+    8,
+    5,
+    25,
+    6,
+    29,
+    7,
+    6,
+    21,
+    1,
+    9,
+    37,
+    15,
+    24,
+    7,
+    8,
+    5,
+    27,
+    12,
+    10,
+    34,
+    14,
+    6,
+    11,
+    7,
+    6,
+    29,
+    29,
+    13,
+    7,
+    6,
+    22,
+    10,
+    7,
+    6,
+    19,
+    25,
+    28,
+    7,
+    6,
+    16,
+    7,
+    8
+   ],
+   "questions": [
+    {
+     "qid": "q0",
+     "type": "score",
+     "keys": [
+      "0",
+      "1",
+      "2"
+     ],
+     "label": null,
+     "probs": [
+      0.2158661037683487,
+      0.40628787875175476,
+      0.37784597277641296
+     ]
+    },
+    {
+     "qid": "q1",
+     "type": "score",
+     "keys": [
+      "0",
+      "1",
+      "2"
+     ],
+     "label": null,
+     "probs": [
+      0.3443121314048767,
+      0.2843985855579376,
+      0.37128928303718567
+     ]
+    },
+    {
+     "qid": "q2",
+     "type": "choice",
+     "keys": [
+      "wrong",
+      "bad"
+     ],
+     "label": null,
+     "probs": [
+      0.4568943679332733,
+      0.5431056618690491
+     ]
+    },
+    {
+     "qid": "q3",
+     "type": "score",
+     "keys": [
+      "0",
+      "1",
+      "2",
+      "3",
+      "4"
+     ],
+     "label": null,
+     "probs": [
+      0.20332619547843933,
+      0.2845888137817383,
+      0.22856514155864716,
+      0.14815732836723328,
+      0.13536258041858673
+     ]
+    }
+   ]
+  },
+  {
+   "id": "tiny:33",
+   "kind": "tiny",
+   "request": {
+    "state": "was the today billing help arrived angry bad refund charged today",
+    "questions": {
+     "q0": {
+      "type": "choice",
+      "instructions": "arrived lost",
+      "criteria": {
+       "bad": null,
+       "how": null,
+       "box": null,
+       "which": null
+      }
+     },
+     "q1": {
+      "type": "score",
+      "instructions": "customer which lost",
+      "criteria": [
+       "twice order which",
+       "help which"
+      ]
+     }
+    }
+   },
+   "input": {
+    "state": "was the today billing help arrived angry bad refund charged today",
+    "questions": [
+     {
+      "instr": "arrived lost",
+      "options": [
+       "bad",
+       "how",
+       "box",
+       "which"
+      ]
+     },
+     {
+      "instr": "customer which lost",
+      "options": [
+       "twice order which",
+       "help which"
+      ]
+     }
+    ]
+   },
+   "ids": [
+    2,
+    4,
+    33,
+    9,
+    37,
+    16,
+    36,
+    28,
+    19,
+    21,
+    18,
+    12,
+    37,
+    5,
+    28,
+    26,
+    6,
+    21,
+    7,
+    6,
+    20,
+    7,
+    6,
+    27,
+    7,
+    6,
+    14,
+    7,
+    8,
+    5,
+    10,
+    14,
+    26,
+    6,
+    13,
+    24,
+    14,
+    7,
+    6,
+    36,
+    14,
+    7,
+    8
+   ],
+   "questions": [
+    {
+     "qid": "q0",
+     "type": "choice",
+     "keys": [
+      "bad",
+      "how",
+      "box",
+      "which"
+     ],
+     "label": null,
+     "probs": [
+      0.21963970363140106,
+      0.19997349381446838,
+      0.3679425120353699,
+      0.21244432032108307
+     ]
+    },
+    {
+     "qid": "q1",
+     "type": "score",
+     "keys": [
+      "0",
+      "1"
+     ],
+     "label": null,
+     "probs": [
+      0.6822236180305481,
+      0.31777632236480713
+     ]
+    }
+   ]
+  },
+  {
+   "id": "tiny:34",
+   "kind": "tiny",
+   "request": {
+    "state": "please lost",
+    "questions": {
+     "q0": {
+      "type": "noul",
+      "instructions": "today",
+      "criteria": {
+       "true": "which",
+       "false": "yes"
+      }
+     },
+     "q1": {
+      "type": "choice",
+      "instructions": "order again order box",
+      "criteria": {
+       "again": null,
+       "billing": "it box it",
+       "the": null,
+       "angry": "billing"
+      }
+     },
+     "q2": {
+      "type": "noul",
+      "instructions": "again refund yes size shipping",
+      "criteria": {
+       "true": "no is order",
+       "false": "team box"
+      }
+     }
+    }
+   },
+   "input": {
+    "state": "please lost",
+    "questions": [
+     {
+      "instr": "today",
+      "options": [
+       "no: yes",
+       "yes: which"
+      ]
+     },
+     {
+      "instr": "order again order box",
+      "options": [
+       "again",
+       "billing: it box it",
+       "the",
+       "angry: billing"
+      ]
+     },
+     {
+      "instr": "again refund yes size shipping",
+      "options": [
+       "no: team box",
+       "yes: no is order"
+      ]
+     }
+    ]
+   },
+   "ids": [
+    2,
+    4,
+    35,
+    26,
+    5,
+    37,
+    6,
+    22,
+    1,
+    23,
+    7,
+    6,
+    23,
+    1,
+    14,
+    7,
+    8,
+    5,
+    24,
+    34,
+    24,
+    27,
+    6,
+    34,
+    7,
+    6,
+    16,
+    1,
+    32,
+    27,
+    32,
+    7,
+    6,
+    9,
+    7,
+    6,
+    19,
+    1,
+    16,
+    7,
+    8,
+    5,
+    34,
+    18,
+    23,
+    30,
+    17,
+    6,
+    22,
+    1,
+    15,
+    27,
+    7,
+    6,
+    23,
+    1,
+    22,
+    11,
+    24,
+    7,
+    8
+   ],
+   "questions": [
+    {
+     "qid": "q0",
+     "type": "noul",
+     "keys": [
+      "false",
+      "true"
+     ],
+     "label": null,
+     "probs": [
+      0.45259422063827515,
+      0.5474057793617249
+     ]
+    },
+    {
+     "qid": "q1",
+     "type": "choice",
+     "keys": [
+      "again",
+      "billing",
+      "the",
+      "angry"
+     ],
+     "label": null,
+     "probs": [
+      0.2554404139518738,
+      0.16847966611385345,
+      0.21315325796604156,
+      0.3629266619682312
+     ]
+    },
+    {
+     "qid": "q2",
+     "type": "noul",
+     "keys": [
+      "false",
+      "true"
+     ],
+     "label": null,
+     "probs": [
+      0.5110030770301819,
+      0.4889969229698181
+     ]
+    }
+   ]
+  },
+  {
+   "id": "tiny:35",
+   "kind": "tiny",
+   "request": {
+    "state": "which late",
+    "questions": {
+     "q0": {
+      "type": "noul",
+      "instructions": "bad refund damaged"
+     },
+     "q1": {
+      "type": "noul",
+      "instructions": "shipping size lost wrong",
+      "criteria": {
+       "true": "the lost please",
+       "false": "angry how which"
+      }
+     },
+     "q2": {
+      "type": "score",
+      "instructions": "today team billing no charged",
+      "criteria": [
+       "which was",
+       "angry no",
+       "angry was",
+       "arrived order box",
+       "it"
+      ]
+     },
+     "q3": {
+      "type": "choice",
+      "instructions": "box customer late the",
+      "criteria": {
+       "team": null,
+       "which": null,
+       "bad": "billing"
+      }
+     }
+    }
+   },
+   "input": {
+    "state": "which late",
+    "questions": [
+     {
+      "instr": "bad refund damaged",
+      "options": [
+       "no",
+       "yes"
+      ]
+     },
+     {
+      "instr": "shipping size lost wrong",
+      "options": [
+       "no: angry how which",
+       "yes: the lost please"
+      ]
+     },
+     {
+      "instr": "today team billing no charged",
+      "options": [
+       "which was",
+       "angry no",
+       "angry was",
+       "arrived order box",
+       "it"
+      ]
+     },
+     {
+      "instr": "box customer late the",
+      "options": [
+       "team",
+       "which",
+       "bad: billing"
+      ]
+     }
+    ]
+   },
+   "ids": [
+    2,
+    4,
+    14,
+    25,
+    5,
+    21,
+    18,
+    31,
+    6,
+    22,
+    7,
+    6,
+    23,
+    7,
+    8,
+    5,
+    17,
+    30,
+    26,
+    29,
+    6,
+    22,
+    1,
+    19,
+    20,
+    14,
+    7,
+    6,
+    23,
+    1,
+    9,
+    26,
+    35,
+    7,
+    8,
+    5,
+    37,
+    15,
+    16,
+    22,
+    12,
+    6,
+    14,
+    33,
+    7,
+    6,
+    19,
+    22,
+    7,
+    6,
+    19,
+    33,
+    7,
+    6,
+    28,
+    24,
+    27,
+    7,
+    6,
+    32,
+    7,
+    8,
+    5,
+    27,
+    10,
+    25,
+    9,
+    6,
+    15,
+    7,
+    6,
+    14,
+    7,
+    6,
+    21,
+    1,
+    16,
+    7,
+    8
+   ],
+   "questions": [
+    {
+     "qid": "q0",
+     "type": "noul",
+     "keys": [
+      "false",
+      "true"
+     ],
+     "label": null,
+     "probs": [
+      0.7093502283096313,
+      0.29064974188804626
+     ]
+    },
+    {
+     "qid": "q1",
+     "type": "noul",
+     "keys": [
+      "false",
+      "true"
+     ],
+     "label": null,
+     "probs": [
+      0.34715431928634644,
+      0.6528456807136536
+     ]
+    },
+    {
+     "qid": "q2",
+     "type": "score",
+     "keys": [
+      "0",
+      "1",
+      "2",
+      "3",
+      "4"
+     ],
+     "label": null,
+     "probs": [
+      0.20183037221431732,
+      0.32054224610328674,
+      0.1893785148859024,
+      0.13443292677402496,
+      0.15381591022014618
+     ]
+    },
+    {
+     "qid": "q3",
+     "type": "choice",
+     "keys": [
+      "team",
+      "which",
+      "bad"
+     ],
+     "label": null,
+     "probs": [
+      0.28620433807373047,
+      0.38771185278892517,
+      0.32608380913734436
+     ]
+    }
+   ]
+  },
+  {
+   "id": "tiny:36",
+   "kind": "tiny",
+   "request": {
+    "state": "team",
+    "questions": {
+     "q0": {
+      "type": "choice",
+      "instructions": "box bad twice which arrived lost",
+      "criteria": {
+       "late": "please bad",
+       "help": "refund it today",
+       "bad": "bad please again late",
+       "the": null,
+       "it": "team today the late",
+       "today": "is today it",
+       "is": "customer help late"
+      }
+     },
+     "q1": {
+      "type": "noul",
+      "instructions": "which damaged damaged"
+     },
+     "q2": {
+      "type": "score",
+      "instructions": "wrong box twice the",
+      "criteria": [
+       "again the today",
+       "damaged it",
+       "today",
+       "angry again"
+      ]
+     },
+     "q3": {
+      "type": "score",
+      "instructions": "team the box",
+      "criteria": [
+       "arrived angry today",
+       "yes customer",
+       "customer order"
+      ]
+     }
+    }
+   },
+   "input": {
+    "state": "team",
+    "questions": [
+     {
+      "instr": "box bad twice which arrived lost",
+      "options": [
+       "late: please bad",
+       "help: refund it today",
+       "bad: bad please again late",
+       "the",
+       "it: team today the late",
+       "today: is today it",
+       "is: customer help late"
+      ]
+     },
+     {
+      "instr": "which damaged damaged",
+      "options": [
+       "no",
+       "yes"
+      ]
+     },
+     {
+      "instr": "wrong box twice the",
+      "options": [
+       "again the today",
+       "damaged it",
+       "today",
+       "angry again"
+      ]
+     },
+     {
+      "instr": "team the box",
+      "options": [
+       "arrived angry today",
+       "yes customer",
+       "customer order"
+      ]
+     }
+    ]
+   },
+   "ids": [
+    2,
+    4,
+    15,
+    5,
+    27,
+    21,
+    13,
+    14,
+    28,
+    26,
+    6,
+    25,
+    1,
+    35,
+    21,
+    7,
+    6,
+    36,
+    1,
+    18,
+    32,
+    37,
+    7,
+    6,
+    21,
+    1,
+    21,
+    35,
+    34,
+    25,
+    7,
+    6,
+    9,
+    7,
+    6,
+    32,
+    1,
+    15,
+    37,
+    9,
+    25,
+    7,
+    6,
+    37,
+    1,
+    11,
+    37,
+    32,
+    7,
+    6,
+    11,
+    1,
+    10,
+    36,
+    25,
+    7,
+    8,
+    5,
+    14,
+    31,
+    31,
+    6,
+    22,
+    7,
+    6,
+    23,
+    7,
+    8,
+    5,
+    29,
+    27,
+    13,
+    9,
+    6,
+    34,
+    9,
+    37,
+    7,
+    6,
+    31,
+    32,
+    7,
+    6,
+    37,
+    7,
+    6,
+    19,
+    34,
+    7,
+    8,
+    5,
+    15,
+    9,
+    27,
+    6,
+    28,
+    19,
+    37,
+    7,
+    6,
+    23,
+    10,
+    7,
+    6,
+    10,
+    24,
+    7,
+    8
+   ],
+   "questions": [
+    {
+     "qid": "q0",
+     "type": "choice",
+     "keys": [
+      "late",
+      "help",
+      "bad",
+      "the",
+      "it",
+      "today",
+      "is"
+     ],
+     "label": null,
+     "probs": [
+      0.19938629865646362,
+      0.07068338990211487,
+      0.12196815758943558,
+      0.22667482495307922,
+      0.129434272646904,
+      0.1445731818675995,
+      0.10727991163730621
+     ]
+    },
+    {
+     "qid": "q1",
+     "type": "noul",
+     "keys": [
+      "false",
+      "true"
+     ],
+     "label": null,
+     "probs": [
+      0.6575573682785034,
+      0.3424426019191742
+     ]
+    },
+    {
+     "qid": "q2",
+     "type": "score",
+     "keys": [
+      "0",
+      "1",
+      "2",
+      "3"
+     ],
+     "label": null,
+     "probs": [
+      0.22907431423664093,
+      0.2573751211166382,
+      0.31501859426498413,
+      0.19853197038173676
+     ]
+    },
+    {
+     "qid": "q3",
+     "type": "score",
+     "keys": [
+      "0",
+      "1",
+      "2"
+     ],
+     "label": null,
+     "probs": [
+      0.3169078826904297,
+      0.39663732051849365,
+      0.2864547371864319
+     ]
+    }
+   ]
+  },
+  {
+   "id": "tiny:37",
+   "kind": "tiny",
+   "request": {
+    "state": "wrong customer lost no charged damaged lost please shipping again",
+    "questions": {
+     "q0": {
+      "type": "choice",
+      "instructions": "angry charged wrong no shipping",
+      "criteria": {
+       "size": null,
+       "yes": "customer"
+      }
+     },
+     "q1": {
+      "type": "noul",
+      "instructions": "today lost",
+      "criteria": {
+       "true": "which billing",
+       "false": "was late"
+      }
+     },
+     "q2": {
+      "type": "choice",
+      "instructions": "wrong customer is late shipping",
+      "criteria": {
+       "shipping": null,
+       "today": null,
+       "no": null,
+       "again": "bad box order shipping",
+       "arrived": null
+      }
+     },
+     "q3": {
+      "type": "choice",
+      "instructions": "wrong is customer no the",
+      "criteria": {
+       "billing": "customer help",
+       "lost": null
+      }
+     },
+     "q4": {
+      "type": "score",
+      "instructions": "bad charged box it",
+      "criteria": [
+       "help bad",
+       "arrived charged angry",
+       "which yes",
+       "lost",
+       "yes the was"
+      ]
+     },
+     "q5": {
+      "type": "noul",
+      "instructions": "shipping twice wrong"
+     }
+    }
+   },
+   "input": {
+    "state": "wrong customer lost no charged damaged lost please shipping again",
+    "questions": [
+     {
+      "instr": "angry charged wrong no shipping",
+      "options": [
+       "size",
+       "yes: customer"
+      ]
+     },
+     {
+      "instr": "today lost",
+      "options": [
+       "no: was late",
+       "yes: which billing"
+      ]
+     },
+     {
+      "instr": "wrong customer is late shipping",
+      "options": [
+       "shipping",
+       "today",
+       "no",
+       "again: bad box order shipping",
+       "arrived"
+      ]
+     },
+     {
+      "instr": "wrong is customer no the",
+      "options": [
+       "billing: customer help",
+       "lost"
+      ]
+     },
+     {
+      "instr": "bad charged box it",
+      "options": [
+       "help bad",
+       "arrived charged angry",
+       "which yes",
+       "lost",
+       "yes the was"
+      ]
+     },
+     {
+      "instr": "shipping twice wrong",
+      "options": [
+       "no",
+       "yes"
+      ]
+     }
+    ]
+   },
+   "ids": [
+    2,
+    4,
+    29,
+    10,
+    26,
+    22,
+    12,
+    31,
+    26,
+    35,
+    17,
+    34,
+    5,
+    19,
+    12,
+    29,
+    22,
+    17,
+    6,
+    30,
+    7,
+    6,
+    23,
+    1,
+    10,
+    7,
+    8,
+    5,
+    37,
+    26,
+    6,
+    22,
+    1,
+    33,
+    25,
+    7,
+    6,
+    23,
+    1,
+    14,
+    16,
+    7,
+    8,
+    5,
+    29,
+    10,
+    11,
+    25,
+    17,
+    6,
+    17,
+    7,
+    6,
+    37,
+    7,
+    6,
+    22,
+    7,
+    6,
+    34,
+    1,
+    21,
+    27,
+    24,
+    17,
+    7,
+    6,
+    28,
+    7,
+    8,
+    5,
+    29,
+    11,
+    10,
+    22,
+    9,
+    6,
+    16,
+    1,
+    10,
+    36,
+    7,
+    6,
+    26,
+    7,
+    8,
+    5,
+    21,
+    12,
+    27,
+    32,
+    6,
+    36,
+    21,
+    7,
+    6,
+    28,
+    12,
+    19,
+    7,
+    6,
+    14,
+    23,
+    7,
+    6,
+    26,
+    7,
+    6,
+    23,
+    9,
+    33,
+    7,
+    8,
+    5,
+    17,
+    13,
+    29,
+    6,
+    22,
+    7,
+    6,
+    23,
+    7,
+    8
+   ],
+   "questions": [
+    {
+     "qid": "q0",
+     "type": "choice",
+     "keys": [
+      "size",
+      "yes"
+     ],
+     "label": null,
+     "probs": [
+      0.4357454776763916,
+      0.5642545223236084
+     ]
+    },
+    {
+     "qid": "q1",
+     "type": "noul",
+     "keys": [
+      "false",
+      "true"
+     ],
+     "label": null,
+     "probs": [
+      0.44969767332077026,
+      0.5503023266792297
+     ]
+    },
+    {
+     "qid": "q2",
+     "type": "choice",
+     "keys": [
+      "shipping",
+      "today",
+      "no",
+      "again",
+      "arrived"
+     ],
+     "label": null,
+     "probs": [
+      0.1164589449763298,
+      0.24478277564048767,
+      0.18669065833091736,
+      0.15522947907447815,
+      0.29683810472488403
+     ]
+    },
+    {
+     "qid": "q3",
+     "type": "choice",
+     "keys": [
+      "billing",
+      "lost"
+     ],
+     "label": null,
+     "probs": [
+      0.5683357119560242,
+      0.4316643476486206
+     ]
+    },
+    {
+     "qid": "q4",
+     "type": "score",
+     "keys": [
+      "0",
+      "1",
+      "2",
+      "3",
+      "4"
+     ],
+     "label": null,
+     "probs": [
+      0.17442470788955688,
+      0.1837942898273468,
+      0.21118462085723877,
+      0.14390775561332703,
+      0.28668859601020813
+     ]
+    },
+    {
+     "qid": "q5",
+     "type": "noul",
+     "keys": [
+      "false",
+      "true"
+     ],
+     "label": null,
+     "probs": [
+      0.598110020160675,
+      0.4018899202346802
+     ]
+    }
+   ]
+  },
+  {
+   "id": "tiny:38",
+   "kind": "tiny",
+   "request": {
+    "state": "please billing refund",
+    "questions": {
+     "q0": {
+      "type": "noul",
+      "instructions": "refund help bad today damaged customer",
+      "criteria": {
+       "true": "box angry team",
+       "false": "late"
+      }
+     },
+     "q1": {
+      "type": "choice",
+      "instructions": "please",
+      "criteria": {
+       "again": null,
+       "team": null,
+       "customer": null,
+       "refund": "twice which yes"
+      }
+     },
+     "q2": {
+      "type": "choice",
+      "instructions": "shipping team arrived damaged yes",
+      "criteria": {
+       "billing": null,
+       "how": "customer"
+      }
+     },
+     "q3": {
+      "type": "noul",
+      "instructions": "how the order how today"
+     },
+     "q4": {
+      "type": "score",
+      "instructions": "damaged lost was order wrong",
+      "criteria": [
+       "no late",
+       "no",
+       "team damaged",
+       "bad was no",
+       "the again shipping"
+      ]
+     },
+     "q5": {
+      "type": "choice",
+      "instructions": "charged team shipping please",
+      "criteria": {
+       "was": "was yes",
+       "bad": null
+      }
+     }
+    }
+   },
+   "input": {
+    "state": "please billing refund",
+    "questions": [
+     {
+      "instr": "refund help bad today damaged customer",
+      "options": [
+       "no: late",
+       "yes: box angry team"
+      ]
+     },
+     {
+      "instr": "please",
+      "options": [
+       "again",
+       "team",
+       "customer",
+       "refund: twice which yes"
+      ]
+     },
+     {
+      "instr": "shipping team arrived damaged yes",
+      "options": [
+       "billing",
+       "how: customer"
+      ]
+     },
+     {
+      "instr": "how the order how today",
+      "options": [
+       "no",
+       "yes"
+      ]
+     },
+     {
+      "instr": "damaged lost was order wrong",
+      "options": [
+       "no late",
+       "no",
+       "team damaged",
+       "bad was no",
+       "the again shipping"
+      ]
+     },
+     {
+      "instr": "charged team shipping please",
+      "options": [
+       "was: was yes",
+       "bad"
+      ]
+     }
+    ]
+   },
+   "ids": [
+    2,
+    4,
+    35,
+    16,
+    18,
+    5,
+    18,
+    36,
+    21,
+    37,
+    31,
+    10,
+    6,
+    22,
+    1,
+    25,
+    7,
+    6,
+    23,
+    1,
+    27,
+    19,
+    15,
+    7,
+    8,
+    5,
+    35,
+    6,
+    34,
+    7,
+    6,
+    15,
+    7,
+    6,
+    10,
+    7,
+    6,
+    18,
+    1,
+    13,
+    14,
+    23,
+    7,
+    8,
+    5,
+    17,
+    15,
+    28,
+    31,
+    23,
+    6,
+    16,
+    7,
+    6,
+    20,
+    1,
+    10,
+    7,
+    8,
+    5,
+    20,
+    9,
+    24,
+    20,
+    37,
+    6,
+    22,
+    7,
+    6,
+    23,
+    7,
+    8,
+    5,
+    31,
+    26,
+    33,
+    24,
+    29,
+    6,
+    22,
+    25,
+    7,
+    6,
+    22,
+    7,
+    6,
+    15,
+    31,
+    7,
+    6,
+    21,
+    33,
+    22,
+    7,
+    6,
+    9,
+    34,
+    17,
+    7,
+    8,
+    5,
+    12,
+    15,
+    17,
+    35,
+    6,
+    33,
+    1,
+    33,
+    23,
+    7,
+    6,
+    21,
+    7,
+    8
+   ],
+   "questions": [
+    {
+     "qid": "q0",
+     "type": "noul",
+     "keys": [
+      "false",
+      "true"
+     ],
+     "label": null,
+     "probs": [
+      0.5565966963768005,
+      0.44340333342552185
+     ]
+    },
+    {
+     "qid": "q1",
+     "type": "choice",
+     "keys": [
+      "again",
+      "team",
+      "customer",
+      "refund"
+     ],
+     "label": null,
+     "probs": [
+      0.27564162015914917,
+      0.24210011959075928,
+      0.1859438419342041,
+      0.29631441831588745
+     ]
+    },
+    {
+     "qid": "q2",
+     "type": "choice",
+     "keys": [
+      "billing",
+      "how"
+     ],
+     "label": null,
+     "probs": [
+      0.5677664875984192,
+      0.4322335124015808
+     ]
+    },
+    {
+     "qid": "q3",
+     "type": "noul",
+     "keys": [
+      "false",
+      "true"
+     ],
+     "label": null,
+     "probs": [
+      0.5705985426902771,
+      0.4294014275074005
+     ]
+    },
+    {
+     "qid": "q4",
+     "type": "score",
+     "keys": [
+      "0",
+      "1",
+      "2",
+      "3",
+      "4"
+     ],
+     "label": null,
+     "probs": [
+      0.17747488617897034,
+      0.23358115553855896,
+      0.36095961928367615,
+      0.09332460165023804,
+      0.13465973734855652
+     ]
+    },
+    {
+     "qid": "q5",
+     "type": "choice",
+     "keys": [
+      "was",
+      "bad"
+     ],
+     "label": null,
+     "probs": [
+      0.3521902859210968,
+      0.6478098034858704
+     ]
+    }
+   ]
+  },
+  {
+   "id": "tiny:39",
+   "kind": "tiny",
+   "request": {
+    "state": "again today was",
+    "questions": {
+     "q0": {
+      "type": "score",
+      "instructions": "charged",
+      "criteria": [
+       "refund billing arrived"
+      ]
+     },
+     "q1": {
+      "type": "score",
+      "instructions": "please order",
+      "criteria": [
+       "which it",
+       "help"
+      ]
+     },
+     "q2": {
+      "type": "choice",
+      "instructions": "wrong help",
+      "criteria": {
+       "it": "arrived shipping is",
+       "billing": "help"
+      }
+     },
+     "q3": {
+      "type": "choice",
+      "instructions": "shipping is which",
+      "criteria": {
+       "damaged": "how"
+      }
+     },
+     "q4": {
+      "type": "choice",
+      "instructions": "team today was",
+      "criteria": {
+       "size": null,
+       "box": "order no again the"
+      }
+     }
+    }
+   },
+   "input": {
+    "state": "again today was",
+    "questions": [
+     {
+      "instr": "charged",
+      "options": [
+       "refund billing arrived"
+      ]
+     },
+     {
+      "instr": "please order",
+      "options": [
+       "which it",
+       "help"
+      ]
+     },
+     {
+      "instr": "wrong help",
+      "options": [
+       "it: arrived shipping is",
+       "billing: help"
+      ]
+     },
+     {
+      "instr": "shipping is which",
+      "options": [
+       "damaged: how"
+      ]
+     },
+     {
+      "instr": "team today was",
+      "options": [
+       "size",
+       "box: order no again the"
+      ]
+     }
+    ]
+   },
+   "ids": [
+    2,
+    4,
+    34,
+    37,
+    33,
+    5,
+    12,
+    6,
+    18,
+    16,
+    28,
+    7,
+    8,
+    5,
+    35,
+    24,
+    6,
+    14,
+    32,
+    7,
+    6,
+    36,
+    7,
+    8,
+    5,
+    29,
+    36,
+    6,
+    32,
+    1,
+    28,
+    17,
+    11,
+    7,
+    6,
+    16,
+    1,
+    36,
+    7,
+    8,
+    5,
+    17,
+    11,
+    14,
+    6,
+    31,
+    1,
+    20,
+    7,
+    8,
+    5,
+    15,
+    37,
+    33,
+    6,
+    30,
+    7,
+    6,
+    27,
+    1,
+    24,
+    22,
+    34,
+    9,
+    7,
+    8
+   ],
+   "questions": [
+    {
+     "qid": "q0",
+     "type": "score",
+     "keys": [
+      "0"
+     ],
+     "label": null,
+     "probs": [
+      1.0
+     ]
+    },
+    {
+     "qid": "q1",
+     "type": "score",
+     "keys": [
+      "0",
+      "1"
+     ],
+     "label": null,
+     "probs": [
+      0.6006214022636414,
+      0.39937856793403625
+     ]
+    },
+    {
+     "qid": "q2",
+     "type": "choice",
+     "keys": [
+      "it",
+      "billing"
+     ],
+     "label": null,
+     "probs": [
+      0.5538347959518433,
+      0.44616520404815674
+     ]
+    },
+    {
+     "qid": "q3",
+     "type": "choice",
+     "keys": [
+      "damaged"
+     ],
+     "label": null,
+     "probs": [
+      1.0
+     ]
+    },
+    {
+     "qid": "q4",
+     "type": "choice",
+     "keys": [
+      "size",
+      "box"
+     ],
+     "label": null,
+     "probs": [
+      0.6033284068107605,
+      0.3966716229915619
+     ]
+    }
+   ]
+  }
+ ]
+}

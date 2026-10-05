@@ -115,7 +115,8 @@ def score(a):
 def summary(pairs, dev):
     """pairs: [(candidate probs, reference probs, label or None)]; dev: which pairs are labelled development questions."""
     d = np.array([float(np.abs(np.asarray(p) - np.asarray(r)).max()) for p, r, _ in pairs])
-    flips = [(int(np.argmax(p)), int(np.argmax(r)), float(np.sort(r)[-1] - np.sort(r)[-2])) for p, r, _ in pairs]
+    margin = lambda r: float(np.sort(r)[-1] - np.sort(r)[-2]) if len(r) > 1 else 1.0   # a one-option question cannot flip
+    flips = [(int(np.argmax(p)), int(np.argmax(r)), margin(r)) for p, r, _ in pairs]
     out = {"questions": len(pairs), "max_dp": float(d.max()), "mean_dp": float(d.mean()), "p95_dp": float(np.percentile(d, 95)),
            "argmax_flips": sum(a != b for a, b, _ in flips), "flip_margins": sorted(round(m, 4) for a, b, m in flips if a != b)}
     from d1a.metrics import ece

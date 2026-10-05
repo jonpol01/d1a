@@ -25,7 +25,9 @@ the question's `<decide>` token. README.md is the user guide; docs/UPSTREAM.md r
 ## Rules
 - A file taken from Kev and changed keeps its "Modified from Kev" header and stays listed in docs/UPSTREAM.md.
 - Do not brand anything "Kev"; product, package, CLI and model names are D1A. `kev-latest` is only a compatibility alias.
-- Never load a model or start training in a unit test.
+- Never load a model or start training in a unit test (tiny random models built or committed under tests/ are fine).
+- `tests/test_conformance.py` pins the answers of the committed tiny checkpoint (`tests/golden/tiny-gemma4`). A change
+  that moves them on purpose rebuilds it (`tests/golden/build_tiny_gemma4.py`) in the same PR and says why.
 
 ## Project board (mandatory)
 Every piece of D1A work is tracked on GitHub Project #14 "D1A" (https://github.com/users/jonpol01/projects/14), and its card
