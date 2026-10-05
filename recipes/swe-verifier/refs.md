@@ -16,6 +16,8 @@ on this list must be verified the same way before it goes into a draft.
 | 8 | Diandian Guo, Cong Cao, Fangfang Yuan, Yingqi Wang, Yueshan Wang, Dakui Wang. **Self-Authored Verification Is Unreliable in Heuristic Self-Improving Agents.** arXiv:2607.24300 (27 Jul 2026). https://arxiv.org/abs/2607.24300 | abstract | The verifier-deployment gap and SEAL, an external acceptance gate: "compares each candidate with the incumbent through a fixed harness-side audit". The closest prior work to our promotion gate; ours differs by using real outcomes and a repository-bootstrap interval on held-out log loss. |
 | 9 | John C. Platt. **Probabilistic Outputs for Support Vector Machines and Comparisons to Regularized Likelihood Methods.** In *Advances in Large Margin Classifiers*, MIT Press, 1999. | standard reference; confirm the page numbers before printing | Platt scaling, used by `OutcomeCalibrator`. |
 
+| 10 | Xingyao Wang, Valerie Chen, Heng Ji, Graham Neubig. **A Rubric-Supervised Critic from Sparse Real-World Outcomes.** arXiv:2603.03800 (4 Mar 2026). https://arxiv.org/abs/2603.03800 | abstract | Closest prior work: a critic learned "from sparse and noisy interaction data" that jointly predicts 24 rubrics and success; "Best@8 +15.9 over Random@8 over the rerankable subset of trajectories". Evaluating on mixed-outcome issues is established; our addition is the decomposition, the issue-prior baseline and the leakage measurement. More candidates verified by the research pass: novelty-research.md. |
+
 ## Data
 
 | Dataset | Licence | Use |
@@ -25,4 +27,4 @@ on this list must be verified the same way before it goes into a draft.
 | SWE-bench/SWE-smith-trajectories | MIT | the third dataset for the leakage study (planned) |
 
 ## Not yet verified
-- Full-text claims beyond the abstracts: for example, whether SWE-RM or SWE-Gym split by repository. Check the PDFs before writing "no prior work splits by repository".
+- Do NOT write "no prior work splits by repository": SWE-Gym's training repositories are disjoint from SWE-Bench's by design, and FailFast and EarlyEval use grouped splits (novelty-research.md). What is unmeasured is the size of the leak. Say "no one measured the leak".

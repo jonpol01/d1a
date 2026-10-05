@@ -55,8 +55,10 @@ the inflation (Section~\ref{sec:leakage}).
 \section{Related Work}\label{sec:related}
 \paragraph{Verifiers for software-engineering agents.} SWE-Gym trains verifiers on agent trajectories and uses them for inference-time scaling, selecting
 among sampled trajectories~\cite{swegym}. SWE-RM is a 30B execution-free reward model that treats classification accuracy and calibration as crucial for
-reinforcement learning~\cite{swerm}. Agentic Rubrics derive contextual rubrics as a verification signal~\cite{rubrics}. Our verifier is small enough to run on a
-laptop, and we evaluate it on repositories it never saw, separating issue difficulty from run quality.
+reinforcement learning~\cite{swerm}. Agentic Rubrics derive contextual rubrics as a verification signal~\cite{rubrics}. Closest to us, a rubric-supervised critic is learned from sparse
+real-world outcomes, jointly predicting 24 behavioural rubrics and success, and improves best-of-8 reranking over random on the ``rerankable'' subset of
+trajectories~\cite{critic}; restricting evaluation to issues with mixed outcomes is thus established. What we add is the decomposition itself: how much of
+pooled AUROC an issue prior explains, how heuristics and a small decision model differ within issues, and how random splits inflate learned verifiers.
 
 \paragraph{Early failure prediction.} FailFast-RestartSmart trains a 0.6B monitor on trajectory prefixes and restarts runs predicted to fail~\cite{failfast};
 EarlyEval predicts outcomes early with gradient-boosted classifiers~\cite{earlyeval}. Our anytime experiment is a weaker instance of this idea and is
@@ -194,6 +196,7 @@ All code is in \url{https://github.com/jonpol01/d1a} (\texttt{recipes/swe-verifi
 \begin{thebibliography}{99}\small
 \bibitem{swegym} J.~Pan, X.~Wang, G.~Neubig, N.~Jaitly, H.~Ji, A.~Suhr, Y.~Zhang. Training Software Engineering Agents and Verifiers with SWE-Gym. arXiv:2412.21139, 2024.
 \bibitem{swerm} K.~Shum, B.~Hui, J.~Chen, L.~Zhang, X.~W., J.~Yang, Y.~Huang, J.~Lin, J.~He. SWE-RM: Execution-free Feedback for Software Engineering Agents. arXiv:2512.21919, 2025. (The author ``X.~W.'' is listed in this form on arXiv.)
+\bibitem{critic} X.~Wang, V.~Chen, H.~Ji, G.~Neubig. A Rubric-Supervised Critic from Sparse Real-World Outcomes. arXiv:2603.03800, 2026.
 \bibitem{rubrics} M.~Raghavendra, A.~Gunjal, B.~Liu, Y.~He. Agentic Rubrics as Contextual Verifiers for SWE Agents. arXiv:2601.04171, 2026.
 \bibitem{failfast} C.~Wang, Y.~Lyu, J.~He, Z.~Yang, C.~Zhong, Y.~Harel, D.~Lo. Fail-Fast, Restart-Smart: Early Failure Prediction and Restart for SWE Agentic Tasks. arXiv:2608.03222, 2026.
 \bibitem{earlyeval} Y.~Shi, Z.~Sun, J.~Dong, C.~Wan, D.~Lo, X.~Gu. EarlyEval: Cheaper Agent Evaluation via Early Outcome Prediction. arXiv:2609.02783, 2026.
