@@ -119,3 +119,27 @@ git checkout 47a8cc2 -- evals/round4 scripts/build_long_states.py   # for exampl
 Kev's `external` (semif-v1, typesafe-v1, wanli-v1, wanli-v2) and `night2` were not dropped: they are D1A suites now,
 byte for byte (`evals/d1a/external`, `evals/d1a/night2`), and their builders (`freeze_semif`, `freeze_semif_external`,
 `build_night2_data`) left with the originals.
+
+## Kev's suite builders (removed October 2026)
+
+The scripts that generated the frozen suites D1A still evaluates on: `build_hard_v1.py` with `hard_v1_common.py`,
+`hard_v1_families.py`, `hard_v1_numeric.py` and `hard_v1_policy.py` (hard-v1: rule-engine families with computed labels),
+`build_breadth_v1.py` (breadth-v1), `build_devtools_v1.py` with `devtools_v1_licences.json` (devtools-v1),
+`build_longdoc_v1.py` with `longdoc_v1_synthetic.py` (longdoc-v1), `build_documents_v1.py`, `build_documents_v2.py`,
+`freeze_documents_v1.py` and `label_documents_v1.py` (documents-v1/v2: candidate collection, LLM adjudication, freezing),
+`build_binding_diagnostic.py`, and `d1a/transfer_v9.py` (transfer-v9). About 6,900 lines, 93-100% Kev's, with their
+builder tests. D1A never regenerates these suites: it loads them as data, and `tests/test_frozen_suites.py` checks every
+partition in git against the sha256 and record count its manifest pins.
+
+To rebuild a suite, use the builder that wrote it:
+
+| Suite | Builder source |
+|---|---|
+| longdoc-v1 | Kev at `a0255cedcb`: its `build_longdoc_v1.py` and `longdoc_v1_synthetic.py` match the manifest's sha256 |
+| hard-v1 | no public commit matches the manifest's builder hashes (frozen from uncommitted code); the nearest is Kev at `0fe8fc9` or D1A at `0c601b2a` |
+| breadth-v1, devtools-v1, documents-v1/v2, transfer-v9 | the manifests do not pin builder hashes; Kev at `0fe8fc9` or D1A at `0c601b2a` |
+
+```bash
+git checkout 0c601b2a -- scripts/build_hard_v1.py scripts/hard_v1_common.py scripts/hard_v1_families.py \
+    scripts/hard_v1_numeric.py scripts/hard_v1_policy.py tests/test_hard_v1.py      # for example
+```
