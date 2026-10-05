@@ -67,7 +67,7 @@ def training_requests(a, tok, manifest, holdout):
     # from another tokenizer family (Gemma 4: its own delimiters, <bos>, a different vocabulary) was never admitted
     foreign = bool(manifest) and not a.data and delimiter_ids(tok) != [tok.convert_tokens_to_ids(t) for t in SPECIAL]
     if not manifest or a.data or foreign or a.extra_suites:
-        # frozen suites are filtered to the training context when they are frozen (d1a.suite.select_unique); records built
+        # frozen suites are filtered to the training context when they are frozen (by the builders that froze them); records built
         # on the fly here are not, so apply the same rule instead of letting the strict encoder abort the run (issue #5).
         # A foreign tokenizer gets the suite's own admission rule, branch headroom included, since augmentation (a none
         # option or distractor, <= 18 Gemma tokens) grows branches after this check (Gemma 4 on decision-v7: 70 of 12,576

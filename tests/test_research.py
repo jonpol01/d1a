@@ -1,5 +1,5 @@
 # Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); dropped two checks bound to the removed experiments/ registrations; the tests of the removed Modal app and report scripts left.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); dropped two checks bound to the removed experiments/ registrations; the tests of the removed Modal app and report scripts left; the contrastive generator's tests left with it (paired_flip and the held-out structure guard keep theirs).
 import copy
 import pathlib
 import random
@@ -7,7 +7,6 @@ import random
 import pytest
 import torch
 
-from d1a.data import materialize
 from d1a.suite import record_digest
 from d1a.train import question_loss
 
@@ -31,18 +30,6 @@ def frozen_request(i=0):
     r = choice_request()
     r["_meta"] = {"id": f"item-{i}", "group_id": f"item-{i}", "source": "fixture", "variant": "clean"}
     return r
-
-
-def test_contrast_cases_preserve_groups_and_relabel():
-    from d1a.suite import contrast_cases
-    original = frozen_request()
-    present, absent, permuted = contrast_cases(original)
-    assert present["questions"]["reason"]["label"] == "size"
-    assert absent["questions"]["reason"]["label"] == "none_of_these"
-    for record in (present, absent, permuted):
-        assert record["_meta"]["group_id"] == original["_meta"]["id"]
-        materialize(record)
-    assert original == frozen_request()
 
 
 def test_source_sampling_does_not_depend_on_other_sources(monkeypatch):
@@ -176,66 +163,36 @@ def test_batched_mask_matches_single_and_pads_are_invisible():
     assert not allowed[3, 1:3].any()          # pads belong to no question segment (state stays visible; rows are discarded)
 
 
-def test_contrastive_pairs_are_checked_and_labelled_by_code():
-    from d1a import contrastive
-    from d1a.benchmark import labels
-    from d1a.contrastive import FAMILIES, UNDETERMINED, check_pair, generate, label_of, paired_flip
-    records, report = generate(5, seed=7)
-    assert len(records) == 2 * 5 * len(FAMILIES) and all(v["pairs"] == 5 for v in report.values())
-    for a, b in zip(records[::2], records[1::2]):
-        assert a["_meta"]["pair_id"] == b["_meta"]["pair_id"] and a["_meta"]["family_id"] == b["_meta"]["family_id"]
-        assert a["questions"]["decision"]["label"] != b["questions"]["decision"]["label"]
-        assert a["state"]["policy"] == b["state"]["policy"]
-        materialize(a); materialize(b)
-    # a family whose label leaks into the policy text (no evidence needed) must be rejected by the ablation check
-    def leaky(rng):
-        def evaluate(f): return True
-        item = {"policy": "Everything is allowed.", "sentences": [("Filler.", {}), ("Age is 30.", {"age": 30})], "evaluate": evaluate,
-                "question": {"type": "noul", "instructions": "Allowed?"}}
-        other = {**item, "sentences": [("Filler.", {}), ("Age is 10.", {"age": 10})], "evaluate": lambda f: False}
-        return item, other
-    assert check_pair(*leaky(None)) == "ablation_failed"
-    # a pair whose two items do not differ in exactly one sentence is rejected
-    a, b = FAMILIES["authorization"](random.Random(1))
-    b["sentences"][2] = ("The refund amount is $1.", {})
-    assert check_pair(a, b) == "not_exactly_one_sentence_differs"
-    assert label_of(a, drop=0) == UNDETERMINED
-    # paired_flip: a constant model never flips; a perfect model flips every pair and gets both right
-    rows = []
-    for rec in records[:8]:
-        keys, y = labels(rec["questions"]["decision"])
-        rows.append({"pair_id": rec["_meta"]["pair_id"], "sibling": rec["_meta"]["sibling"], "keys": keys, "label": y, "p": [1.0 if i == y else 0.0 for i in range(len(keys))]})
-    assert paired_flip(rows) == {"pairs": 4, "flip_rate": 1.0, "both_correct_rate": 1.0}
-    constant = [{**r, "p": [1.0] + [0.0] * (len(r["keys"]) - 1)} for r in rows]
-    assert paired_flip(constant)["flip_rate"] == 0.0
+def test_paired_flip_counts_state_driven_flips():
+    """benchmark.paired_flip over a contrastive suite's rows: a constant model never flips; a perfect model flips every
+    pair whose label changes and gets both siblings right; pairs whose label does not change measure invariance."""
+    from d1a.benchmark import paired_flip
+    keys = ["no", "yes"]
+    row = lambda pair, sibling, y, p: {"pair_id": pair, "sibling": sibling, "keys": keys, "label": y, "p": p}
+    perfect = [row(f"p{i}", s, y, [1.0 - y, float(y)]) for i in range(4) for s, y in (("a", i % 2), ("b", 1 - i % 2))]
+    assert paired_flip(perfect) == {"pairs": 4, "flip_rate": 1.0, "both_correct_rate": 1.0}
+    constant = [{**r, "p": [1.0, 0.0]} for r in perfect]
+    assert paired_flip(constant) == {"pairs": 4, "flip_rate": 0.0, "both_correct_rate": 0.0}
+    same = perfect + [row("q", "a", 1, [0.0, 1.0]), row("q", "b", 1, [1.0, 0.0])]
+    assert paired_flip(same)["invariant_pairs"] == 1 and paired_flip(same)["invariance_rate"] == 0.0
+    with pytest.raises(ValueError, match="incomplete"):
+        paired_flip(perfect[:-1])
+    assert paired_flip([{"keys": keys, "label": 0, "p": [1.0, 0.0]}]) is None
 
 
 def test_permuted_variants_pair_with_their_parent_not_their_group():
     from d1a.benchmark import prediction_rows, summarize
-    from d1a.suite import contrast_cases
     rows = []
     for i in range(2):
         r = frozen_request(i); r["_meta"]["group_id"] = "shared-pair"     # siblings share a bootstrap group
-        variants = contrast_cases(r)
-        for rec in [r] + variants:
-            rec["_meta"].setdefault("group_id", "shared-pair")
+        permuted = copy.deepcopy(r); q = permuted["questions"]["reason"]   # a frozen suite's "permuted" variant
+        q["criteria"] = dict(reversed(q["criteria"].items()))
+        permuted["_meta"].update(id=f"item-{i}/permuted", parent_id=f"item-{i}", variant="permuted")
+        for rec in (r, permuted):
             keys = list(rec["questions"]["reason"]["criteria"])
             rows += prediction_rows(rec, {"probabilities": {"reason": {k: (0.7 if k == rec["questions"]["reason"]["label"] else 0.3 / (len(keys) - 1)) for k in keys}}})
     report = summarize(rows)
     assert report["permutation"]["n"] == 2 and report["permutation"]["flip_rate"] == 0.0
-
-
-def test_contrastive_eval_split_is_stratified_by_family():
-    from collections import Counter
-    from d1a.contrastive import generate
-    recs, _ = generate(6, seed="t", families=["authorization", "deadline"])
-    dev, test = [], []
-    for i in range(0, len(recs), 2):
-        (dev if (i // 2) % 2 == 0 else test).extend(recs[i : i + 2])
-    for part in (dev, test):
-        fams = Counter(r["_meta"]["family"] for r in part)
-        assert set(fams) == {"authorization", "deadline"} and all(v == 6 for v in fams.values())
-        assert all(a["_meta"]["pair_id"] == b["_meta"]["pair_id"] for a, b in zip(part[::2], part[1::2]))
 
 
 def test_coverage_cannot_split_equal_confidence_ties():
@@ -436,10 +393,21 @@ def test_uneven_microbatches_have_equal_record_weight():
     assert accumulation_records(10, 3, 3, 3) == 1
 
 def test_v3_training_refuses_heldout_structure():
+    from d1a.composition import DEV_SHAPES, SHAPES, canonical, push_negation, structure_keys
     from d1a.suite import validate_training
     r = {"_meta": {"source": "compositional", "family": "held_and_or"}}
     with pytest.raises(ValueError, match="held-out"):
         validate_training([r], {"trainable_sources": ["compositional"]})
+    # a random tree is refused when its structure, up to operand order, numbering and De Morgan, is a held-out shape's
+    assert canonical(("or", ("not", 0), ("and", 1, 2))) == canonical(SHAPES["held_or_not"])
+    assert canonical(("not", ("and", 0, 1))) != canonical(("or", ("not", 0), ("not", 1)))
+    assert canonical(push_negation(("not", ("and", 0, 1)))) == canonical(("or", ("not", 0), ("not", 1)))
+    negated = canonical(push_negation(SHAPES["final_negation"]))           # held out only through De Morgan
+    assert negated != canonical(SHAPES["final_negation"]) and negated in structure_keys(SHAPES["final_negation"])
+    for held in (canonical(SHAPES[DEV_SHAPES[0]]), negated):
+        with pytest.raises(ValueError, match="held-out"):
+            validate_training([{"_meta": {"source": "compositional", "family": "rand:7", "structure": held}}], {"trainable_sources": ["compositional"]})
+    validate_training([{"_meta": {"source": "compositional", "family": "nested_and"}}], {"trainable_sources": ["compositional"]})
 
 
 def test_none_pair_is_minimal_and_relabelled():

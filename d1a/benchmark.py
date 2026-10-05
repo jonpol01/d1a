@@ -1,5 +1,5 @@
 # Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); --remote-model defaults to d1a-latest; --context serving for --data, and a warning when --data records are skipped as too long.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); --remote-model defaults to d1a-latest; --context serving for --data, and a warning when --data records are skipped as too long; paired_flip moved here from the removed d1a.contrastive.
 """Score a predictor on a frozen suite partition (or your own labelled JSONL).
 
     uv run python -m d1a.benchmark --run runs/<run>/checkpoint --suite evals/<v>/decision-<v> --out runs/<name>
@@ -20,7 +20,6 @@ import numpy as np
 
 from d1a.api import question_keys, with_date_facts
 from d1a.checkpoint import LoadOptions
-from d1a.contrastive import paired_flip
 from d1a.data import api_request, load_records
 from d1a.device import default_device
 from d1a.metrics import EPSILON, grouped_metrics, metrics, unknowable_report
@@ -71,6 +70,34 @@ def prediction_rows(record, prediction):
         if "kernels" in prediction: row["kernels"] = prediction["kernels"]   # a long row off the fp32-exact kernels (LocalPredictor)
         rows.append(row)
     return rows
+
+
+def paired_flip(rows):
+    """Pair-level metrics from benchmark rows carrying pair_id/sibling. A model that ignores the state cannot flip."""
+    by_pair = {}
+    for r in rows:
+        if r.get("pair_id"):
+            key = (r["pair_id"], r.get("question", "decision"))
+            pair = by_pair.setdefault(key, {})
+            if r["sibling"] in pair:
+                raise ValueError("duplicate contrastive sibling")
+            pair[r["sibling"]] = r
+    if not by_pair:
+        return None
+    if any(set(p) != {"a", "b"} for p in by_pair.values()):
+        raise ValueError("incomplete contrastive pair")
+    prediction = lambda r: r["keys"][max(range(len(r["p"])), key=r["p"].__getitem__)]
+    truth = lambda r: r["keys"][r["label"]]
+    relevant = [p for p in by_pair.values() if truth(p["a"]) != truth(p["b"])]
+    invariant = [p for p in by_pair.values() if truth(p["a"]) == truth(p["b"])]
+    both = lambda ps: sum(all(prediction(r) == truth(r) for r in p.values()) for p in ps) / len(ps) if ps else None
+    result = {"pairs": len(relevant),
+              "flip_rate": sum(prediction(p["a"]) != prediction(p["b"]) for p in relevant) / len(relevant) if relevant else None,
+              "both_correct_rate": both(relevant)}
+    if invariant:
+        result.update(invariant_pairs=len(invariant), invariance_rate=sum(prediction(p["a"]) == prediction(p["b"]) for p in invariant) / len(invariant),
+                      invariant_both_correct_rate=both(invariant))
+    return result
 
 
 def summarize(rows, temperature=1.0, heldout_sources=()):

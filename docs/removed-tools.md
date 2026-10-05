@@ -143,3 +143,33 @@ To rebuild a suite, use the builder that wrote it:
 git checkout 0c601b2a -- scripts/build_hard_v1.py scripts/hard_v1_common.py scripts/hard_v1_families.py \
     scripts/hard_v1_numeric.py scripts/hard_v1_policy.py tests/test_hard_v1.py      # for example
 ```
+
+## `d1a.suite`'s suite freezer and the policy generators (removed October 2026)
+
+The last suite builder, inside the package, and the code only it (and the builders above) called:
+
+- **`python -m d1a.suite`** (`freeze`, `main`, with `select_unique`, `contrast_cases`, `case_copy` and
+  `training_state_hashes`). It froze a suite from the public datasets in `d1a.data` (`--sources`, `--transfer`,
+  `--exclude-states-from`): per source, a deterministic sample deduplicated on normalised state text, admitted only if it
+  encodes under both pinned Qwen tokenizers with branch headroom, split train/calibration/development/test, plus three
+  contrast variants per clean record with a Choice of 3+ options (`none_present`, `none_absent` with the label moved to a new "None of these"
+  option, and `permuted` with the options shuffled), and a manifest with dataset and base revisions and code hashes. It
+  wrote decision-v2, transfer-v2, public-pool-v4 and smoke-v1. `semantic_hash` (an order-insensitive state hash for policy
+  records) was already unused.
+- **`d1a/contrastive.py`**: eleven policy families (return windows, spend thresholds, authorization, age eligibility,
+  quantity limits, and six Score-threshold families such as deadlines, warranty claims and late fees) that generate minimal pairs, the same case with one
+  sentence changed so the label flips, each pair checked by code: removing an evidence sentence must make the label
+  undetermined, and removing a filler sentence must not change it (`--contrastive-pairs`, `--contrastive-holdout`).
+  Its `paired_flip` metric stays, now in `d1a/benchmark.py`, because the benchmark still reports it on those suites.
+- **`d1a/composition.py`'s generator**: random rule trees over typed atoms (thresholds, ranges, matches, elapsed days,
+  flags), rendered as policy text in several styles, with labels computed from the facts and four-record groups checked
+  for invariance. The study harness used it for decision-v4 and decision-v7. The rule shapes and structure keys stay,
+  because `d1a.suite.validate_training` uses them to refuse held-out compositional structures in training.
+
+The suites stay as data, pinned by their manifests. Their `code_hashes` name Kev's files, so rebuild a suite with Kev's
+code at the commit the table above names. To bring back D1A's last copy of these files:
+
+```bash
+git show aeaa97c0:d1a/suite.py                      # freeze, main and their helpers
+git checkout aeaa97c0 -- d1a/contrastive.py d1a/composition.py tests/test_generators.py
+```
