@@ -16,6 +16,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **`recipes/swe-verifier`: D1A as a verifier of coding-agent runs** (issue, patch and the end of the run → P(the patch resolves the
+  issue)), on public SWE-agent runs (nebius/SWE-agent-trajectories, CC-BY-4.0) held out by repository: zero-shot and LoRA scoring,
+  held-out evaluation with repository-bootstrap intervals and within-issue AUROC, best-of-k, a training-data filter, anytime
+  restarts under a budget, a split-leakage study (random runs vs by issue vs by repository), the self-improvement rounds through
+  `d1a.feedback`, competition-harness input (`from_swegemma.py`), verified references, and the paper draft.
 - **`GET /metrics`** (`d1a.serve`): Prometheus text format: whether the model is loaded, requests and batches served, queue depth, recent batch latency (p50, p95, max), prefix-cache hits, misses and states, peak process memory and the model's device memory. Like `/v1/models`, it does not load an unloaded model.
 - **README: the self-learning loop's measured rounds** (calibration error 0.068 → 0.017; the gate kept the model when retraining was not clearly better), also on the diagram.
 - **Self-learning as a service** (`d1a.serve`): `D1A_FEEDBACK_LOG` logs every decision and returns a `decision_id`; `POST /v1/feedback` records its real outcome; `D1A_OUTCOME_CALIBRATOR` applies `d1a.feedback`'s calibrator to yes/no answers and re-reads it when the file changes. `/v1/models` reports the learning state.
