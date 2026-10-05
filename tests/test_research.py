@@ -1,5 +1,5 @@
 # Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); dropped two checks bound to the removed experiments/ registrations; the tests of the removed Modal app and report scripts left; the contrastive generator's tests left with it (paired_flip and the held-out structure guard keep theirs).
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); dropped two checks bound to the removed experiments/ registrations; the tests of the removed Modal app and report scripts left; the contrastive generator's tests left with it (paired_flip and the held-out structure guard keep theirs); the d1a.metrics tests rewritten as tests/test_metrics.py.
 import copy
 import pathlib
 import random
@@ -195,61 +195,6 @@ def test_permuted_variants_pair_with_their_parent_not_their_group():
     assert report["permutation"]["n"] == 2 and report["permutation"]["flip_rate"] == 0.0
 
 
-def test_coverage_cannot_split_equal_confidence_ties():
-    from d1a.metrics import coverage_at_error
-    correct = [True] * 90 + [False] * 10
-    assert coverage_at_error([0.99] * 100, correct, 0.05) == 0.0
-    assert coverage_at_error([0.99] * 100, correct[::-1], 0.05) == 0.0
-    assert coverage_at_error([0.99] * 100, correct, 0.1) == 1.0
-    assert coverage_at_error([], [], 0.05) == 0.0
-
-
-def test_risk_curve_thresholds_and_nonmonotone_risk():
-    from d1a.metrics import coverage_at_error, risk_coverage_curve
-    curve = risk_coverage_curve([0.99, 0.99, 0.9, 0.8], [True, False, True, True])
-    assert [p["accepted"] for p in curve] == [2, 3, 4]
-    assert [p["threshold"] for p in curve] == [0.99, 0.9, 0.8]
-    assert [p["risk"] for p in curve] == pytest.approx([0.5, 1 / 3, 0.25])
-    assert coverage_at_error([0.99, 0.99, 0.9, 0.8], [True, False, True, True], 0.25) == 1.0
-
-
-@pytest.mark.parametrize("confidence,correct,budget", [
-    ([float("nan")], [True], 0.05), ([1.1], [True], 0.05),
-    ([0.5], [], 0.05), ([[0.5]], [True], 0.05), ([0.5], [True], -0.1),
-])
-def test_selective_metrics_reject_invalid_inputs(confidence, correct, budget):
-    from d1a.metrics import coverage_at_error
-    with pytest.raises(ValueError):
-        coverage_at_error(confidence, correct, budget)
-
-
-def test_fixed_threshold_does_not_reselect_using_evaluation_labels():
-    from d1a.metrics import select_threshold, evaluate_threshold
-    threshold = select_threshold([0.99, 0.98, 0.97, 0.6], [True, True, True, False], 0.05)
-    assert threshold == 0.97
-    result = evaluate_threshold([0.99, 0.7, 0.6], [False, True, True], threshold)
-    assert result["accepted"] == 1 and result["errors"] == 1 and result["risk"] == 1.0
-    assert result["coverage"] == pytest.approx(1 / 3)
-    empty = evaluate_threshold([0.99], [True], None)
-    assert empty["coverage"] == 0 and empty["risk"] is None
-
-
-def test_global_coverage_bootstrap_recomputes_full_statistic():
-    from d1a.metrics import metrics, paired_bootstrap
-    candidate, reference = [], []
-    for i in range(20):
-        common = {"id": str(i), "group": "one-cluster", "source": "fixture", "task": "fixture",
-                  "question": "q", "variant": "clean", "type": "choice", "keys": ["a", "b"], "label": 0}
-        candidate.append({**common, "p": [0.99, 0.01] if i < 18 else [0.4, 0.6]})
-        reference.append({**common, "p": [0.6, 0.4] if i < 18 else [0.01, 0.99]})
-    assert metrics(candidate)["acc"] == metrics(reference)["acc"]
-    result = paired_bootstrap(candidate, reference, samples=50, metric="coverage_at_5pct_error", aggregation="micro")
-    assert result["micro_coverage_at_5pct_error_delta"] == pytest.approx(0.9)
-    assert result["ci95"] == pytest.approx([0.9, 0.9])
-    assert result["groups"] == 1
-    assert paired_bootstrap(candidate, candidate, samples=50, metric="aurc", aggregation="micro")["ci95"] == [0, 0]
-
-
 def test_bootstrap_rejects_duplicate_or_inconsistent_pairs():
     from d1a.benchmark import prediction_rows
     from d1a.metrics import paired_bootstrap
@@ -258,26 +203,6 @@ def test_bootstrap_rejects_duplicate_or_inconsistent_pairs():
         paired_bootstrap(rows + rows, rows)
     with pytest.raises(ValueError, match="group"):
         paired_bootstrap(rows, [{**rows[0], "group": "different"}])
-
-
-def test_temperature_preserves_argmax_but_not_cross_question_ranking():
-    import numpy as np
-    from d1a.metrics import probabilities_at_temperature
-    rows = [{"p": [0.6, 0.2, 0.2]}, {"p": [0.55, 0.449, 0.001]}]
-    calibrated = [probabilities_at_temperature(r, 2.0) for r in rows]
-    assert max(rows[0]["p"]) > max(rows[1]["p"])
-    assert calibrated[0].max() < calibrated[1].max()
-    assert all(np.argmax(r["p"]) == p.argmax() for r, p in zip(rows, calibrated))
-
-
-def test_calibration_uses_logits_without_probability_floor_distortion():
-    import numpy as np
-    from d1a.metrics import probabilities_at_temperature
-    p = probabilities_at_temperature({"p": [1.0, 0.0], "logits": [0.0, -100.0]}, 2.0)
-    assert p[1] == pytest.approx(np.exp(-50), rel=1e-6, abs=0)
-    for temperature in (0, -1, float("nan"), float("inf")):
-        with pytest.raises(ValueError):
-            probabilities_at_temperature({"p": [0.5, 0.5]}, temperature)
 
 
 def test_unknowable_not_in_raw_or_calibrated_accuracy_denominator():
@@ -298,84 +223,6 @@ def test_logits_are_recorded_in_option_order():
     prediction["logits"]["reason"]["size"] = float("inf")
     with pytest.raises(ValueError, match="logit"):
         prediction_rows(frozen_request(), prediction)
-
-
-def test_risk_curve_area_has_explicit_tie_policy():
-    from d1a.metrics import area_under_risk_coverage
-    assert area_under_risk_coverage([0.99, 0.9, 0.8], [True, True, False]) == pytest.approx(1 / 9)
-    assert area_under_risk_coverage([0.99] * 10, [True] * 9 + [False]) == pytest.approx(0.1)
-    assert area_under_risk_coverage([0.99] * 10, [False] + [True] * 9) == pytest.approx(0.1)
-
-
-def test_temperature_fit_requires_raw_rows_and_uses_true_logit_nll():
-    from d1a.metrics import fit_temperature, nll_at_temperature
-    row = {"variant": "clean", "source": "fixture", "task": "fixture", "p": [1.0, 0.0],
-           "logits": [0.0, -100.0], "label": 1, "inference_temperature": 1.0}
-    assert nll_at_temperature(row, 2.0) == pytest.approx(50.0)
-    assert fit_temperature([row], aggregation="micro") == pytest.approx(4.0)
-    with pytest.raises(ValueError, match="raw logits"):
-        fit_temperature([{**row, "inference_temperature": 2.0}])
-
-
-def test_cross_validated_temperature_is_group_disjoint_and_reports_intervals():
-    import numpy as np
-    from d1a.metrics import cross_validated_temperature
-    weights = np.exp([3.0, 0.0]); p = (weights / weights.sum()).tolist()
-    rows = []
-    for source in ("a", "b"):
-        for group in range(10):
-            for _ in range(2):
-                i = len(rows)
-                rows.append({"id": str(i), "source": source, "group": f"g{group}", "task": "t", "type": "choice",
-                             "variant": "clean", "question": "q", "keys": ["x", "y"],
-                             "label": 1 if i % 4 == 3 else 0, "logits": [3.0, 0.0], "p": p, "inference_temperature": 1.0})
-    from d1a.metrics import grouped_folds
-    fold_id = grouped_folds(rows, 5, 0)
-    fold_of = {(r["source"], r["group"]): f for r, f in zip(rows, fold_id)}
-    assert all(fold_of[(r["source"], r["group"])] == f for r, f in zip(rows, fold_id))   # a group never straddles folds
-    for source in ("a", "b"):
-        assert {fold_of[(source, f"g{g}")] for g in range(10)} == set(range(5))   # every source in every fold
-    result = cross_validated_temperature(rows, folds=5, samples=200)
-    assert len(result["temperatures"]) == 5 and all(t > 1 for t in result["temperatures"])
-    assert result["out_of_fold"]["ece"] < result["raw"]["ece"]
-    lo, hi = result["ece_ci95"]["delta"]
-    assert lo <= hi and isinstance(result["separated"], bool)
-    assert result["raw"]["n"] == result["out_of_fold"]["n"] == 40
-
-
-def test_raw_row_inverts_the_served_temperature():
-    import numpy as np
-    from d1a.metrics import fit_temperature, raw_row, tempered_row
-    raw = {"variant": "clean", "source": "s", "task": "t", "type": "choice", "label": 0, "logits": [2.0, -1.0, 0.5],
-           "p": (np.exp([2.0, -1.0, 0.5]) / np.exp([2.0, -1.0, 0.5]).sum()).tolist(), "inference_temperature": 1.0}
-    served = tempered_row(raw, 2.3)
-    back = raw_row(served)
-    assert back["inference_temperature"] == 1.0 and np.allclose(back["p"], raw["p"])
-    assert np.allclose(np.asarray(back["logits"]) - max(back["logits"]), np.asarray(raw["logits"]) - max(raw["logits"]))
-    assert raw_row(raw) is raw
-    fit_temperature([back], aggregation="micro")   # accepted as raw
-    with pytest.raises(ValueError, match="raw logits"):
-        fit_temperature([served])
-    with pytest.raises(ValueError, match="recorded none"):
-        raw_row({"p": [0.6, 0.4], "inference_temperature": 2.0})
-    twice = tempered_row(served, 1.5)                        # a second temperature composes, and raw_row still restores T=1
-    assert twice["inference_temperature"] == pytest.approx(2.3 * 1.5) and np.allclose(raw_row(twice)["p"], raw["p"])
-
-
-def test_cross_validated_temperature_rejects_too_few_groups():
-    from d1a.metrics import cross_validated_temperature
-    rows = [{"id": str(i), "source": "a", "group": f"g{i}", "task": "t", "type": "choice", "variant": "clean",
-             "label": 0, "logits": [1.0, 0.0], "p": [0.73, 0.27], "inference_temperature": 1.0} for i in range(3)]
-    with pytest.raises(ValueError, match="fewer"):
-        cross_validated_temperature(rows, folds=5)
-
-
-def test_selective_metrics_include_confidence_ties():
-    from d1a.metrics import metrics
-    rows = [{"p": [0.99, 0.01], "label": y, "type": "noul"} for y in [0, 1]]
-    report = metrics(rows)
-    assert report["confident_error_rate"] == .5
-    assert report["selective"]["0.5"] == {"coverage": 1.0, "accuracy": .5, "confidence_cutoff": .99}
 
 
 def test_uneven_microbatches_have_equal_record_weight():
@@ -521,14 +368,6 @@ def test_concurrent_predictions_keep_record_order_and_sequential_failure_semanti
     failure = read_json(tmp_path / "abort" / "failure.json")
     assert failure["record_id"] == "item-2" and failure["coverage"]["evaluated_records"] == 2
 
-def test_top_bins_and_confidence_bias():
-    from d1a.metrics import metrics
-    rows = [{"p": [0.99, 0.01], "label": 0, "type": "noul"}, {"p": [0.99, 0.01], "label": 1, "type": "noul"}, {"p": [0.6, 0.4], "label": 0, "type": "noul"}]
-    m = metrics(rows)
-    assert m["top_bins"]["0.99"] == {"n": 2, "errors": 1, "error_rate": 0.5} and m["top_bins"]["0.9"]["n"] == 2
-    assert abs(m["confidence_bias"] - ((0.99 + 0.99 + 0.6) / 3 - 2 / 3)) < 1e-9
-
-
 def test_frozen_suites_load_under_any_locale(tmp_path):
     """Issue #12: frozen partitions contain non-ASCII text and are sha256-checked byte for byte, so they must be read as
     UTF-8 whatever the platform's preferred encoding is (Windows cp936 in the report; an ASCII C locale here), and their
@@ -584,28 +423,6 @@ def test_none_pair_leaves_soft_target_questions_alone():
     req = {"state": "x", "questions": {"q": q}}
     assert len(none_pair(req, random.Random(0))) == 2
     assert none_pair({"state": "x", "questions": {"q": {**q, "target": {"a": 0.5, "b": 0.5}}}}, random.Random(0)) == []
-
-
-def test_served_fits_on_raw_rows_and_cluster_resamples_keep_groups_together():
-    import numpy as np
-    from d1a.metrics import TEMPERATURE_FIT, cluster_resamples, fit_temperature, served, served_at, tempered_row
-    rng = np.random.default_rng(1)
-    rows = []
-    for g in range(20):
-        for q in range(2):
-            z = rng.normal(0, 1, 3); y = int(rng.integers(0, 3)); z[y] += 2.0; p = np.exp(z - z.max()); p /= p.sum()
-            rows.append({"id": f"r{g}", "question": f"q{q}", "source": "s" if g % 2 else "t", "group": f"g{g}", "task": "k", "type": "choice",
-                         "variant": "clean", "label": y, "logits": z.tolist(), "p": p.tolist(), "inference_temperature": None})
-    temperature, out = served(rows, rows)
-    raw = [{**r, "inference_temperature": 1.0} for r in rows]
-    assert temperature == fit_temperature(raw, **TEMPERATURE_FIT)                      # None = recorded raw
-    assert out == [tempered_row(r, temperature) for r in raw] == served_at(rows, temperature)
-    assert served(out, rows)[0] == temperature                                         # fitting on served rows restores raw logits first
-    assert np.allclose([r["p"] for r in served_at(out, temperature)], [r["p"] for r in out])   # re-serving served rows does not temper twice
-    for idx in cluster_resamples(rows, 20, 0):
-        drawn = [rows[i]["group"] for i in idx]
-        assert all(drawn.count(g) % 2 == 0 for g in set(drawn))                        # both questions of a record move together
-        assert sum(rows[i]["source"] == "s" for i in idx) == 20                        # stratified: each source keeps its size
 
 
 def test_jsonl_round_trips_unicode_line_separators(tmp_path):
