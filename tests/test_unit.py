@@ -1261,3 +1261,17 @@ def test_metrics_reports_the_server_without_loading_it():
                  'd1a_batch_latency_ms{quantile="1"} 30.0', "d1a_prefix_cache_hits_total 4", "d1a_prefix_cache_misses_total 1", "d1a_prefix_cache_states 1",
                  "d1a_device_memory_bytes 0", "# TYPE d1a_requests_total counter"):
         assert line in text, line
+
+
+def test_metrics_needs_the_api_key_when_one_is_set(monkeypatch):
+    """With D1A_API_KEY set, /metrics is behind the same bearer check as /v1 (request counts, queue and memory are not public)."""
+    from types import SimpleNamespace
+    from fastapi.testclient import TestClient
+    from d1a import serve
+    monkeypatch.setattr(serve, "API_KEY", "secret")
+    serve.app.state.models = SimpleNamespace(model=None, idle_s=None)
+    with TestClient(serve.app) as client:
+        assert client.get("/metrics").status_code == 401
+        assert client.get("/metrics", headers={"authorization": "Bearer wrong"}).status_code == 401
+        ok = client.get("/metrics", headers={"authorization": "Bearer secret"})
+    assert ok.status_code == 200 and "d1a_loaded 0" in ok.text

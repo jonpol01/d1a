@@ -177,7 +177,7 @@ curl -s localhost:8009/v1/systemone -H 'content-type: application/json' -d '{
 
 ### The System One API
 
-`POST /v1/systemone` takes a `state` (the document), a `model` name and up to many `questions`, each a `noul` (yes/no), `choice` (one of named options) or `score` (an ordered scale). The response has one answer per question with a probability per option, plus token usage and latency. `GET /v1/models` lists the accepted model names with the serving details, including load: requests and batches served, the queue, prefix-cache hits and the recent batches' model time (p50, p95, max). `GET /metrics` reports the same in Prometheus text format (plus memory), for a scraper.
+`POST /v1/systemone` takes a `state` (the document), a `model` name and up to many `questions`, each a `noul` (yes/no), `choice` (one of named options) or `score` (an ordered scale). The response has one answer per question with a probability per option, plus token usage and latency. `GET /v1/models` lists the accepted model names with the serving details, including load: requests and batches served, the queue, prefix-cache hits and the recent batches' model time (p50, p95, max). `GET /metrics` reports the same in Prometheus text format (plus memory), for a scraper; like `/v1`, it needs the bearer key when `D1A_API_KEY` is set.
 
 Model names: the server answers any name and lists `d1a-latest`, `kev-latest` and `jev-latest`. `d1a-latest` is D1A's own name. `kev-latest` stays accepted so clients written against Kev keep working unchanged, and `jev-latest` is the TypeSafe SDK's default, so an unconfigured SDK client works too. Set `D1A_API_KEY` to require `Authorization: Bearer <key>`.
 

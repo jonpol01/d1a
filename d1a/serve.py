@@ -290,11 +290,14 @@ app = FastAPI(title="d1a")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"], expose_headers=["x-typesafe-request-id", "server-timing"])
 
 
+PROTECTED = ("/v1", "/metrics")   # paths that need the bearer key when D1A_API_KEY is set: the API and the operational metrics
+
+
 @app.middleware("http")
 async def typesafe(request, call_next):
     """Bearer auth (when API_KEY is set) and the request id every TypeSafe client reads off the response."""
     started = time.perf_counter()
-    if API_KEY and request.url.path.startswith("/v1") and not hmac.compare_digest(request.headers.get("authorization", ""), f"Bearer {API_KEY}"):
+    if API_KEY and request.url.path.startswith(PROTECTED) and not hmac.compare_digest(request.headers.get("authorization", ""), f"Bearer {API_KEY}"):
         resp = JSONResponse({"detail": "missing or invalid API key; send Authorization: Bearer <D1A_API_KEY>"}, 401, {"www-authenticate": "Bearer"})
     else:
         resp = await call_next(request)
