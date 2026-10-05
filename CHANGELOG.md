@@ -16,6 +16,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- `scripts/equivalence/` (`api.py`, `metrics.py`, `benchmark.py`, `suite.py`): each runs a rewritten module and the same
+  module at a git commit (`--ref`; the default is the last commit before its rewrite) on generated inputs, and stops at
+  the first difference: types, float bits, key order, files byte for byte, error messages.
 - `tests/test_tiny_checkpoint.py` (in CI): a random 6-layer Gemma 4, with sliding and KV-shared layers, goes through
   `d1a.train`, `d1a.checkpoint` and `d1a.serve` with no download. Every scoring path (packed, rows, prefix miss and hit,
   serving batch) and the served answers must match an independent reference: each question as a plain causal row
@@ -34,6 +37,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `d1a/metrics.py` is rewritten in D1A's own code, no longer derived from Kev. Every figure, report (key order included),
   fitted temperature and bootstrap interval is bit-identical to the previous version: checked on about 300,000 generated
   calls and on saved benchmark rows. Its tests are rewritten too, as `tests/test_metrics.py`.
+- `d1a/benchmark.py` is rewritten in D1A's own code, no longer derived from Kev. Its rows, reports, the files it writes
+  (byte for byte), its failure and skip rules and its command line are unchanged: checked against the previous version
+  on about 34,000 generated cases and end to end on a frozen suite. Its tests are rewritten too, as
+  `tests/test_benchmark.py`.
 
 ### Removed
 

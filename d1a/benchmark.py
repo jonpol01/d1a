@@ -1,12 +1,11 @@
-# Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); --remote-model defaults to d1a-latest; --context serving for --data, and a warning when --data records are skipped as too long; paired_flip moved here from the removed d1a.contrastive.
-"""Score a predictor on a frozen suite partition (or your own labelled JSONL).
+"""Score a predictor (a checkpoint, or any System One endpoint) on a frozen suite partition or on your own labelled JSONL.
 
     uv run python -m d1a.benchmark --run runs/<run>/checkpoint --suite evals/<v>/decision-<v> --out runs/<name>
     uv run python -m d1a.benchmark --remote http://127.0.0.1:8008 --suite ... --out ...      # any System One endpoint
 
-Every prediction becomes one row per question (prediction_rows); d1a.metrics scores rows; evaluate_records writes
-predictions.jsonl, rows.json and report.json. Predictors live in d1a.predictors.
+Each prediction becomes one row per question (prediction_rows), d1a.metrics scores the rows (summarize), and
+evaluate_records writes three files to --out: predictions.jsonl (each record's request hash, prediction and rows, written
+as it is scored), rows.json and report.json. The predictors are in d1a.predictors.
 """
 import argparse
 import functools
@@ -29,176 +28,217 @@ from d1a.suites import resolve
 from d1a.suite import CONTEXT, ENCODING, SERVING_CONTEXT, digest, load_split, read_manifest, record_digest, write_json
 
 
+# --- rows ---------------------------------------------------------------------------------------------------------------
+
 def labels(q):
-    """(option keys, label index) of a labelled request question."""
+    """(the option keys of a labelled request question, the index of its label among them)."""
     keys = question_keys(q["type"], q.get("criteria"))
-    return keys, keys.index(q["label"]) if q["type"] == "choice" else int(q["label"])
+    return keys, (keys.index(q["label"]) if q["type"] == "choice" else int(q["label"]))
 
 
 def validate_distribution(raw, keys):
+    """A returned {key: probability} as an array in option order, renormalised, and its sum as returned. Refuses other
+    keys, values outside [0, 1] or not finite, and a sum off 1 by more than rounding over that many options explains."""
     if set(raw) != set(keys):
         raise ValueError("probability keys do not match requested options")
-    p = np.array([raw[k] for k in keys], dtype=float)
+    p = np.array([raw[key] for key in keys], dtype=float)
     if not np.isfinite(p).all() or (p < 0).any() or (p > 1).any():
         raise ValueError("non-finite or out-of-range probabilities")
     total = float(p.sum())
-    if total <= 0 or abs(total - 1) > max(1e-5, len(keys) * 0.005 + 1e-8):
+    tolerance = max(1e-5, len(keys) * 0.005 + 1e-8)   # 4-decimal answers (d1a.api.round_prob) may each be off by 0.00005
+    if total <= 0 or abs(total - 1) > tolerance:
         raise ValueError(f"invalid probability sum: {total}")
     return p / total, total
 
 
+def parent_of(meta):
+    """The clean record a variant perturbs. Suites frozen before parent_id existed kept it in a variant's group_id."""
+    return meta.get("parent_id") or (meta["id"] if meta["variant"] == "clean" else meta["group_id"])
+
+
 def prediction_rows(record, prediction):
+    """One row per question of a labelled record: its identity, the distribution in option order (renormalised), the
+    label's index, and the raw logits and inference temperature when the prediction carries them."""
     if set(prediction["probabilities"]) != set(record["questions"]):
         raise ValueError("answer IDs differ from request IDs")
-    meta = record["_meta"]
-    rows = []
+    meta, rows = record["_meta"], []
     for qid, q in record["questions"].items():
-        keys, y = labels(q)
+        keys, label = labels(q)
         p, total = validate_distribution(prediction["probabilities"][qid], keys)
-        row = {"id": meta["id"], "group": meta["group_id"], "question": qid,
-               "source": meta["source"], "task": q["src"], "type": q["type"],
-               "variant": meta["variant"], "keys": keys, "label": y, "control_id": meta.get("control_id"),
-               "pair_id": meta.get("pair_id"), "sibling": meta.get("sibling"), # suites frozen before parent_id existed stored the parent's id in group_id for variants
-               "parent": meta.get("parent_id") or (meta["id"] if meta["variant"] == "clean" else meta["group_id"]),
+        row = {"id": meta["id"], "group": meta["group_id"], "question": qid, "source": meta["source"], "task": q["src"], "type": q["type"],
+               "variant": meta["variant"], "keys": keys, "label": label, "control_id": meta.get("control_id"),
+               "pair_id": meta.get("pair_id"), "sibling": meta.get("sibling"), "parent": parent_of(meta),
                "p": p.tolist(), "raw_probability_sum": total, "zero_count": int((p == 0).sum())}
         if "logits" in prediction:
-            raw_logits = prediction["logits"][qid]
-            if set(raw_logits) != set(keys) or not all(math.isfinite(raw_logits[k]) for k in keys):
+            logits = prediction["logits"][qid]
+            if set(logits) != set(keys) or not all(math.isfinite(logits[key]) for key in keys):
                 raise ValueError("logit keys or values do not match the requested options")
-            row["logits"] = [float(raw_logits[k]) for k in keys]
+            row["logits"] = [float(logits[key]) for key in keys]
             row["inference_temperature"] = prediction["inference_temperature"]
-        if "kernels" in prediction: row["kernels"] = prediction["kernels"]   # a long row off the fp32-exact kernels (LocalPredictor)
+        if "kernels" in prediction:
+            row["kernels"] = prediction["kernels"]   # a long row scored off the fp32-exact kernels (d1a.predictors.LocalPredictor)
         rows.append(row)
     return rows
 
 
+# --- the report ---------------------------------------------------------------------------------------------------------
+
 def paired_flip(rows):
-    """Pair-level metrics from benchmark rows carrying pair_id/sibling. A model that ignores the state cannot flip."""
-    by_pair = {}
-    for r in rows:
-        if r.get("pair_id"):
-            key = (r["pair_id"], r.get("question", "decision"))
-            pair = by_pair.setdefault(key, {})
-            if r["sibling"] in pair:
-                raise ValueError("duplicate contrastive sibling")
-            pair[r["sibling"]] = r
-    if not by_pair:
+    """Minimal-pair metrics over rows with a pair_id (contrastive suites: siblings "a" and "b" differ in one sentence).
+    Over the pairs whose label changes: how often the answer changes too, and how often both are right. Over the pairs
+    whose label stays: how often the answer stays. None without pairs. A model that ignores the state cannot flip."""
+    pairs = {}
+    for row in rows:
+        if not row.get("pair_id"):
+            continue
+        siblings = pairs.setdefault((row["pair_id"], row.get("question", "decision")), {})
+        if row["sibling"] in siblings:
+            raise ValueError("duplicate contrastive sibling")
+        siblings[row["sibling"]] = row
+    if not pairs:
         return None
-    if any(set(p) != {"a", "b"} for p in by_pair.values()):
+    if any(set(siblings) != {"a", "b"} for siblings in pairs.values()):
         raise ValueError("incomplete contrastive pair")
-    prediction = lambda r: r["keys"][max(range(len(r["p"])), key=r["p"].__getitem__)]
-    truth = lambda r: r["keys"][r["label"]]
-    relevant = [p for p in by_pair.values() if truth(p["a"]) != truth(p["b"])]
-    invariant = [p for p in by_pair.values() if truth(p["a"]) == truth(p["b"])]
-    both = lambda ps: sum(all(prediction(r) == truth(r) for r in p.values()) for p in ps) / len(ps) if ps else None
-    result = {"pairs": len(relevant),
-              "flip_rate": sum(prediction(p["a"]) != prediction(p["b"]) for p in relevant) / len(relevant) if relevant else None,
-              "both_correct_rate": both(relevant)}
-    if invariant:
-        result.update(invariant_pairs=len(invariant), invariance_rate=sum(prediction(p["a"]) == prediction(p["b"]) for p in invariant) / len(invariant),
-                      invariant_both_correct_rate=both(invariant))
-    return result
+    answer = lambda row: row["keys"][max(range(len(row["p"])), key=row["p"].__getitem__)]
+    truth = lambda row: row["keys"][row["label"]]
+    flipping = [s for s in pairs.values() if truth(s["a"]) != truth(s["b"])]
+    steady = [s for s in pairs.values() if truth(s["a"]) == truth(s["b"])]
+
+    def both_right(group):
+        return sum(all(answer(row) == truth(row) for row in s.values()) for s in group) / len(group) if group else None
+
+    out = {"pairs": len(flipping),
+           "flip_rate": sum(answer(s["a"]) != answer(s["b"]) for s in flipping) / len(flipping) if flipping else None,
+           "both_correct_rate": both_right(flipping)}
+    if steady:
+        out["invariant_pairs"] = len(steady)
+        out["invariance_rate"] = sum(answer(s["a"]) == answer(s["b"]) for s in steady) / len(steady)
+        out["invariant_both_correct_rate"] = both_right(steady)
+    return out
+
+
+def permutation_shift(rows, clean):
+    """For each permuted Choice row, against its clean parent with the options put back in order: the largest probability
+    change and whether the top answer changed."""
+    parent = {(row["id"], row["question"]): row for row in clean}
+    shifts, flips = [], []
+    for row in rows:
+        if row["variant"] != "permuted" or row["type"] != "choice":
+            continue
+        original = parent[(row["parent"], row["question"])]
+        realigned = [row["p"][row["keys"].index(key)] for key in original["keys"]]
+        shifts.append(float(np.max(np.abs(np.array(realigned) - original["p"]))))
+        flips.append(int(np.argmax(realigned) != np.argmax(original["p"])))
+    return shifts, flips
+
+
+def objective_tasks(tasks):
+    """The tasks the objective averages: every task except the unknowable ones (their controls count)."""
+    return [m["nll"] for name, m in tasks.items() if not name.startswith("unknowable_") or name.startswith("unknowable_control")]
+
+
+METRIC_POLICY = {"version": 2, "selective_ties": "whole_confidence_groups",
+                 "coverage_at_error": "in-sample maximum over confidence thresholds; not a deployed error guarantee",
+                 "aurc": "right-step integral over whole confidence groups",
+                 "confident_error_rate": "high-confidence errors divided by all questions",
+                 "error_rate_at_0_9": "errors divided by questions accepted at p_max >= 0.9",
+                 "nll": "exact from logits when recorded; otherwise from floored probabilities"}
 
 
 def summarize(rows, temperature=1.0, heldout_sources=()):
-    """Report over benchmark rows. heldout_sources: sources the scored model never trained on; their tasks are also
-    reported as a separate block."""
-    clean = [r for r in rows if r["variant"] == "clean"]
+    """The report over benchmark rows: the objective (minus the task-macro mean NLL), per-task and per-variant metrics,
+    the clean knowable questions raw and at `temperature`, minimal pairs, option-order sensitivity and the unknowable
+    report. heldout_sources: sources the scored model never trained on; their tasks are also reported apart."""
+    clean = [row for row in rows if row["variant"] == "clean"]
     tasks = grouped_metrics(clean, "task")
     variants = grouped_metrics(rows, "variant")
-    lookup = {(r["id"], r["question"]): r for r in clean}
-    diffs, flips = [], []
-    for row in rows:
-        if row["variant"] == "permuted" and row["type"] == "choice":
-            original = lookup[(row["parent"], row["question"])]
-            aligned = [row["p"][row["keys"].index(k)] for k in original["keys"]]
-            diffs.append(float(np.max(np.abs(np.array(aligned) - original["p"]))))
-            flips.append(int(np.argmax(aligned) != np.argmax(original["p"])))
-    knowable = [r for r in clean if r["source"] != "unknowable"]     # unknowable records are scored on confidence, never on accuracy
-    return {"objective": -float(np.mean([v["nll"] for k, v in tasks.items() if not k.startswith("unknowable_") or k.startswith("unknowable_control")])),
+    shifts, flips = permutation_shift(rows, clean)
+    knowable = [row for row in clean if row["source"] != "unknowable"]   # unknowable records are scored on confidence alone
+    heldout = [row for row in clean if row["source"] in heldout_sources]
+    return {"objective": -float(np.mean(objective_tasks(tasks))),
             "paired_flip": paired_flip(clean), "unknowable": unknowable_report(clean),
             "clean": metrics(knowable), "tasks": tasks, "variants": variants,
-            "heldout_tasks": grouped_metrics([r for r in clean if r["source"] in heldout_sources], "task") if any(r["source"] in heldout_sources for r in clean) else {},
-            "permutation": {"n": len(diffs), "mean_max_delta": float(np.mean(diffs)) if diffs else None,
+            "heldout_tasks": grouped_metrics(heldout, "task") if heldout else {},
+            "permutation": {"n": len(shifts), "mean_max_delta": float(np.mean(shifts)) if shifts else None,
                             "flip_rate": float(np.mean(flips)) if flips else None},
             "temperature": temperature, "calibrated_clean": metrics(knowable, temperature),
-            "metric_policy": {"version": 2, "selective_ties": "whole_confidence_groups",
-                              "coverage_at_error": "in-sample maximum over confidence thresholds; not a deployed error guarantee",
-                              "aurc": "right-step integral over whole confidence groups",
-                              "confident_error_rate": "high-confidence errors divided by all questions",
-                              "error_rate_at_0_9": "errors divided by questions accepted at p_max >= 0.9",
-                              "nll": "exact from logits when recorded; otherwise from floored probabilities",
-                              "nll_floor": EPSILON, "renormalize_returned_probabilities": True,
-                              "raw_sums_outside_1e_5": sum(abs(r["raw_probability_sum"] - 1) > 1e-5 for r in rows),
-                              "returned_zeros": sum(r["zero_count"] for r in rows)}}
+            "metric_policy": {**METRIC_POLICY, "nll_floor": EPSILON, "renormalize_returned_probabilities": True,
+                              "raw_sums_outside_1e_5": sum(abs(row["raw_probability_sum"] - 1) > 1e-5 for row in rows),
+                              "returned_zeros": sum(row["zero_count"] for row in rows)}}
 
+
+# --- scoring ------------------------------------------------------------------------------------------------------------
 
 def predictions(records, predictor):
     """Yield, in record order, a zero-argument callable that returns predictor(record) or raises what it raised. A
     predictor with `concurrency` > 1 (RemotePredictor: one independent HTTP request per call) keeps that many calls in
     flight on a thread pool; in-process predictors (one GPU) have no `concurrency` and run one record at a time. Either
-    way the caller sees each outcome in the same order as the plain sequential loop."""
+    way the caller sees each outcome in the order of the plain sequential loop."""
     workers = getattr(predictor, "concurrency", 1)
     if workers <= 1 or len(records) <= 1:
         for record in records:
             yield functools.partial(predictor, record)
         return
-    executor = ThreadPoolExecutor(max_workers=min(workers, len(records)))
+    pool = ThreadPoolExecutor(max_workers=min(workers, len(records)))
     try:
-        for future in [executor.submit(predictor, record) for record in records]:
+        for future in [pool.submit(predictor, record) for record in records]:
             yield future.result
     finally:
-        executor.shutdown(wait=False, cancel_futures=True)
+        pool.shutdown(wait=False, cancel_futures=True)
 
 
 def evaluate_records(records, predictor, directory, temperature=1.0, heldout_sources=(), skip_overlong=False):
-    """skip_overlong: for external data that was not admitted to a context (--data, or an eval-only suite frozen as published),
-    records the predictor cannot encode are counted in coverage["rejected_records"] and listed in rejected.json instead of
-    aborting. Admitted suites never trigger it; reports must state how rejected records enter any headline number."""
+    """Score `records` into `directory` (which must not exist) and return (report, rows). The first record that fails
+    stops the run, with failure.json saying which and how far it got. skip_overlong: for data never admitted to a context
+    (--data, or an eval-only suite frozen as published), a record the predictor cannot encode is counted in
+    coverage["rejected_records"] and listed in rejected.json instead; admitted suites never hit it. A report must say how
+    rejected records enter any headline number."""
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=False)
     coverage = {"requested_records": len(records), "requested_questions": sum(len(r["questions"]) for r in records),
                 "evaluated_records": 0, "evaluated_questions": 0, "rejected_records": 0, "truncated_records": 0}
     rows, latencies, rejected = [], [], []
-    with (directory / "predictions.jsonl").open("w", encoding=ENCODING) as output:
-        preds = predictions(records, predictor)
+    outcomes = predictions(records, predictor)
+    with (directory / "predictions.jsonl").open("w", encoding=ENCODING) as log:
         for record in records:
             try:
-                pred = next(preds)()
-                new_rows = prediction_rows(record, pred)
-            except ContextOverflow as error:
-                if skip_overlong:
-                    coverage["rejected_records"] += 1; rejected.append({"id": record["_meta"]["id"], "error": str(error)}); continue
-                coverage["rejected_records"] += 1
-                write_json(directory / "failure.json", {"coverage": coverage, "record_id": record["_meta"]["id"], "error_type": type(error).__name__})
-                raise
+                prediction = next(outcomes)()
+                scored = prediction_rows(record, prediction)
             except Exception as error:
                 coverage["rejected_records"] += 1
+                if skip_overlong and isinstance(error, ContextOverflow):
+                    rejected.append({"id": record["_meta"]["id"], "error": str(error)})
+                    continue
                 write_json(directory / "failure.json", {"coverage": coverage, "record_id": record["_meta"]["id"], "error_type": type(error).__name__})
                 raise
-            output.write(json.dumps({"request_sha256": record_digest(api_request(record)), "id": record["_meta"]["id"],
-                                     "prediction": pred, "rows": new_rows}, allow_nan=False) + "\n")
-            output.flush()
-            rows.extend(new_rows)
-            latencies.append(pred["latency_ms"])
+            log.write(json.dumps({"request_sha256": record_digest(api_request(record)), "id": record["_meta"]["id"],
+                                  "prediction": prediction, "rows": scored}, allow_nan=False) + "\n")
+            log.flush()
+            rows += scored
+            latencies.append(prediction["latency_ms"])
             coverage["evaluated_records"] += 1
-            coverage["evaluated_questions"] += len(new_rows)
+            coverage["evaluated_questions"] += len(scored)
             if coverage["evaluated_records"] % 50 == 0:
                 print(f"evaluated {coverage['evaluated_records']}/{len(records)}", flush=True)
     write_json(directory / "rows.json", rows)
-    if rejected: write_json(directory / "rejected.json", rejected)
+    if rejected:
+        write_json(directory / "rejected.json", rejected)
     report = summarize(rows, temperature, heldout_sources)
-    report.update(coverage=coverage, latency_ms={"median": float(np.median(latencies)), "p95": float(np.quantile(latencies, .95))},
-                  calibration={"inference_temperature": getattr(predictor, "temperature", None),
-                               "additional_temperature": temperature, "logits_recorded": all("logits" in r for r in rows)})
-    long = [r for r in rows if "kernels" in r]
-    if long:   # absent when every row ran the exact kernels, so such reports are unchanged
-        report["long_rows"] = {"count": len(long), "records": len({r["id"] for r in long}), "kernels": sorted({r["kernels"] for r in long}), "threshold": ROW_PASS_TOKENS}
+    report["coverage"] = coverage
+    report["latency_ms"] = {"median": float(np.median(latencies)), "p95": float(np.quantile(latencies, .95))}
+    report["calibration"] = {"inference_temperature": getattr(predictor, "temperature", None), "additional_temperature": temperature,
+                             "logits_recorded": all("logits" in row for row in rows)}
+    long = [row for row in rows if "kernels" in row]
+    if long:   # absent when every row ran the exact kernels, so those reports are unchanged
+        report["long_rows"] = {"count": len(long), "records": len({row["id"] for row in long}), "kernels": sorted({row["kernels"] for row in long}),
+                               "threshold": ROW_PASS_TOKENS}
     write_json(directory / "report.json", report)
     return report, rows
 
 
-def main():
+# --- command line -------------------------------------------------------------------------------------------------------
+
+def parse_args(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--run", help="checkpoint dir or Hub id (local scoring)")
     ap.add_argument("--remote", help="base URL of a System One-compatible endpoint to score instead of a local checkpoint")
@@ -216,29 +256,42 @@ def main():
                     help="suite partition to score (train: teacher predictions for distillation; --allow-test reads the locked test instead)")
     ap.add_argument("--date_facts", action="store_true", help="apply d1a.api.with_date_facts to every state before scoring (the opt-in serving preprocessor); reported in report.json")
     ap.add_argument("--rotations", type=int, default=1, help="average every Choice question over this many cyclic option rotations (d1a.predictors.RotationAveraged); 1 = one order")
-    a = ap.parse_args()
+    a = ap.parse_args(argv)
     if bool(a.run) == bool(a.remote): ap.error("give exactly one of --run or --remote")
     if a.rotations < 1: ap.error("--rotations must be >= 1")
     if a.remote_concurrency < 1: ap.error("--remote-concurrency must be >= 1")
     if bool(a.suite) == bool(a.data): ap.error("give exactly one of --suite or --data")
+    return a
+
+
+def inputs(a):
+    """(records, held-out sources, split name, sha256 of what was read, the context to score under, skip_overlong)."""
     if a.data:
-        path = resolve(a.data)   # a d1a suite partition (evals/d1a/<suite>:<partition>): fetched pinned and verified
-        records, heldout, split, source_hash = load_records(path), [], "custom", digest(Path(path))
-        context, skip_overlong = (SERVING_CONTEXT if a.context == "serving" else CONTEXT), True
-    else:
-        split = "test" if a.allow_test else a.split
-        records = load_split(a.suite, split, allow_test=a.allow_test)
-        manifest = read_manifest(a.suite)
-        heldout = manifest["holdout_sources"]; source_hash = digest(Path(a.suite) / "manifest.json")
-        context, skip_overlong = manifest.get("context", CONTEXT), bool(manifest.get("eval_only"))
+        path = resolve(a.data)   # a D1A suite partition (evals/d1a/<suite>:<partition>) is fetched pinned and verified
+        context = SERVING_CONTEXT if a.context == "serving" else CONTEXT
+        return load_records(path), [], "custom", digest(Path(path)), context, True
+    split = "test" if a.allow_test else a.split
+    records = load_split(a.suite, split, allow_test=a.allow_test)
+    manifest = read_manifest(a.suite)
+    return (records, manifest["holdout_sources"], split, digest(Path(a.suite) / "manifest.json"),
+            manifest.get("context", CONTEXT), bool(manifest.get("eval_only")))
+
+
+def main():
+    a = parse_args()
+    records, heldout, split, source_hash, context, skip_overlong = inputs(a)
     if a.date_facts:
-        records = [{**r, "state": with_date_facts(r["state"])} for r in records]
-    predictor = RemotePredictor(a.remote, a.remote_model, os.environ.get("D1A_REMOTE_API_KEY", "local"), concurrency=a.remote_concurrency) if a.remote else LocalPredictor(a.run, a.device, LoadOptions.from_env(), context=context)
+        records = [{**record, "state": with_date_facts(record["state"])} for record in records]
+    if a.remote:
+        predictor = RemotePredictor(a.remote, a.remote_model, os.environ.get("D1A_REMOTE_API_KEY", "local"), concurrency=a.remote_concurrency)
+    else:
+        predictor = LocalPredictor(a.run, a.device, LoadOptions.from_env(), context=context)
     scorer = RotationAveraged(predictor, a.rotations) if a.rotations > 1 else predictor
     report, _ = evaluate_records(records, scorer, a.out, heldout_sources=tuple(heldout), skip_overlong=skip_overlong)
     report.update(suite_sha256=source_hash, data=a.data, date_facts=a.date_facts, rotations=a.rotations, run=a.run or a.remote, split=split,
-                  calibration_applied=predictor.temperature != 1.0 if not a.remote else None,
-                  remote={"base_url": a.remote, "requested_model": a.remote_model, "served_model": predictor.served_model, "concurrency": a.remote_concurrency} if a.remote else None)
+                  calibration_applied=None if a.remote else predictor.temperature != 1.0,
+                  remote={"base_url": a.remote, "requested_model": a.remote_model, "served_model": predictor.served_model,
+                          "concurrency": a.remote_concurrency} if a.remote else None)
     write_json(Path(a.out) / "report.json", report)
     skipped = report["coverage"]["rejected_records"]
     if a.data and skipped:   # a silently smaller set would read as the whole file's score

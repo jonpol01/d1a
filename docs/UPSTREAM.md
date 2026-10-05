@@ -79,6 +79,7 @@ the Apache License 2.0. This file records where D1A's code came from and what D1
 - **Rewritten from scratch** (no longer derived), one file per line in path order, so rewrites landing in parallel touch
   different lines; each behaviour-identical rewrite is checked by `scripts/equivalence/` where one exists:
   - `d1a/api.py`: the same schema, texts and answers; its tests are `tests/test_system_one.py`.
+  - `d1a/benchmark.py`: the same rows, reports and files; its tests are `tests/test_benchmark.py`.
   - `d1a/calibrate.py`: replaces Kev's calibration script; `scripts/calibrate_checkpoint.py` is now a wrapper around it.
   - `d1a/metrics.py`: bit-identical results; its tests are `tests/test_metrics.py`.
 - **Rewritten**: `README.md`, `AGENTS.md`, `NOTICE`, `.gitignore`.
@@ -93,7 +94,6 @@ changes at the top; `scripts/check_license.py` checks that this list and the hea
 ```text
 .github/workflows/ci.yml
 .gitignore
-d1a/benchmark.py
 d1a/checkpoint.py
 d1a/composition.py
 d1a/cuda_graphs.py

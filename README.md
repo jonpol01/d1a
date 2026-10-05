@@ -327,6 +327,7 @@ D1A-E4B is the most accurate so far, ahead of Jev (0.845) on sources it trained 
 uv sync --extra serve
 uv run python -m pytest tests --unit -q   # what CI runs: every test file but the few tests/conftest.py's OUTSIDE_UNIT_TESTS lists
 python scripts/check_license.py          # license and provenance rules (see CONTRIBUTING.md)
+uv run python scripts/equivalence/metrics.py   # a rewritten module against its last version before the rewrite (api, metrics, benchmark, suite)
 ```
 
 These suites need no model weights (the tokenizer, about 10 MB, is downloaded from the Hub). `tests/test_model.py`, `tests/test_mlx.py` and `tests/test_api.py` need weights or a running server.
