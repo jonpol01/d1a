@@ -1,6 +1,5 @@
 # Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); dropped two checks bound to the removed experiments/ registrations; the tests of the removed Modal app and report scripts left; the contrastive generator's tests left with it (paired_flip and the held-out structure guard keep theirs); the d1a.metrics tests rewritten as tests/test_metrics.py.
-import copy
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); dropped two checks bound to the removed experiments/ registrations; the tests of the removed Modal app and report scripts left; the contrastive generator's tests left with it (paired_flip and the held-out structure guard keep theirs); the d1a.metrics tests rewritten as tests/test_metrics.py; the d1a.benchmark tests rewritten as tests/test_benchmark.py.
 import pathlib
 import random
 
@@ -85,71 +84,6 @@ def test_api_payload_excludes_answers_and_metadata():
     assert set(clean["questions"]["reason"]) == {"type", "instructions", "criteria"}
 
 
-def test_failed_prediction_cannot_produce_partial_score(tmp_path):
-    from d1a.suite import read_json
-    from d1a.benchmark import evaluate_records
-
-    def fail(record):
-        raise ValueError("invalid prediction")
-
-    out = tmp_path / "evaluation"
-    with pytest.raises(ValueError):
-        evaluate_records([frozen_request()], fail, out)
-    failure = read_json(out / "failure.json")
-    assert failure["coverage"]["requested_records"] == 1
-    assert failure["coverage"]["evaluated_records"] == 0
-    assert failure["coverage"]["rejected_records"] == 1
-    assert not (out / "report.json").exists()
-
-
-def test_overlong_records_are_rejected_only_for_suites_scored_as_published(tmp_path):
-    """ContextOverflow from the encoder (any of its three limits) is a counted rejection under skip_overlong and an abort
-    otherwise; every other ValueError still aborts either way."""
-    from d1a.benchmark import evaluate_records
-    from d1a.model import ContextOverflow
-    from d1a.suite import read_json
-    records = [frozen_request(0), frozen_request(1), frozen_request(2)]
-    keys = list(records[0]["questions"]["reason"]["criteria"])
-
-    def predictor(record):
-        if record["_meta"]["id"] == "item-1": raise ContextOverflow("branch too long: 1590 tokens with a 7000-token state (row limit 8192)")
-        return {"probabilities": {"reason": {k: 1.0 / len(keys) for k in keys}}, "latency_ms": 1.0}
-
-    report, _ = evaluate_records(records, predictor, tmp_path / "published", skip_overlong=True)
-    assert report["coverage"]["evaluated_records"] == 2 and report["coverage"]["rejected_records"] == 1
-    assert [r["id"] for r in read_json(tmp_path / "published" / "rejected.json")] == ["item-1"]
-    with pytest.raises(ContextOverflow):
-        evaluate_records(records, predictor, tmp_path / "admitted")
-    assert read_json(tmp_path / "admitted" / "failure.json")["error_type"] == "ContextOverflow"
-
-    def other(record):
-        raise ValueError("answer IDs differ from request IDs")
-    with pytest.raises(ValueError):
-        evaluate_records(records, other, tmp_path / "other", skip_overlong=True)
-
-
-def test_missing_answers_and_nonfinite_probabilities_fail():
-    from d1a.benchmark import prediction_rows, validate_distribution
-    with pytest.raises(ValueError, match="answer IDs"):
-        prediction_rows(frozen_request(), {"probabilities": {}})
-    with pytest.raises(ValueError, match="non-finite"):
-        validate_distribution({"x": float("nan"), "y": 0.5}, ["x", "y"])
-    with pytest.raises(ValueError, match="sum"):
-        validate_distribution({"x": 0, "y": 0}, ["x", "y"])
-
-
-def test_task_macro_and_record_bootstrap():
-    from d1a.benchmark import prediction_rows, summarize
-    from d1a.metrics import paired_bootstrap
-    pred = {"probabilities": {"reason": {"size": 0.8, "damage": 0.1, "color": 0.1}}}
-    rows = prediction_rows(frozen_request(), pred)
-    report = summarize(rows)
-    assert report["objective"] == pytest.approx(-report["clean"]["nll"])
-    assert paired_bootstrap(rows, rows, samples=50)["ci95"] == [0, 0]
-    with pytest.raises(ValueError, match="identical"):
-        paired_bootstrap(rows, [])
-
-
 def test_batched_mask_matches_single_and_pads_are_invisible():
     from d1a.model import branch_mask, branch_mask_batch
     a, b = [0, 0, 1, 1, 2], [0, 1, 1]
@@ -163,66 +97,6 @@ def test_batched_mask_matches_single_and_pads_are_invisible():
     assert not allowed[3, 1:3].any()          # pads belong to no question segment (state stays visible; rows are discarded)
 
 
-def test_paired_flip_counts_state_driven_flips():
-    """benchmark.paired_flip over a contrastive suite's rows: a constant model never flips; a perfect model flips every
-    pair whose label changes and gets both siblings right; pairs whose label does not change measure invariance."""
-    from d1a.benchmark import paired_flip
-    keys = ["no", "yes"]
-    row = lambda pair, sibling, y, p: {"pair_id": pair, "sibling": sibling, "keys": keys, "label": y, "p": p}
-    perfect = [row(f"p{i}", s, y, [1.0 - y, float(y)]) for i in range(4) for s, y in (("a", i % 2), ("b", 1 - i % 2))]
-    assert paired_flip(perfect) == {"pairs": 4, "flip_rate": 1.0, "both_correct_rate": 1.0}
-    constant = [{**r, "p": [1.0, 0.0]} for r in perfect]
-    assert paired_flip(constant) == {"pairs": 4, "flip_rate": 0.0, "both_correct_rate": 0.0}
-    same = perfect + [row("q", "a", 1, [0.0, 1.0]), row("q", "b", 1, [1.0, 0.0])]
-    assert paired_flip(same)["invariant_pairs"] == 1 and paired_flip(same)["invariance_rate"] == 0.0
-    with pytest.raises(ValueError, match="incomplete"):
-        paired_flip(perfect[:-1])
-    assert paired_flip([{"keys": keys, "label": 0, "p": [1.0, 0.0]}]) is None
-
-
-def test_permuted_variants_pair_with_their_parent_not_their_group():
-    from d1a.benchmark import prediction_rows, summarize
-    rows = []
-    for i in range(2):
-        r = frozen_request(i); r["_meta"]["group_id"] = "shared-pair"     # siblings share a bootstrap group
-        permuted = copy.deepcopy(r); q = permuted["questions"]["reason"]   # a frozen suite's "permuted" variant
-        q["criteria"] = dict(reversed(q["criteria"].items()))
-        permuted["_meta"].update(id=f"item-{i}/permuted", parent_id=f"item-{i}", variant="permuted")
-        for rec in (r, permuted):
-            keys = list(rec["questions"]["reason"]["criteria"])
-            rows += prediction_rows(rec, {"probabilities": {"reason": {k: (0.7 if k == rec["questions"]["reason"]["label"] else 0.3 / (len(keys) - 1)) for k in keys}}})
-    report = summarize(rows)
-    assert report["permutation"]["n"] == 2 and report["permutation"]["flip_rate"] == 0.0
-
-
-def test_bootstrap_rejects_duplicate_or_inconsistent_pairs():
-    from d1a.benchmark import prediction_rows
-    from d1a.metrics import paired_bootstrap
-    rows = prediction_rows(frozen_request(), {"probabilities": {"reason": {"size": 0.8, "damage": 0.1, "color": 0.1}}})
-    with pytest.raises(ValueError, match="duplicate"):
-        paired_bootstrap(rows + rows, rows)
-    with pytest.raises(ValueError, match="group"):
-        paired_bootstrap(rows, [{**rows[0], "group": "different"}])
-
-
-def test_unknowable_not_in_raw_or_calibrated_accuracy_denominator():
-    from d1a.benchmark import prediction_rows, summarize
-    rows = prediction_rows(frozen_request(), {"probabilities": {"reason": {"size": 0.8, "damage": 0.1, "color": 0.1}}})
-    rows.append({**rows[0], "id": "unk", "source": "unknowable", "task": "unknowable_test"})
-    result = summarize(rows, temperature=2.0)
-    assert result["clean"]["n"] == result["calibrated_clean"]["n"] == 1
-    assert result["metric_policy"]["selective_ties"] == "whole_confidence_groups"
-
-
-def test_logits_are_recorded_in_option_order():
-    from d1a.benchmark import prediction_rows
-    prediction = {"probabilities": {"reason": {"size": 0.8, "damage": 0.1, "color": 0.1}},
-                  "logits": {"reason": {"color": -2.0, "damage": -2.0, "size": 0.0}}, "inference_temperature": 1.0}
-    row = prediction_rows(frozen_request(), prediction)[0]
-    assert row["logits"] == [0.0, -2.0, -2.0] and row["inference_temperature"] == 1.0
-    prediction["logits"]["reason"]["size"] = float("inf")
-    with pytest.raises(ValueError, match="logit"):
-        prediction_rows(frozen_request(), prediction)
 
 
 def test_uneven_microbatches_have_equal_record_weight():
@@ -332,41 +206,6 @@ def test_remote_predictor_maps_system_one_answers_and_retries(monkeypatch):
     assert out["probabilities"] == {"q": {"a": 0.7, "b": 0.3}, "y": {"true": 0.2, "false": 0.8}} and p.served_model == "openjev-x" and len(calls) == 2
     assert calls[0]["model"] == "d1a-latest" and "label" not in json.dumps(calls[0])        # labels never leave the machine
 
-def test_concurrent_predictions_keep_record_order_and_sequential_failure_semantics(tmp_path):
-    """A predictor with `concurrency` > 1 is scored on a thread pool; the rows, predictions.jsonl order and coverage must be
-    what the sequential loop produces, and an exception surfaces at the failing record's position with the same coverage."""
-    import threading, time
-    from d1a.benchmark import evaluate_records
-    from d1a.model import ContextOverflow
-    from d1a.suite import read_json
-    records = [frozen_request(i) for i in range(6)]
-    keys = list(records[0]["questions"]["reason"]["criteria"])
-
-    class Predictor:
-        def __init__(self, concurrency, fail=None):
-            self.concurrency, self.fail, self.in_flight, self.peak, self.lock = concurrency, fail, 0, 0, threading.Lock()
-        def __call__(self, record):
-            with self.lock:
-                self.in_flight += 1; self.peak = max(self.peak, self.in_flight)
-            time.sleep(0.02)
-            with self.lock: self.in_flight -= 1
-            i = int(record["_meta"]["id"].split("-")[1])
-            if i == self.fail: raise ContextOverflow("too long")
-            p = 0.5 + 0.05 * i
-            return {"probabilities": {"reason": {keys[0]: p, keys[1]: 1 - p, **{k: 0.0 for k in keys[2:]}}}, "latency_ms": float(i)}
-
-    seq = Predictor(1); par = Predictor(4)
-    r1, rows1 = evaluate_records(records, seq, tmp_path / "seq"); r2, rows2 = evaluate_records(records, par, tmp_path / "par")
-    assert rows1 == rows2 and r1["coverage"] == r2["coverage"] and r1["latency_ms"] == r2["latency_ms"]
-    assert (tmp_path / "seq" / "predictions.jsonl").read_bytes() == (tmp_path / "par" / "predictions.jsonl").read_bytes()
-    assert seq.peak == 1 and par.peak > 1
-
-    r3, _ = evaluate_records(records, Predictor(4, fail=2), tmp_path / "skip", skip_overlong=True)
-    assert r3["coverage"]["evaluated_records"] == 5 and [r["id"] for r in read_json(tmp_path / "skip" / "rejected.json")] == ["item-2"]
-    with pytest.raises(ContextOverflow):
-        evaluate_records(records, Predictor(4, fail=2), tmp_path / "abort")
-    failure = read_json(tmp_path / "abort" / "failure.json")
-    assert failure["record_id"] == "item-2" and failure["coverage"]["evaluated_records"] == 2
 
 def test_frozen_suites_load_under_any_locale(tmp_path):
     """Issue #12: frozen partitions contain non-ASCII text and are sha256-checked byte for byte, so they must be read as
@@ -430,32 +269,3 @@ def test_jsonl_round_trips_unicode_line_separators(tmp_path):
     recs = [{"state": "line one\u2028line two"}, {"state": "next\x85record\u2029end"}, {"state": "plain"}]
     write_jsonl(tmp_path / "x.jsonl", recs)
     assert read_jsonl(tmp_path / "x.jsonl") == recs
-
-
-@pytest.mark.parametrize("context", ["training", "serving"])
-def test_data_scoring_context_and_skip_warning(tmp_path, monkeypatch, capsys, context):
-    # --data scored under the training limits used to drop long records without a word; --context serving scores them
-    import json as _json, sys
-    import d1a.benchmark as bm
-    from d1a.model import ContextOverflow
-    from d1a.suite import CONTEXT, SERVING_CONTEXT
-    data = tmp_path / "data.jsonl"
-    data.write_text("".join(_json.dumps({k: v for k, v in frozen_request(i).items() if k != "_meta"}) + "\n" for i in range(3)), encoding="utf-8")
-    seen = {}
-
-    class Fake:
-        temperature = 1.0
-        def __init__(self, run, device, opts, context): seen["context"] = context
-        def __call__(self, record):
-            if record["_meta"]["id"].endswith("1") and seen["context"] is CONTEXT: raise ContextOverflow("state exceeds 384 tokens")
-            keys = list(record["questions"]["reason"]["criteria"])
-            return {"probabilities": {"reason": {k: 1.0 / len(keys) for k in keys}}, "latency_ms": 1.0}
-    monkeypatch.setattr(bm, "LocalPredictor", Fake)
-    monkeypatch.setattr(sys, "argv", ["benchmark", "--run", "x", "--data", str(data), "--out", str(tmp_path / "out"), "--device", "cpu", "--context", context])
-    bm.main()
-    report = _json.loads((tmp_path / "out" / "report.json").read_text(encoding="utf-8"))
-    if context == "serving":
-        assert seen["context"] is SERVING_CONTEXT and report["coverage"]["rejected_records"] == 0
-    else:
-        assert seen["context"] is CONTEXT and report["coverage"]["rejected_records"] == 1
-        assert "skipped 1 of 3 records" in capsys.readouterr().out
