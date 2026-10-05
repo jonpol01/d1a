@@ -285,9 +285,9 @@ def evaluate_records(records, predictor, directory, temperature=1.0, heldout_sou
                 kept.append(control)
             except ContextOverflow:   # the first option repeated K times can outgrow the row its question fit in
                 pass
-        report["identical_options"] = identical_report(answers)
-        if report["identical_options"] is not None:
-            report["identical_options"]["skipped_overlong"] = len(controls) - len(kept)
+        # how many were asked and skipped sits beside the results, so a mostly skipped set never reads as a clean one
+        report["identical_options"] = {"requested": len(controls), "skipped_overlong": len(controls) - len(kept),
+                                       **(identical_report(answers) or {"n": 0})} if controls else None
         write_json(directory / "identical_options.json", [{"id": c["_meta"]["id"], "p": a} for c, a in zip(kept, answers)])
     long = [row for row in rows if "kernels" in row]
     if long:   # absent when every row ran the exact kernels, so those reports are unchanged
