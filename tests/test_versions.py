@@ -1,13 +1,13 @@
 import re
 from pathlib import Path
 
-from d1a.versions import LATEST, latest
+from d1a.core.versions import LATEST, latest
 
 ROOT = Path(__file__).resolve().parent.parent
 
 
 def test_latest_matches_the_newest_row_of_the_changelog_versions_table():
-    """CHANGELOG lists versions newest first; its first row per model must be d1a.versions.LATEST, so a release that
+    """CHANGELOG lists versions newest first; its first row per model must be d1a.core.versions.LATEST, so a release that
     updates one and not the other fails here."""
     table = ROOT.joinpath("CHANGELOG.md").read_text(encoding="utf-8").split("## Model versions", 1)[1]
     newest = {}

@@ -1,14 +1,14 @@
 import json
 import numpy as np
 
-from d1a.data import materialize
-from d1a.feedback import FeedbackLog, OutcomeCalibrator, choice_log_loss, choice_pairs, gate, gate_choice, held_out, log_loss, main, pairs, promote, records, split
+from d1a.training.data import materialize
+from d1a.learning.feedback import FeedbackLog, OutcomeCalibrator, choice_log_loss, choice_pairs, gate, gate_choice, held_out, log_loss, main, pairs, promote, records, split
 
 Q = {"resolved": {"type": "noul", "instr": "Does the patch fix the issue?", "criteria": {"true": "fixes it", "false": "does not"}}}
 
 
 def test_log_joins_outcomes_exports_trainable_records_and_recalibrates_a_shifted_base_rate(tmp_path):
-    """Decisions and later outcomes join by id (pending ones stay out); records() are labelled requests d1a.data
+    """Decisions and later outcomes join by id (pending ones stay out); records() are labelled requests d1a.training.data
     materialises; the calibrator turns an overconfident yes/no (P ~0.8 when 20% are true) into calibrated probabilities."""
     log = FeedbackLog(tmp_path / "f.jsonl"); rng = np.random.default_rng(0)
     for i in range(400):
@@ -69,7 +69,7 @@ def test_choice_temperature_fixes_overconfidence_keeps_the_choice_and_passes_the
 
 
 def test_promote_updates_the_served_calibrator_only_where_held_out_groups_confirm_it(tmp_path, capsys):
-    """`d1a.feedback promote` on a live log: whole groups (two decisions per pull request) go to one side; a question twice
+    """`d1a.learning.feedback promote` on a live log: whole groups (two decisions per pull request) go to one side; a question twice
     as sure as it should be gets a calibrator that passes the gate on the held-out groups and is written for the server,
     while a question that is already calibrated keeps no parameters, and a log with nothing to promote leaves the file alone."""
     log = FeedbackLog(tmp_path / "f.jsonl"); rng = np.random.default_rng(3); opts = list(CQ["blast"]["criteria"])
@@ -112,14 +112,14 @@ def test_a_human_label_beats_a_later_reviewer_label_per_question(tmp_path):
 
 
 def test_serve_logs_decisions_accepts_outcomes_and_applies_a_reloaded_calibrator(tmp_path, monkeypatch):
-    """d1a.serve's self-learning hooks: with a log, every answer carries a decision_id and POST /v1/feedback records its
+    """d1a.serving.serve's self-learning hooks: with a log, every answer carries a decision_id and POST /v1/feedback records its
     outcome; with a calibrator file, yes/no answers are recalibrated and a rewritten file takes effect on the next answer;
     with neither, /v1/feedback is a 404."""
     import os
     from types import SimpleNamespace
     from fastapi.testclient import TestClient
-    from d1a import serve
-    from d1a.api import SystemOneRequest, to_record
+    from d1a.serving import serve
+    from d1a.core.api import SystemOneRequest, to_record
     req = SystemOneRequest(state="issue + patch", questions=Q)
     _, meta = to_record(req)
     fake = SimpleNamespace(checkpoint=SimpleNamespace(requested="JohnP1/d1a-e4b-mlx-q8@v0.4"), tok=None)

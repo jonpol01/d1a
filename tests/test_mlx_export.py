@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 import torch
 
-from d1a.checkpoint import (EXPORT_CONFIG, EXPORT_FORMAT, EXPORT_HEAD, EXPORT_VERSION, Checkpoint, LoadOptions, Meta,
+from d1a.backends.checkpoint import (EXPORT_CONFIG, EXPORT_FORMAT, EXPORT_HEAD, EXPORT_VERSION, Checkpoint, LoadOptions, Meta,
                             export_config, mlx_available, write_meta)
 
 
@@ -79,7 +79,7 @@ def tiny_gemma4():
 
 
 def fake_encoding(rng, state, branches):
-    """An encoding (d1a.model.encode's layout) of random tokens: `state` tokens, then per question (tokens, options)."""
+    """An encoding (d1a.backends.torch.encode's layout) of random tokens: `state` tokens, then per question (tokens, options)."""
     ids, seg, decide, opts = [int(t) for t in rng.integers(1, 64, state)], [0] * state, [], []
     for k, (n, options) in enumerate(branches, start=1):
         start = len(ids); ids += [int(t) for t in rng.integers(1, 64, n)]; seg += [k] * n
@@ -92,7 +92,7 @@ def test_gemma4_state_pass_skips_the_kv_shared_layers():
     """The state pass never runs Gemma 4's KV-shared layers (they keep no cache and the state's outputs are not read), and
     the questions answered on that cache equal each question run as its own full row."""
     import mlx.core as mx
-    from d1a.mlx_model import MLXDecisionModel
+    from d1a.backends.mlx import MLXDecisionModel
     mx.random.seed(0)
     m = MLXDecisionModel.from_lm(tiny_gemma4(), pad_id=0, head_dim=16)
     enc = fake_encoding(np.random.default_rng(1), 20, [(5, 2), (14, 4)])
@@ -117,7 +117,7 @@ def test_gemma4_prefix_form_matches_rows_across_the_sliding_window():
     equals each question run as its own full row, for states shorter and longer than the window, in fp32; reusing the
     prefix leaves it intact."""
     import mlx.core as mx
-    from d1a.mlx_model import MLXDecisionModel
+    from d1a.backends.mlx import MLXDecisionModel
     mx.random.seed(0)
     m = MLXDecisionModel.from_lm(tiny_gemma4(), pad_id=0, head_dim=16)
     assert not m.hybrid and m.dtype == "float32"
@@ -139,7 +139,7 @@ def test_gemma4_branch_pass_runs_shared_layers_on_the_read_positions_only():
     the head reads alone (each question's <decide> and options), one length-1 row per position at its own offset, and
     the answers equal each question run as its own full row, across the sliding window."""
     import mlx.core as mx
-    from d1a.mlx_model import MLXDecisionModel
+    from d1a.backends.mlx import MLXDecisionModel
     mx.random.seed(0)
     m = MLXDecisionModel.from_lm(tiny_gemma4(), pad_id=0, head_dim=16)
     enc = fake_encoding(np.random.default_rng(2), 20, [(5, 2), (14, 4), (9, 3)])

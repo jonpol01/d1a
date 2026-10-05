@@ -3,7 +3,7 @@
     uv run python tests/golden/build_tiny_gemma4.py
 
 A random 6-layer Gemma 4 base (sliding and KV-shared layers, a 4-token window) with a word-level tokenizer, a checkpoint
-d1a.train writes from it (one LoRA step), and golden.json: a fixed set of requests, their token ids and the fp32 CPU
+d1a.training.train writes from it (one LoRA step), and golden.json: a fixed set of requests, their token ids and the fp32 CPU
 probabilities of every question, in scripts/golden_vectors.py's d1a-golden format. tests/test_conformance.py requires
 the same ids exactly and the same probabilities to 1e-5, so a change to the model code that moves any answer fails CI.
 The weights are committed rather than rebuilt in the test, so a new torch release's initialisation cannot move them.
@@ -29,7 +29,7 @@ S, F = "sliding_attention", "full_attention"
 def build_base(base):
     from tokenizers import Tokenizer, models, pre_tokenizers, processors
     from transformers import Gemma4ForCausalLM, Gemma4TextConfig, PreTrainedTokenizerFast
-    from d1a.model import GEMMA_SPECIAL
+    from d1a.backends.torch import GEMMA_SPECIAL
     vocab = {t: i for i, t in enumerate(["<pad>", "<unk>", "<bos>", "<eos>", *GEMMA_SPECIAL, *WORDS])}
     tk = Tokenizer(models.WordLevel(vocab, unk_token="<unk>")); tk.pre_tokenizer = pre_tokenizers.Whitespace()
     tk.post_processor = processors.TemplateProcessing(single="<bos> $A", special_tokens=[("<bos>", vocab["<bos>"])])
@@ -73,17 +73,17 @@ def training_rows(rng):
 
 
 def main():
-    from d1a import train
-    from d1a.api import SystemOneRequest, to_record
-    from d1a.checkpoint import LoadOptions, load, read_meta, write_meta
-    from d1a.model import SERVE_MAX_BRANCH, SERVE_MAX_STATE
+    from d1a.training import train
+    from d1a.core.api import SystemOneRequest, to_record
+    from d1a.backends.checkpoint import LoadOptions, load, read_meta, write_meta
+    from d1a.backends.torch import SERVE_MAX_BRANCH, SERVE_MAX_STATE
     if OUT.exists(): shutil.rmtree(OUT)
     (OUT / "base").mkdir(parents=True)
     build_base(OUT / "base")
     rng = random.Random(20261005)
     data = OUT / "train.jsonl"
     data.write_text("".join(json.dumps(r) + "\n" for r in training_rows(rng)), encoding="utf-8")
-    sys.argv = ["d1a.train", "--base", str(RELATIVE / "base"), "--data", str(data.relative_to(ROOT)), "--device", "cpu", "--batch", "2",
+    sys.argv = ["d1a.training.train", "--base", str(RELATIVE / "base"), "--data", str(data.relative_to(ROOT)), "--device", "cpu", "--batch", "2",
                 "--lr", "1e-2", "--lora", "4", "--max_steps", "1", "--out", str(RELATIVE / "checkpoint")]
     train.main()
     data.unlink()

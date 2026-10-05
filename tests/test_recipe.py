@@ -1,11 +1,11 @@
-"""d1a.recipe (#63): recipe files checked against d1a.train's own options, stages chained, and the recipe recorded beside
+"""d1a.training.recipe (#63): recipe files checked against d1a.training.train's own options, stages chained, and the recipe recorded beside
 every checkpoint. Nothing trains here: the runner is replaced by a stand-in."""
 import json
 from pathlib import Path
 
 import pytest
 
-from d1a import recipe as R
+from d1a.training import recipe as R
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -57,8 +57,8 @@ def test_stages_chain_and_are_recorded(tmp_path):
 @pytest.mark.parametrize("change, message", [
     (("format: d1a-recipe", "format: kev-recipe"), "not a d1a-recipe file"),
     (("version: 1", "version: 2"), "version 1-1"),
-    (("epochs: 1,", "epochs: one,"), "stage skills: d1a.train refuses"),                # d1a.train's own type check
-    (("lr: 2.0e-5}", "lr: 2.0e-5, warmup: 3}"), "stage skills: d1a.train refuses"),     # not one of its options
+    (("epochs: 1,", "epochs: one,"), "stage skills: d1a.training.train refuses"),                # d1a.training.train's own type check
+    (("lr: 2.0e-5}", "lr: 2.0e-5, warmup: 3}"), "stage skills: d1a.training.train refuses"),     # not one of its options
     (("lr: 2.0e-5}", "lr: 2.0e-5, device: cuda}"), r"\['device'\] cannot be set in train"),
     (("name: skills", "name: base"), "unique name"),
     (("  - name: base\n", "  - name: base\n    init_from: previous\n"), "it is the first stage"),

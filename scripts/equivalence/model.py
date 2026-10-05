@@ -1,4 +1,4 @@
-"""d1a.model against the module at --ref, bit for bit, on the committed tiny Gemma 4 (tests/golden/tiny-gemma4/base) and a
+"""d1a.backends.torch against the module at --ref, bit for bit, on the committed tiny Gemma 4 (tests/golden/tiny-gemma4/base) and a
 tiny random Qwen3.5 (hybrid): the module-level functions (encode, masks, rows_of, contexts) on generated records, then the
 old and new DecisionModel built from the same seed (their weights checked equal first) through every scoring path
 (forward_batch, the row form, probs, the prefix miss and hit, probs_batch, the shared prefix) and training-mode
@@ -16,7 +16,7 @@ import torch
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from common import ROOT, Checker, arguments, module_at  # noqa: E402
 
-import d1a.model as new  # noqa: E402
+import d1a.backends.torch as new  # noqa: E402
 
 WORDS = "the customer is charged twice which team billing shipping refund angry how bad no yes order late lost box arrived wrong size".split()
 
@@ -25,7 +25,7 @@ def qwen_base(root):
     """A 2-layer random Qwen3.5 (one Gated DeltaNet layer) with a word-level tokenizer, saved like a Hub snapshot."""
     from tokenizers import Tokenizer, models, pre_tokenizers
     from transformers import PreTrainedTokenizerFast, Qwen3_5ForCausalLM, Qwen3_5TextConfig
-    from d1a.model import SPECIAL
+    from d1a.backends.torch import SPECIAL
     vocab = {t: i for i, t in enumerate(["<unk>", "<pad>", *SPECIAL, *WORDS])}
     tk = Tokenizer(models.WordLevel(vocab, unk_token="<unk>")); tk.pre_tokenizer = pre_tokenizers.Whitespace()
     config = Qwen3_5TextConfig(vocab_size=len(vocab), hidden_size=32, intermediate_size=64, num_hidden_layers=2, num_attention_heads=2, num_key_value_heads=1,
@@ -48,7 +48,7 @@ def records(rng, n):
 
 def main():
     a = arguments(__doc__.split("\n")[0], "origin/main", 60)
-    old, rng, check = module_at(a.ref, "d1a/model.py"), random.Random(a.seed), Checker()
+    old, rng, check = module_at(a.ref, "d1a/backends/torch.py"), random.Random(a.seed), Checker()
     for name in ("SPECIAL", "GEMMA_SPECIAL", "MAX_STATE", "MAX_BRANCH", "MAX_PACKED", "SERVE_MAX_STATE", "SERVE_MAX_BRANCH", "SERVE_MAX_PACKED",
                  "ROW_PASS_TOKENS", "MAX_TRAIN_STATE", "SERVE_MAX_STATE_8K", "SERVE_MAX_BRANCH_8K", "MAX_TRAIN_STATE_8K", "SCORING_INTERFACE", "EAGER_STATES"):
         check.equal(name, getattr(old, name), getattr(new, name))
@@ -99,7 +99,7 @@ def main():
             sum(z.sum() for zs in model.forward_batch(encs[:4]) for z in zs).backward()
         check.equal("gradients", [p.grad for p in mo.trainable_parameters()], [p.grad for p in mn.trainable_parameters()])
         print(f"same on {Path(base).name}", flush=True)
-    print(f"d1a.model: identical to {a.ref} on {check.count} comparisons")
+    print(f"d1a.backends.torch: identical to {a.ref} on {check.count} comparisons")
 
 
 if __name__ == "__main__":

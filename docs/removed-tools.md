@@ -12,7 +12,7 @@ The demo app D1A uses is [jonpol01/d1a-playground](https://github.com/jonpol01/d
 
 ## `playground/`: the developer playground (removed October 2026)
 
-A Next.js page for trying requests by hand against a running `d1a.serve` (proxied under `/d1a`).
+A Next.js page for trying requests by hand against a running `d1a.serving.serve` (proxied under `/d1a`).
 
 - **Free-form request editor.** A preset picker plus two text boxes:
   - the state, as plain text or JSON;
@@ -31,7 +31,7 @@ A Next.js page for trying requests by hand against a running `d1a.serve` (proxie
   - Modes: model vs model, you as White, you as Black.
   - It shows the top 8 moves with probabilities, and saves games in the browser.
 
-**Still in D1A:** the `/v1/systemone/separate` and `/v1/systemone/permute` endpoints in `d1a.serve` stay, so a new
+**Still in D1A:** the `/v1/systemone/separate` and `/v1/systemone/permute` endpoints in `d1a.serving.serve` stay, so a new
 page can be built on them without server work.
 
 ## `tools/review/`: the label-review page (removed October 2026)
@@ -64,12 +64,12 @@ that again.
 
 ## Training options (removed October 2026)
 
-Research options of `d1a.train` that no D1A checkpoint used (every `training_config.json` of D1A-E2B, D1A-E4B and
+Research options of `d1a.training.train` that no D1A checkpoint used (every `training_config.json` of D1A-E2B, D1A-E4B and
 the routing model leaves them at their defaults, which turned them off). They are in commit `00371c1` and earlier:
 
 ```bash
-git show 00371c1:d1a/train.py   # question_loss, anchor_loss, permutation_kl, batch_loss, parse_args
-git show 00371c1:d1a/model.py   # encode(option_isolation=...), branch_mask_batch(opts=...)
+git show 00371c1:d1a/training/train.py   # question_loss, anchor_loss, permutation_kl, batch_loss, parse_args
+git show 00371c1:d1a/backends/torch.py   # encode(option_isolation=...), branch_mask_batch(opts=...)
 ```
 
 | Option | What it did |
@@ -85,7 +85,7 @@ git show 00371c1:d1a/model.py   # encode(option_isolation=...), branch_mask_batc
 
 ## Full-weight training (removed October 2026)
 
-`d1a.train --full_ft 1` trained every backbone weight instead of a LoRA. No D1A model used it: D1A trains LoRA adapters
+`d1a.training.train --full_ft 1` trained every backbone weight instead of a LoRA. No D1A model used it: D1A trains LoRA adapters
 on one GPU (an L4), and a whole-backbone run of E4B wants far more memory. It is in commit `2a9be28` and earlier:
 
 ```bash
@@ -144,12 +144,12 @@ git checkout 0c601b2a -- scripts/build_hard_v1.py scripts/hard_v1_common.py scri
     scripts/hard_v1_numeric.py scripts/hard_v1_policy.py tests/test_hard_v1.py      # for example
 ```
 
-## `d1a.suite`'s suite freezer and the policy generators (removed October 2026)
+## `d1a.eval.suite`'s suite freezer and the policy generators (removed October 2026)
 
 The last suite builder, inside the package, and the code only it (and the builders above) called:
 
-- **`python -m d1a.suite`** (`freeze`, `main`, with `select_unique`, `contrast_cases`, `case_copy` and
-  `training_state_hashes`). It froze a suite from the public datasets in `d1a.data` (`--sources`, `--transfer`,
+- **`python -m d1a.eval.suite`** (`freeze`, `main`, with `select_unique`, `contrast_cases`, `case_copy` and
+  `training_state_hashes`). It froze a suite from the public datasets in `d1a.training.data` (`--sources`, `--transfer`,
   `--exclude-states-from`): per source, a deterministic sample deduplicated on normalised state text, admitted only if it
   encodes under both pinned Qwen tokenizers with branch headroom, split train/calibration/development/test, plus three
   contrast variants per clean record with a Choice of 3+ options (`none_present`, `none_absent` with the label moved to a new "None of these"
@@ -160,15 +160,15 @@ The last suite builder, inside the package, and the code only it (and the builde
   quantity limits, and six Score-threshold families such as deadlines, warranty claims and late fees) that generate minimal pairs, the same case with one
   sentence changed so the label flips, each pair checked by code: removing an evidence sentence must make the label
   undetermined, and removing a filler sentence must not change it (`--contrastive-pairs`, `--contrastive-holdout`).
-  Its `paired_flip` metric stays, now in `d1a/benchmark.py`, because the benchmark still reports it on those suites.
-- **`d1a/composition.py`'s generator**: random rule trees over typed atoms (thresholds, ranges, matches, elapsed days,
+  Its `paired_flip` metric stays, now in `d1a/eval/benchmark.py`, because the benchmark still reports it on those suites.
+- **`d1a/training/composition.py`'s generator**: random rule trees over typed atoms (thresholds, ranges, matches, elapsed days,
   flags), rendered as policy text in several styles, with labels computed from the facts and four-record groups checked
   for invariance. The study harness used it for decision-v4 and decision-v7. The rule shapes and structure keys stay,
-  because `d1a.suite.validate_training` uses them to refuse held-out compositional structures in training.
+  because `d1a.eval.suite.validate_training` uses them to refuse held-out compositional structures in training.
 
-- **`d1a/data.py`'s other converters**: trec, dbpedia14, emotion, imdb, amazon, qnli, tweet_offensive, mmlu, paws,
+- **`d1a/training/data.py`'s other converters**: trec, dbpedia14, emotion, imdb, amazon, qnli, tweet_offensive, mmlu, paws,
   sciq, arc, openbookqa and csqa (`ALL_SOURCES`, `ALL_REPOS`, `TRAINABLE`, the `TRANSFER_*` subsets, and the
-  parquet-branch pin `trec` needed). Only the freezer's `--sources`/`--transfer` read them; `d1a.train`'s `build()`
+  parquet-branch pin `trec` needed). Only the freezer's `--sources`/`--transfer` read them; `d1a.training.train`'s `build()`
   default is the six `SOURCES`, unchanged. `EVAL_ONLY` stays: training still refuses those sources' records.
 - **`scripts/longdoc_serving.py`**: long-document serving cost on CUDA (latency, peak and resident memory per state-length
   bucket on longdoc-v1 development records, one cached repeat per bucket), run on an H200 through the removed Modal app.
@@ -177,7 +177,7 @@ The suites stay as data, pinned by their manifests. Their `code_hashes` name Kev
 code at the commit the table above names. To bring back D1A's last copy of these files:
 
 ```bash
-git show aeaa97c0:d1a/suite.py                      # freeze, main and their helpers
-git checkout aeaa97c0 -- d1a/contrastive.py d1a/composition.py tests/test_generators.py
-git checkout aeaa97c0 -- d1a/data.py scripts/longdoc_serving.py
+git show aeaa97c0:d1a/eval/suite.py                      # freeze, main and their helpers
+git checkout aeaa97c0 -- d1a/contrastive.py d1a/training/composition.py tests/test_generators.py
+git checkout aeaa97c0 -- d1a/training/data.py scripts/longdoc_serving.py
 ```

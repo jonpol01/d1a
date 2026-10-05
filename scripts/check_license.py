@@ -17,6 +17,7 @@ Rules (each violation is printed on its own line; exit status 1 if there is any)
 Standard library only.
 """
 import argparse
+import ast
 import difflib
 import json
 import re
@@ -32,7 +33,9 @@ UPSTREAM_COMMIT = "0fe8fc97c2bcc247fa3efb6e5c32af4e99770e91"
 HEADER = re.compile(r"^\s*(#|//|<!--|/\*|\*)\s*Modified from Kev \(https://github\.com/jaredpalmer/kev\)")
 HEADER_LINES = 15
 SIMILARITY = 0.5
-PATH_MAP = [("d1a/", "kev/")]   # D1A path -> Kev path (renames)
+_MOVED = ast.literal_eval((ROOT / "d1a/_layout.py").read_text(encoding="utf-8").split("MOVED = ", 1)[1])   # d1a/_layout.py, read without importing d1a
+# D1A path -> Kev path (renames): the modules #60 moved into subpackages first, then the package rename
+PATH_MAP = [(f"d1a/{new.replace('.', '/')}.py", f"kev/{old}.py") for old, new in _MOVED.items()] + [("d1a/", "kev/")]
 SECTIONS = {"derived": "Derived files", "derived_noheader": "Derived files without a header", "copies": "Unmodified copies"}
 
 # "kev" is allowed in user-facing files only inside these, each for a reason:

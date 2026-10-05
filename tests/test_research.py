@@ -1,10 +1,10 @@
 # Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); dropped two checks bound to the removed experiments/ registrations; the tests of the removed Modal app and report scripts left; the contrastive generator's tests left with it (paired_flip and the held-out structure guard keep theirs); the d1a.metrics tests rewritten as tests/test_metrics.py; the d1a.benchmark tests rewritten as tests/test_benchmark.py; the d1a.suite tests rewritten as tests/test_suite.py; the d1a.data tests rewritten as tests/test_data.py; the d1a.train loss and accumulation tests rewritten in tests/test_train.py.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); dropped two checks bound to the removed experiments/ registrations; the tests of the removed Modal app and report scripts left; the contrastive generator's tests left with it (paired_flip and the held-out structure guard keep theirs); the d1a.eval.metrics tests rewritten as tests/test_metrics.py; the d1a.eval.benchmark tests rewritten as tests/test_benchmark.py; the d1a.eval.suite tests rewritten as tests/test_suite.py; the d1a.training.data tests rewritten as tests/test_data.py; the d1a.training.train loss and accumulation tests rewritten in tests/test_train.py.
 
 import pytest
 import torch
 
-from d1a.suite import record_digest
+from d1a.eval.suite import record_digest
 
 
 def choice_request():
@@ -23,7 +23,7 @@ def frozen_request(i=0):
 
 def test_strict_encoding_rejects_truncation():
     from types import SimpleNamespace
-    from d1a.model import encode
+    from d1a.backends.torch import encode
 
     class Tokenizer:
         def __call__(self, text, **kwargs):
@@ -39,7 +39,7 @@ def test_strict_encoding_rejects_truncation():
 
 
 def test_batched_mask_matches_single_and_pads_are_invisible():
-    from d1a.model import branch_mask, branch_mask_batch
+    from d1a.backends.torch import branch_mask, branch_mask_batch
     a, b = [0, 0, 1, 1, 2], [0, 1, 1]
     m = branch_mask_batch([a, b], "cpu")
     assert m.shape == (2, 1, 5, 5)
@@ -53,7 +53,7 @@ def test_batched_mask_matches_single_and_pads_are_invisible():
 
 def test_remote_predictor_maps_system_one_answers_and_retries(monkeypatch):
     import io, json
-    from d1a.predictors import RemotePredictor
+    from d1a.eval.predictors import RemotePredictor
     rec = {"state": "s", "questions": {"q": {"type": "choice", "instructions": "i", "criteria": {"a": "A", "b": "B"}, "label": "a", "src": "t"},
                                        "y": {"type": "noul", "instructions": "i", "label": True, "src": "t"}}}
     calls = []
@@ -74,8 +74,8 @@ def test_remote_predictor_maps_system_one_answers_and_retries(monkeypatch):
 
 def test_rotation_averaging_cancels_a_position_bias():
     import math
-    from d1a.api import question_keys
-    from d1a.predictors import RotationAveraged
+    from d1a.core.api import question_keys
+    from d1a.eval.predictors import RotationAveraged
     content = {"a": 1.0, "b": 0.0, "c": -1.0}; position = [2.0, 0.0, 0.0]         # the first slot is favoured by +2 logits
 
     def biased(record):

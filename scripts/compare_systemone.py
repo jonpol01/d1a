@@ -1,4 +1,4 @@
-"""Score any System One server on D1A record files, through its HTTP API: D1A (d1a.serve), Clef through Ollama, Jev, or
+"""Score any System One server on D1A record files, through its HTTP API: D1A (d1a.serving.serve), Clef through Ollama, Jev, or
 anything else that answers POST /v1/systemone. Every server gets the same requests (the record's state and questions,
 labels removed) from the same client, so their numbers compare directly.
 

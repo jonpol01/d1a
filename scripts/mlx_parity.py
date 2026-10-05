@@ -14,11 +14,11 @@ import argparse, gc, json, statistics, time
 import torch
 from pathlib import Path
 
-from d1a.checkpoint import Checkpoint, LoadOptions
-from d1a.data import materialize
-from d1a.device import empty_cache
-from d1a.model import load_tokenizer
-from d1a.suite import load_split, write_json
+from d1a.backends.checkpoint import Checkpoint, LoadOptions
+from d1a.training.data import materialize
+from d1a.backends.device import empty_cache
+from d1a.backends.torch import load_tokenizer
+from d1a.eval.suite import load_split, write_json
 
 
 def timed(fn, reps):

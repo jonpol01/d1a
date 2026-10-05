@@ -49,7 +49,7 @@ partition's sha256 and record count (the text stays in the dataset), and `evals/
 pin the replay data the same way. After adding files to the dataset, pin the new commit:
 
 ```bash
-uv run python -m d1a.suites freeze evals/d1a/pr-labels --dataset JohnP1/d1a-pr-labels \
+uv run python -m d1a.eval.suites freeze evals/d1a/pr-labels --dataset JohnP1/d1a-pr-labels \
     --partition train=train.jsonl:train --partition train-ja=train_ja.jsonl:train ... --partition test=test.jsonl:eval
 ```
 
@@ -95,7 +95,7 @@ the same for the starting model as `before-test.json`, then `python compare.py .
 Training produces a LoRA adapter plus a pointer head (about 145 MB). Nothing is device-specific, so no device needs its
 own training run:
 
-- **NVIDIA GPUs and CPUs:** `python -m d1a.serve --run JohnP1/d1a-e4b@v0.3` loads it as is (PyTorch).
+- **NVIDIA GPUs and CPUs:** `python -m d1a.serving.serve --run JohnP1/d1a-e4b@v0.3` loads it as is (PyTorch).
 - **Apple Silicon:** export once to MLX and serve the folder:
   `uv run --extra mlx python scripts/export_mlx.py --run JohnP1/d1a-e4b@v0.3 --q-bits 8 --q-per-layer-bits 4 --out runs/exports/d1a-e4b-v0.3-mlx-q8`
   (published as `JohnP1/d1a-e4b-mlx-q8@v0.3`).

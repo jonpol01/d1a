@@ -2,7 +2,7 @@
 
 What a D1A implementation must do to give D1A's answers: how a request becomes model input, how the pointer head scores
 it, how answers are reported, the checkpoint formats, and the conformance test any port must pass. The reference
-implementation is this repository (`d1a/api.py`, `d1a/model.py`, `d1a/checkpoint.py`, `d1a/serve.py`). Where this text and
+implementation is this repository (`d1a/core/api.py`, `d1a/backends/torch.py`, `d1a/backends/checkpoint.py`, `d1a/serving/serve.py`). Where this text and
 the code disagree, the code is right and this text has a bug.
 
 "Must" marks what changes answers when it is not followed. Everything else (the packed, row and cached forms, batching,
@@ -22,7 +22,7 @@ A request is TypeSafe's System One request (`POST /v1/systemone`): a `state` (an
 Each request becomes one **record**: the state as text, and per question its instructions as text and its options as
 texts. The text rules are part of every trained model's contract; a change to them changes every answer.
 
-- **render(value)** (`d1a.api.render`): `null` → `""`; a string, number or boolean → `str(value)` (Python's spelling:
+- **render(value)** (`d1a.core.api.render`): `null` → `""`; a string, number or boolean → `str(value)` (Python's spelling:
   `True`, `1.5`); a list → one line per item, `"- " + render(item)`; an object → one line per key, `"key: " + render(value)`
   for a scalar, or `"key:"` then the nested value on the following lines. Nested lists and objects are indented two spaces
   per level. Lines are joined with `\n`.
@@ -31,7 +31,7 @@ texts. The text rules are part of every trained model's contract; a change to th
   the criteria key; a `score` level's text is `render(level)`.
 - Questions keep the request's order.
 
-`d1a.serve` can add date facts to the state (`with_date_facts`, opt-in); that is a preprocessing step, not part of the model.
+`d1a.serving.serve` can add date facts to the state (`with_date_facts`, opt-in); that is a preprocessing step, not part of the model.
 
 ## 2. Model input
 
@@ -105,13 +105,13 @@ From a question's probabilities p (option order):
 
 Both confidences read p normalised to sum 1 (all zeros as uniform). Every reported number is rounded to 4 decimals.
 The response holds `model` (the request's), `answers` (question id → answer), `usage` (`input_tokens`: the packed sequence's length; `output_tokens`: the tokens of the
-serialised answers) and `latency_ms`. Other endpoints of `d1a.serve` (`/v1/systemone/media`, `/permute`, `/separate`,
+serialised answers) and `latency_ms`. Other endpoints of `d1a.serving.serve` (`/v1/systemone/media`, `/permute`, `/separate`,
 `/v1/feedback`, `/v1/models`) are described in its docstring.
 
 ## 6. Calibration
 
-A checkpoint carries one temperature `T` (§4), fitted on held-out rows by `d1a.calibrate`; 1.0 means uncalibrated.
-`D1A_TEMPERATURE` overrides it at load. Learning from outcomes (`d1a.feedback`: the outcome calibrator, and the outcome
+A checkpoint carries one temperature `T` (§4), fitted on held-out rows by `d1a.training.calibrate`; 1.0 means uncalibrated.
+`D1A_TEMPERATURE` overrides it at load. Learning from outcomes (`d1a.learning.feedback`: the outcome calibrator, and the outcome
 memory) is an optional serving layer on top of these answers, off unless configured; a port that implements only §1 to
 §5 gives D1A's answers.
 
@@ -120,7 +120,7 @@ memory) is an optional serving layer on top of these answers, off unless configu
 A checkpoint is a directory or a Hugging Face repo (`owner/name@revision`). D1A reads three layouts, told apart by
 `d1a_config.json`'s `format`:
 
-**Training run, `d1a-torch` version 1** (written by `d1a.train` and `d1a.calibrate` from D1A 0.4):
+**Training run, `d1a-torch` version 1** (written by `d1a.training.train` and `d1a.training.calibrate` from D1A 0.4):
 
 - `adapter_config.json`, `adapter_model.safetensors`: a PEFT LoRA adapter on the base;
 - `head.safetensors`: the head's tensors (`q.weight`, `q.bias`, `k.weight`, `k.bias`), fp32;
@@ -152,5 +152,5 @@ the head, or loading stops. D1A 0.5 stops writing it; reading it stays.
 version 1): 40 requests and 154 questions, each record with its System One `request`, the record it becomes (`input`),
 its token `ids`, and per question the `qid`, `type`, `keys` and fp32 CPU `probs`. A conforming implementation must produce
 the token ids exactly and every probability within 1e-5. `tests/test_conformance.py` checks this through the model,
-through `d1a.serve`, and through `scripts/golden_vectors.py compare`, which compares any two answer sets (another backend,
+through `d1a.serving.serve`, and through `scripts/golden_vectors.py compare`, which compares any two answer sets (another backend,
 another port) the same way.

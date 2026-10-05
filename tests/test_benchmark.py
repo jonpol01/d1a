@@ -1,4 +1,4 @@
-"""d1a.benchmark with stand-in predictors: rows from predictions, the report, evaluate_records' files and its failure
+"""d1a.eval.benchmark with stand-in predictors: rows from predictions, the report, evaluate_records' files and its failure
 rules, and the command line."""
 import copy
 import json
@@ -8,10 +8,10 @@ import time
 
 import pytest
 
-from d1a import benchmark as B
-from d1a.api import question_keys
-from d1a.model import ContextOverflow
-from d1a.suite import CONTEXT, SERVING_CONTEXT, read_json
+from d1a.eval import benchmark as B
+from d1a.core.api import question_keys
+from d1a.backends.torch import ContextOverflow
+from d1a.eval.suite import CONTEXT, SERVING_CONTEXT, read_json
 
 CRITERIA = {"size": "Wrong size", "damage": "Damaged", "color": "Wrong color"}
 
@@ -117,7 +117,7 @@ def test_paired_flip_counts_state_driven_flips():
 
 
 def test_rows_feed_the_paired_bootstrap():
-    from d1a.metrics import paired_bootstrap
+    from d1a.eval.metrics import paired_bootstrap
     rows = B.prediction_rows(record(), answer())
     assert B.summarize(rows)["objective"] == pytest.approx(-B.summarize(rows)["clean"]["nll"])
     assert paired_bootstrap(rows, rows, samples=50)["ci95"] == [0, 0]
@@ -286,7 +286,7 @@ def test_identical_option_controls(tmp_path, monkeypatch):
 
 def test_an_overlong_control_is_skipped_not_fatal(tmp_path):
     """A control repeats its first option K times, so it can be longer than the question it came from: it is skipped and
-    counted, and the suite's report is still written (d1a.benchmark crashed after scoring decision-v2 on E4B)."""
+    counted, and the suite's report is still written (d1a.eval.benchmark crashed after scoring decision-v2 on E4B)."""
     def predictor(r):
         q = next(iter(r["questions"].values()))
         if q["type"] == "score" and r["_meta"]["id"].startswith("item-0#"):
@@ -308,8 +308,8 @@ def test_an_overlong_control_is_skipped_not_fatal(tmp_path):
 def test_identical_options_reach_the_model_as_the_same_tokens(monkeypatch):
     """Through the serving path (materialize, encode) a control's options are the same token span, only at different places."""
     from pathlib import Path
-    from d1a.data import materialize
-    from d1a.model import encode, load_tokenizer
+    from d1a.training.data import materialize
+    from d1a.backends.torch import encode, load_tokenizer
     monkeypatch.chdir(Path(__file__).resolve().parents[1])
     tok = load_tokenizer("tests/golden/tiny-gemma4/base")
     enc = encode(tok, materialize(B.identical_controls([record(0)], 1)[0]))

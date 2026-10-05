@@ -1,5 +1,5 @@
 # Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: Gemma 4 tests (from jonpol01/kev); package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); the tests of the removed Modal app and autoresearch left; the d1a.api tests rewritten as tests/test_system_one.py; the d1a.data tests rewritten as tests/test_data.py; the d1a.checkpoint tests rewritten as tests/test_checkpoint.py.
+# Changes for D1A Copyright 2026 John Soliva: Gemma 4 tests (from jonpol01/kev); package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); the tests of the removed Modal app and autoresearch left; the d1a.core.api tests rewritten as tests/test_system_one.py; the d1a.training.data tests rewritten as tests/test_data.py; the d1a.backends.checkpoint tests rewritten as tests/test_checkpoint.py.
 """Fast tests with no model weights and no server: mask rule, token sanitizing, loading, training and serving.
 Run: uv run --extra serve python -m pytest tests/test_unit.py -q
 """
@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 from transformers.cache_utils import Cache, DynamicLayer, LinearAttentionLayer
-from d1a.model import DecisionModel, SPECIAL, branch_mask, encode, user_tokens
+from d1a.backends.torch import DecisionModel, SPECIAL, branch_mask, encode, user_tokens
 
 
 def test_branch_mask_rule():
@@ -24,7 +24,7 @@ def test_branch_mask_rule():
 
 @pytest.fixture(scope="module")
 def tok():
-    from d1a.model import load_tokenizer
+    from d1a.backends.torch import load_tokenizer
     return load_tokenizer("Qwen/Qwen2.5-0.5B")
 
 
@@ -40,7 +40,7 @@ def test_user_text_cannot_forge_delimiters(tok):
 
 @pytest.fixture(scope="module")
 def gemma_tok():
-    from d1a.model import load_tokenizer
+    from d1a.backends.torch import load_tokenizer
     return load_tokenizer("google/gemma-4-E2B", revision="d29ff6b45f081a49ee2733a859c9c9c2d95d1a6f")
 
 
@@ -48,7 +48,7 @@ def test_gemma_layout_and_forgery(tok, gemma_tok):
     """Gemma 4 has none of the Qwen delimiters (they would all encode as <unk>): it gets its reserved <unused0-4> rows and
     its <bos> in front. Its control tokens (<bos>, <pad>, <|turn> ...) are not of the <|name|> form, so they are escaped
     per tokenizer; Qwen tokenizers have no such tokens and encode exactly as before."""
-    from d1a.model import GEMMA_SPECIAL, layout
+    from d1a.backends.torch import GEMMA_SPECIAL, layout
     leading, delims, escape = layout(gemma_tok)
     assert leading == [gemma_tok.bos_token_id] and delims == gemma_tok.convert_tokens_to_ids(GEMMA_SPECIAL) and gemma_tok.unk_token_id not in delims
     assert layout(tok) == ([], [tok.convert_tokens_to_ids(t) for t in SPECIAL], None)
@@ -67,7 +67,7 @@ def test_sliding_window_mask_uses_branch_positions():
     """branch_masks for a sliding-window backbone: the sliding mask drops keys `window` or more positions back, counted in
     position ids (which restart per branch), so a branch token sees the state tail its own causal row would."""
     import torch
-    from d1a.model import branch_mask_batch, branch_masks
+    from d1a.backends.torch import branch_mask_batch, branch_masks
     seg = [0, 0, 0, 0, 1, 1, 2, 2]
     pos = [0, 1, 2, 3, 4, 5, 4, 5]
     enc = {"seg": seg, "pos": pos, "opt": [-1] * 8}
@@ -94,9 +94,9 @@ def test_soft_targets_and_date_facts():
     """Night-2 additions: a question with a soft target materializes to a normalized vector aligned with its keys, survives
     option permutation, and trains with cross-entropy against the target; date_facts writes one sentence per date pair."""
     import random, torch
-    from d1a.api import date_facts, with_date_facts
-    from d1a.data import augment, materialize
-    from d1a.train import question_loss
+    from d1a.core.api import date_facts, with_date_facts
+    from d1a.training.data import augment, materialize
+    from d1a.training.train import question_loss
     req = {"state": "policy text", "questions": {"q": {"type": "choice", "instructions": "Which?", "criteria": {"a": None, "b": None, "c": None}, "label": "a",
                                                         "target": {"a": 1, "b": 1, "c": 1}, "src": "t"}}}
     rec = materialize(req)
@@ -112,7 +112,7 @@ def test_soft_targets_and_date_facts():
 def test_head_temperature_scales_logits_at_eval_only():
     """The pointer head divides logits by its temperature in eval mode only; argmax is unchanged; training sees T=1."""
     import torch
-    from d1a.model import PointerHead
+    from d1a.backends.torch import PointerHead
     torch.manual_seed(0); head = PointerHead(16, dp=8); hd, ho = torch.randn(16), torch.randn(3, 16)
     head.train(); raw_train = head(hd, ho)
     head.eval(); raw = head(hd, ho); head.temperature = 2.0; cal = head(hd, ho)
@@ -126,7 +126,7 @@ def test_permute_bounds_n_perm(n_perm, code, monkeypatch):
     from contextlib import nullcontext
     from types import SimpleNamespace
     from fastapi.testclient import TestClient
-    from d1a import serve
+    from d1a.serving import serve
     answer = lambda req: {"answers": {"q": {"probabilities": {"a": 0.75, "b": 0.25}, "choice": "a"}}, "latency_ms": 1.0}
     monkeypatch.setattr(serve, "server", lambda: nullcontext(SimpleNamespace(answer=answer)))
     body = {"request": {"state": "s", "questions": {"q": {"type": "choice", "instructions": "Pick", "criteria": {"a": None, "b": None}}}}, "question": "q", "n_perm": n_perm}
@@ -137,16 +137,16 @@ def test_permute_bounds_n_perm(n_perm, code, monkeypatch):
 
 
 def test_rows_per_pass_is_a_token_budget():
-    from d1a.model import rows_per_pass
+    from d1a.backends.torch import rows_per_pass
     assert rows_per_pass([[0] * 30] * 5, prefix_len=270) == 16384 // 300     # a short state: every question of a normal request batches
     assert rows_per_pass([[0] * 20] * 64, prefix_len=4802) == 3            # a long state: a few cache copies per pass
     assert rows_per_pass([[0] * 8192], prefix_len=8192) == 1               # a maximal row still runs
 
 
 def test_prefix_cache_keeps_what_survives_the_batch():
-    """d1a.serve.PrefixCache: a batch keeps only its last `size` distinct cacheable states (the rest it would evict
+    """d1a.serving.serve.PrefixCache: a batch keeps only its last `size` distinct cacheable states (the rest it would evict
     itself), hits are reinserted as most recent, short states and size 0 are never cached."""
-    from d1a.serve import PrefixCache
+    from d1a.serving.serve import PrefixCache
     enc = lambda state, n=3: {"ids": list(state) + [0] * 5, "seg": [0] * n + [1] * (len(state) + 5 - n)}
     c = PrefixCache(size=2, min_tokens=3)
     batch = [enc("abc"), enc("abd"), enc("abe"), enc("abd"), enc("ab", n=2)]
@@ -162,10 +162,10 @@ def test_prefix_cache_keeps_what_survives_the_batch():
 
 
 def test_prefix_cache_bounds_the_state_tokens_it_holds():
-    """d1a.serve.PrefixCache.max_tokens (D1A_PREFIX_MAX_TOKENS, default 65,536): the cached states hold at most that many
+    """d1a.serving.serve.PrefixCache.max_tokens (D1A_PREFIX_MAX_TOKENS, default 65,536): the cached states hold at most that many
     tokens in all, least recently used evicted first, and a longer state is never cached, so a few 64k-token states
     cannot pin their keys and values; within the bound the count limit still applies."""
-    from d1a.serve import PREFIX_MAX_TOKENS, PrefixCache
+    from d1a.serving.serve import PREFIX_MAX_TOKENS, PrefixCache
     assert PREFIX_MAX_TOKENS == 65536
     enc = lambda state: {"ids": list(state) + [0] * 5, "seg": [0] * len(state) + [1] * 5}
     c = PrefixCache(size=4, min_tokens=0, max_tokens=10)
@@ -182,15 +182,15 @@ def test_prefix_cache_bounds_the_state_tokens_it_holds():
 
 
 def test_out_of_memory_drops_the_prefix_cache_and_retries_once():
-    """d1a.serve.Server._run: a pass out of device memory with states cached clears the cache and runs once more (#75: a
+    """d1a.serving.serve.Server._run: a pass out of device memory with states cached clears the cache and runs once more (#75: a
     full cache kept failing every later batch); a second failure fails the batch with the cache left empty, and an
     out-of-memory pass with nothing cached, or any other error, is not retried. A failed batch's pass is freed with it:
     the model thread keeps the exception until its next batch, and the exception's frames held the pass's tensors (142 MiB
     on an H100, tests/test_model.py::test_server_recovers_when_a_pass_runs_out_of_memory)."""
     import torch, weakref
     from types import SimpleNamespace
-    from d1a.device import out_of_memory
-    from d1a.serve import Server
+    from d1a.backends.device import out_of_memory
+    from d1a.serving.serve import Server
 
     class Tensors: pass   # stands for what a pass allocates
 
@@ -230,11 +230,11 @@ def test_out_of_memory_drops_the_prefix_cache_and_retries_once():
 
 
 def test_graph_buckets_and_length_groups():
-    """d1a.cuda_graphs pads batched passes: counts to count_bucket (under half extra), token lengths to bucket (under a
+    """d1a.backends.cuda_graphs pads batched passes: counts to count_bucket (under half extra), token lengths to bucket (under a
     quarter), and length_groups computes the fewest tokens: a pass under PASS_TOKENS stays whole, one long item does not
     pad the rest, and the grouping beats every other split of the sorted lengths."""
     import itertools
-    from d1a.cuda_graphs import PASS_TOKENS, bucket, count_bucket, length_groups
+    from d1a.backends.cuda_graphs import PASS_TOKENS, bucket, count_bucket, length_groups
     assert [count_bucket(n) for n in (1, 3, 5, 7, 9, 13, 17, 25)] == [1, 3, 6, 8, 12, 16, 24, 32]
     assert all(n <= count_bucket(n) < 1.5 * n for n in range(2, 200)) and all(n <= bucket(n) < max(1.25 * n, n + 16) for n in range(1, 5000))
     assert length_groups([40, 20, 35, 30, 25, 45], 32) == [[1, 4, 3, 2, 0, 5]]            # a small pass stays whole
@@ -248,7 +248,7 @@ def test_graph_buckets_and_length_groups():
 
 
 def test_rows_hidden_replicates_cache_without_changing_prefix(monkeypatch):
-    import d1a.model as M
+    import d1a.backends.torch as M
 
     kv, linear = DynamicLayer(), LinearAttentionLayer()
     kv.update(torch.ones(1, 1, 2, 2), torch.full((1, 1, 2, 2), 2.0))
@@ -284,9 +284,9 @@ def test_rows_hidden_replicates_cache_without_changing_prefix(monkeypatch):
 
 
 def test_bearer_auth_and_request_id(monkeypatch):
-    """D1A_API_KEY (d1a.serve.API_KEY) gates /v1/*; every response carries the request id the TypeSafe clients read."""
+    """D1A_API_KEY (d1a.serving.serve.API_KEY) gates /v1/*; every response carries the request id the TypeSafe clients read."""
     from fastapi.testclient import TestClient
-    from d1a import serve
+    from d1a.serving import serve
     with TestClient(serve.app) as client:
         assert client.get("/openapi.json").headers["x-typesafe-request-id"]
         monkeypatch.setattr(serve, "API_KEY", "secret")
@@ -295,7 +295,7 @@ def test_bearer_auth_and_request_id(monkeypatch):
         assert client.get("/openapi.json").status_code == 200   # only /v1 is gated
 
 
-# --- training (d1a.train): a 2-layer Qwen3.5 with random weights, no downloads -------------------------------------
+# --- training (d1a.training.train): a 2-layer Qwen3.5 with random weights, no downloads -------------------------------------
 
 @pytest.fixture(scope="module")
 def tiny_base(tmp_path_factory):
@@ -323,8 +323,8 @@ def tiny_base(tmp_path_factory):
 
 def train_tiny(tiny_base, out, *args, monkeypatch=None):
     import sys
-    from d1a import train
-    argv = ["d1a.train", "--base", str(tiny_base / "base"), "--data", str(tiny_base / "data.jsonl"), "--device", "cpu", "--batch", "2", "--lr", "1e-3", "--out", str(out), *args]
+    from d1a.training import train
+    argv = ["d1a.training.train", "--base", str(tiny_base / "base"), "--data", str(tiny_base / "data.jsonl"), "--device", "cpu", "--batch", "2", "--lr", "1e-3", "--out", str(out), *args]
     monkeypatch.setattr(sys, "argv", argv)
     train.main()
 
@@ -332,8 +332,8 @@ def train_tiny(tiny_base, out, *args, monkeypatch=None):
 def test_nonfinite_gradient_never_moves_a_weight(tiny_base, tmp_path, monkeypatch):
     """A finite loss whose gradient is NaN passes batch_loss's loss check, and no update runs with it: the run skips that
     optimizer step (counted in training_metrics.json) and finishes."""
-    from d1a import train
-    from d1a.suite import read_json
+    from d1a.training import train
+    from d1a.eval.suite import read_json
 
     class NanGrad(torch.autograd.Function):   # the value passes through, its gradient becomes NaN
         @staticmethod
@@ -359,9 +359,9 @@ def test_none_pair_max_state_pairs_only_short_states_and_the_plan_counts_them(ti
     cost, and without pairs cuts the same runs as before (the default path is today's)."""
     from collections import Counter
     from types import SimpleNamespace
-    from d1a.data import load_records, materialize
-    from d1a.model import MAX_STATE, encode, load_tokenizer
-    from d1a.train import encode_batch, microbatch_plan, none_pairs, state_token_counts
+    from d1a.training.data import load_records, materialize
+    from d1a.backends.torch import MAX_STATE, encode, load_tokenizer
+    from d1a.training.train import encode_batch, microbatch_plan, none_pairs, state_token_counts
     tok = load_tokenizer(str(tiny_base / "base"))
     reqs = load_records(tiny_base / "data.jsonl")   # states of 6 + i tokens, each with a 3-option Choice
     counts = state_token_counts(tok, reqs)
@@ -392,9 +392,9 @@ def test_plan_shapes_are_the_encoded_shapes(tiny_base):
     """--pass_tokens_max plans on plan_shapes: per record, the (state, branches) token shapes of exactly the variants
     encode_batch then encodes (augmented, none-pair siblings included), with or without the gate's pairs."""
     from types import SimpleNamespace
-    from d1a.data import load_records
-    from d1a.model import MAX_STATE, load_tokenizer
-    from d1a.train import encode_batch, none_pairs, plan_shapes, shape, state_token_counts
+    from d1a.training.data import load_records
+    from d1a.backends.torch import MAX_STATE, load_tokenizer
+    from d1a.training.train import encode_batch, none_pairs, plan_shapes, shape, state_token_counts
     tok = load_tokenizer(str(tiny_base / "base"))
     model = DecisionModel(str(tiny_base / "base"), tok, "cpu")
     reqs = load_records(tiny_base / "data.jsonl")
@@ -411,7 +411,7 @@ def test_pass_tokens_max_caps_every_pass():
     """--pass_tokens_max: on token shapes, a step whose costliest run is over the ceiling gets more micro-batches until no
     pass is over it; each step still trains its own records once; a record over the ceiling on its own is refused;
     without shapes the plan is today's."""
-    from d1a.train import microbatch_plan, pass_tokens
+    from d1a.training.train import microbatch_plan, pass_tokens
     # four steps of 4 records (2 x 2) and a last step of 3; the short records at indices divisible by 3 carry siblings
     sizes = [300, 290, 280, 270, 260, 5, 6, 7, 8, 9, 12, 60, 70, 15, 25, 35, 400, 390, 7]
     reqs = [{"_meta": {"id": f"r{i}"}, "state": "s" * n, "questions": {"q": {"instr": "x"}}} for i, n in enumerate(sizes)]
@@ -432,7 +432,7 @@ def test_pass_tokens_max_caps_every_pass():
 
 def test_pass_tokens_max_refuses_an_attention_only_base(tiny_base, tmp_path, monkeypatch):
     """pass_tokens measures the row form and the shared prefix, which a hybrid backbone always runs; an attention-only one
-    runs the packed mask (rows_form) for records under ROW_PASS_TOKENS, a cost the ceiling does not see, so d1a.train
+    runs the packed mask (rows_form) for records under ROW_PASS_TOKENS, a cost the ceiling does not see, so d1a.training.train
     refuses the flag there once the model is built (and trains the hybrid tiny base with it)."""
     import shutil
     from transformers import Qwen3_5ForCausalLM, Qwen3_5TextConfig
@@ -456,9 +456,9 @@ def test_row_budget_changes_passes_not_gradients(tiny_base, shared):
     half of its record's mean); the accumulated gradient equals the single pass's, in the row form and through a shared
     prefix (whose pass cost counts the state once)."""
     import contextlib
-    from d1a.data import load_records
-    from d1a.model import MAX_STATE, load_tokenizer
-    from d1a.train import batch_loss, encode_batch, row_passes
+    from d1a.training.data import load_records
+    from d1a.backends.torch import MAX_STATE, load_tokenizer
+    from d1a.training.train import batch_loss, encode_batch, row_passes
     tok = load_tokenizer(str(tiny_base / "base"))
     model = DecisionModel(str(tiny_base / "base"), tok, "cpu"); model.train()
     reqs = load_records(tiny_base / "data.jsonl")[:4]
@@ -479,10 +479,10 @@ def test_row_budget_changes_passes_not_gradients(tiny_base, shared):
 
 @pytest.mark.parametrize("checkpointing,lora", [(False, 0), (True, 0), (True, 4)])
 def test_shared_prefix_equals_rows(tiny_base, checkpointing, lora):
-    """d1a.shared_prefix (each state once, branches continuing from it: attention keys and values, the DeltaNet conv
+    """d1a.backends.shared_prefix (each state once, branches continuing from it: attention keys and values, the DeltaNet conv
     window and recurrent state) gives the row form's logits and gradients in fp32, over states of unequal length (left
     padding) and 1-4 questions; with gradient checkpointing each layer's two passes are recomputed together. With a LoRA
-    (d1a.train --shared_prefix 1) the same holds for the adapter's gradients (dropout off: eval mode,
+    (d1a.training.train --shared_prefix 1) the same holds for the adapter's gradients (dropout off: eval mode,
     so the two passes draw no different masks)."""
     assert_shared_prefix_equals_rows(tiny_base, checkpointing, lora, ((5, 3), (17, 4), (1, 2), (40, 1)))
 
@@ -492,7 +492,7 @@ def test_shared_prefix_unpadded_states_run_without_a_state_mask(tiny_base, check
     """Under SDPA, states of one length (a long record alone in its micro-batch) run causal with no explicit state mask
     (a 64k-token state's would be 4 GB, and the flash kernel takes none): same logits and gradients as the row form. Mixed
     lengths still build the mask."""
-    import d1a.shared_prefix as SP
+    import d1a.backends.shared_prefix as SP
     shapes = []
     real = SP._masks
     monkeypatch.setattr(SP, "_masks", lambda allow, dtype, attn: (shapes.append(tuple(allow.shape)), real(allow, dtype, attn))[1])
@@ -504,17 +504,17 @@ def test_shared_prefix_unpadded_states_run_without_a_state_mask(tiny_base, check
 
 
 def test_local_predictor_scores_long_rows_through_the_shared_prefix(tiny_base, tmp_path, monkeypatch):
-    """d1a.benchmark's predictor runs a record whose longest row exceeds d1a.model.ROW_PASS_TOKENS (a state past 16k
+    """d1a.eval.benchmark's predictor runs a record whose longest row exceeds d1a.backends.torch.ROW_PASS_TOKENS (a state past 16k
     tokens) on a hybrid torch backbone through the shared prefix (the state once, not once per question): same logits as
     the row form. On CUDA such a record also runs under SDPA's flash / memory-efficient kernels, off the fp32-exact
     contract, so it is labelled: the prediction and its rows carry `kernels`, report.json counts them in `long_rows`. A
     run with no long row has neither (existing rows and reports are unchanged); on the CPU a long row is exact and
     unlabelled."""
-    from d1a import predictors as P
-    from d1a.benchmark import evaluate_records
-    from d1a.checkpoint import LoadOptions
-    from d1a.data import load_records
-    from d1a.model import ROW_PASS_TOKENS
+    from d1a.eval import predictors as P
+    from d1a.eval.benchmark import evaluate_records
+    from d1a.backends.checkpoint import LoadOptions
+    from d1a.training.data import load_records
+    from d1a.backends.torch import ROW_PASS_TOKENS
     train_tiny(tiny_base, tmp_path / "lora", "--lora", "4", "--max_steps", "1", monkeypatch=monkeypatch)
     predictor = P.LocalPredictor(str(tmp_path / "lora"), "cpu", LoadOptions(dtype=torch.float32, temperature=1.0))
     record = load_records(tiny_base / "data.jsonl")[7]
@@ -540,9 +540,9 @@ def test_local_predictor_long_rows_on_mlx_use_its_forward(monkeypatch):
     """The MLX backend (what a hybrid checkpoint resolves to on Apple Silicon) has no forward_batch and its forward already
     runs the state once: a long record goes through model.forward, unlabelled (no CUDA kernels involved)."""
     from types import SimpleNamespace
-    from d1a import predictors as P
+    from d1a.eval import predictors as P
     calls = []
-    class MLXShaped:   # the scoring interface d1a.mlx_model.MLXDecisionModel exposes, minus everything unused here
+    class MLXShaped:   # the scoring interface d1a.backends.mlx.MLXDecisionModel exposes, minus everything unused here
         backend, hybrid, head = "mlx", True, SimpleNamespace(temperature=1.0)
         def encode(self, tok, rec, **kw):
             return {"ids": [1] * 30 + [2, 3, 4], "seg": [0] * 30 + [1, 1, 1], "pos": list(range(33)), "decide_idx": [32], "opt_idx": [[31]]}
@@ -560,7 +560,7 @@ def test_local_predictor_long_rows_on_mlx_use_its_forward(monkeypatch):
 def assert_shared_prefix_equals_rows(tiny_base, checkpointing, lora, shapes, attn=None):
     """(state words, questions) per record -> the shared prefix's logits and gradients equal the row form's in fp32."""
     import random
-    from d1a.model import load_tokenizer
+    from d1a.backends.torch import load_tokenizer
     tok, rng = load_tokenizer(str(tiny_base / "base")), random.Random(0)
     words = "it is charged twice which team billing shipping refund angry the customer".split()
     text = lambda n: " ".join(rng.choice(words) for _ in range(n))
@@ -585,7 +585,7 @@ def assert_shared_prefix_equals_rows(tiny_base, checkpointing, lora, shapes, att
 
 def _run_train(args, out):
     import subprocess, sys
-    done = subprocess.run([sys.executable, "-m", "d1a.train", *args, "--out", str(out)], capture_output=True, text=True)
+    done = subprocess.run([sys.executable, "-m", "d1a.training.train", *args, "--out", str(out)], capture_output=True, text=True)
     assert done.returncode == 0, done.stderr[-3000:]
     return done.stdout
 
@@ -599,7 +599,7 @@ def test_resume_is_bit_identical_under_length_sort(tiny_base, tmp_path, gate):
     --pass_tokens_max (it plans the same extra micro-batches)."""
     import re
     from safetensors.torch import load_file
-    from d1a.checkpoint import read_meta
+    from d1a.backends.checkpoint import read_meta
     args = ["--base", str(tiny_base / "base"), "--data", str(tiny_base / "data.jsonl"), "--device", "cpu", "--batch", "2", "--accum", "2",
             "--lr", "1e-3", "--epochs", "2", "--p_none_pair", "0.5", "--length_sort", "1", "--shared_prefix", "1", "--lora", "4", *gate]
     out = _run_train(args, tmp_path / "whole")
@@ -615,22 +615,22 @@ def test_resume_is_bit_identical_under_length_sort(tiny_base, tmp_path, gate):
     head_a, head_b = read_meta(tmp_path / "whole").head, read_meta(tmp_path / "split").head
     assert all(torch.equal(a[k], b[k]) for k in a) and all(torch.equal(head_a[k], head_b[k]) for k in head_a)
     assert not (tmp_path / "split/resume").exists()   # the finished checkpoint supersedes the resume point
-    from d1a.suite import read_json
+    from d1a.eval.suite import read_json
     norms = [read_json(tmp_path / d / "training_metrics.json")["grad_norm"] for d in ("whole", "split")]
     assert norms[0] == norms[1] and [e["epoch"] for e in norms[0]] == [0, 1]   # carried across the resume point
 
 
 def _parse_train(monkeypatch, *args):
     import sys
-    from d1a import train
-    monkeypatch.setattr(sys, "argv", ["d1a.train", "--out", "/nonexistent/kev-test-run", *args])
+    from d1a.training import train
+    monkeypatch.setattr(sys, "argv", ["d1a.training.train", "--out", "/nonexistent/kev-test-run", *args])
     return train.parse_args()
 
 
 def test_grad_norm_in_training_metrics(tiny_base, tmp_path, monkeypatch):
     """training_metrics.json carries, per epoch, the mean and max global gradient norm before clipping and the number of
     clipped steps."""
-    from d1a.suite import read_json
+    from d1a.eval.suite import read_json
     for name, args in (("lora", ("--lora", "4")),):
         train_tiny(tiny_base, tmp_path / name, *args, "--accum", "1", "--epochs", "2", monkeypatch=monkeypatch)
         metrics = read_json(tmp_path / name / "training_metrics.json")
@@ -655,7 +655,7 @@ def _finish(directory):
 
 def test_serve_self_check():
     """The startup self-check passes sound probabilities and refuses the silent failures: non-finite or unnormalised."""
-    from d1a.serve import self_check
+    from d1a.serving.serve import self_check
     self_check(lambda rec: ([[0.7, 0.3], [0.2, 0.8]], {}))
     for bad in ([[float("nan"), 0.5], [0.2, 0.8]], [[0.7, 0.7], [0.2, 0.8]]):
         with pytest.raises(SystemExit, match="probabilities"): self_check(lambda rec, bad=bad: (bad, {}))
@@ -663,7 +663,7 @@ def test_serve_self_check():
 
 def test_serve_device_probe():
     """A device that cannot run a kernel is reported unusable instead of crashing the server process."""
-    from d1a.serve import usable
+    from d1a.serving.serve import usable
     assert usable("cpu") and not usable("no-such-device")
 
 
@@ -671,7 +671,7 @@ def test_lora_resume_is_bit_identical(tiny_base, tmp_path):
     """A LoRA run stopped after step 3 (resume point: the adapter and head tensors, AdamW moments, scheduler, RNG, data
     position) and continued with --resume 1 ends with the same bits as an uninterrupted run, across an epoch boundary."""
     from safetensors.torch import load_file
-    from d1a.checkpoint import read_meta
+    from d1a.backends.checkpoint import read_meta
     args = ["--base", str(tiny_base / "base"), "--data", str(tiny_base / "data.jsonl"), "--device", "cpu", "--batch", "2", "--accum", "2",
             "--lr", "1e-3", "--epochs", "2", "--lora", "4"]
     _run_train(args, tmp_path / "whole")
@@ -687,8 +687,8 @@ def test_lora_resume_is_bit_identical(tiny_base, tmp_path):
 def test_nonfinite_loss_skips_its_batch(tiny_base, tmp_path, monkeypatch):
     """A non-finite loss skips its micro-batch and the run finishes (counted in training_metrics.json); MAX_NONFINITE in a
     row end it. (A NaN gradient from a finite loss: test_nonfinite_gradient_never_moves_a_weight.)"""
-    from d1a import train
-    from d1a.suite import read_json
+    from d1a.training import train
+    from d1a.eval.suite import read_json
     real, calls = train.batch_loss, []
     def flaky(bad):
         def batch_loss(*args, **kw):
@@ -704,10 +704,10 @@ def test_nonfinite_loss_skips_its_batch(tiny_base, tmp_path, monkeypatch):
 
 
 def test_library_decide_matches_the_server(tiny_base, tmp_path, monkeypatch):
-    """d1a.D1A answers a question set exactly as d1a.serve's Server does for the same checkpoint and request."""
+    """d1a.D1A answers a question set exactly as d1a.serving.serve's Server does for the same checkpoint and request."""
     import d1a
-    from d1a.api import SystemOneRequest
-    from d1a.serve import Server
+    from d1a.core.api import SystemOneRequest
+    from d1a.serving.serve import Server
     train_tiny(tiny_base, tmp_path / "ck", "--lora", "4", "--max_steps", "2", monkeypatch=monkeypatch)
     m = d1a.D1A.load(str(tmp_path / "ck"), device="cpu")
     questions = {"team": {"type": "choice", "instr": "which team", "criteria": {"billing": "billing", "shipping": "shipping"}},
@@ -721,7 +721,7 @@ def test_library_decide_matches_the_server(tiny_base, tmp_path, monkeypatch):
 
 def test_serve_latency_summary():
     """/v1/models reports the recent batches' model time by nearest rank; nothing before the first batch."""
-    from d1a.serve import latency_summary
+    from d1a.serving.serve import latency_summary
     assert latency_summary([]) is None
     assert latency_summary([float(i) for i in range(1, 101)]) == {"recent": 100, "p50_ms": 50.0, "p95_ms": 95.0, "max_ms": 100.0}
     assert latency_summary([7.0]) == {"recent": 1, "p50_ms": 7.0, "p95_ms": 7.0, "max_ms": 7.0}
@@ -730,8 +730,8 @@ def test_serve_latency_summary():
 def test_presets_are_valid_requests_and_advice_fails_safe():
     """Every preset is a valid System One request, and advise() turns unsure answers into the safe action: route up,
     ask a person, do not close a card."""
-    from d1a.api import SystemOneRequest
-    from d1a.presets import PRESETS, advise, fail_up
+    from d1a.core.api import SystemOneRequest
+    from d1a.agents.presets import PRESETS, advise, fail_up
     for kind, qs in PRESETS.items(): SystemOneRequest(model="d1a-latest", state="x", questions=qs)
     assert fail_up({"small": 0.65, "medium": 0.3, "large": 0.05}) == "medium"          # unsure about small: one tier up
     assert fail_up({"small": 0.2, "medium": 0.2, "large": 0.6}) == "large"
@@ -747,11 +747,11 @@ def test_presets_are_valid_requests_and_advice_fails_safe():
 
 
 def test_mcp_server_tools(monkeypatch):
-    """d1a.mcp_server exposes the presets as MCP tools; each sends its preset's questions and returns advice."""
+    """d1a.agents.mcp_server exposes the presets as MCP tools; each sends its preset's questions and returns advice."""
     pytest.importorskip("mcp")
     import asyncio
-    from d1a import mcp_server
-    from d1a.presets import PRESETS
+    from d1a.agents import mcp_server
+    from d1a.agents.presets import PRESETS
     sent = []
     def fake_ask(state, questions):
         sent.append((state, questions))
@@ -765,7 +765,7 @@ def test_mcp_server_tools(monkeypatch):
 
 def test_extra_suites_join_the_run(tiny_base, tmp_path, monkeypatch, capsys):
     """--extra_suites adds a frozen suite's training partition (checked against that suite's own manifest) to the run."""
-    from d1a.suite import load_split
+    from d1a.eval.suite import load_split
     n = len(load_split("evals/devtools-v1", "train"))
     train_tiny(tiny_base, tmp_path / "out", "--lora", "4", "--max_steps", "1", "--extra_suites", "evals/devtools-v1", monkeypatch=monkeypatch)
     out = capsys.readouterr().out
@@ -773,13 +773,13 @@ def test_extra_suites_join_the_run(tiny_base, tmp_path, monkeypatch, capsys):
 
 
 def test_backbone_families(monkeypatch):
-    """d1a.backbone picks the family from the config: Qwen3.5 (DeltaNet) runs rows with its cache and extra LoRA names,
+    """d1a.backends.backbone picks the family from the config: Qwen3.5 (DeltaNet) runs rows with its cache and extra LoRA names,
     Gemma 4 (sliding layers) the packed form with a second mask, a plain model neither. MLX runs Gemma 4 and Qwen3.5
     only, and Qwen3.5's CUDA kernels load through Qwen35 alone (fused only on merged weights)."""
     import sys
     from types import SimpleNamespace
     from transformers import DynamicCache
-    from d1a.backbone import Attention, Gemma4, Qwen35, for_config
+    from d1a.backends.backbone import Attention, Gemma4, Qwen35, for_config
     qwen = SimpleNamespace(layer_types=["linear_attention", "full_attention"])
     gemma = SimpleNamespace(layer_types=["sliding_attention"] * 4 + ["full_attention"], sliding_window=512, model_type="gemma4_text")
     sliding = SimpleNamespace(layer_types=["sliding_attention", "full_attention"], sliding_window=1024, model_type="gemma3_text")
@@ -793,8 +793,8 @@ def test_backbone_families(monkeypatch):
     assert isinstance(bg.new_cache(), DynamicCache)
     assert Attention.unwrap(SimpleNamespace(language_model="text")) == "text"
     fused = []
-    monkeypatch.setitem(sys.modules, "d1a.fused_qwen35", SimpleNamespace(fuse=fused.append))
-    monkeypatch.setitem(sys.modules, "d1a.cuda_graphs", SimpleNamespace(CudaGraphs=lambda lm, pad: ("graphs", lm, pad)))
+    monkeypatch.setitem(sys.modules, "d1a.backends.fused_qwen35", SimpleNamespace(fuse=fused.append))
+    monkeypatch.setitem(sys.modules, "d1a.backends.cuda_graphs", SimpleNamespace(CudaGraphs=lambda lm, pad: ("graphs", lm, pad)))
     on = SimpleNamespace(fused=True, cuda_graphs=True)
     for bb, merged in ((bg, True), (bq, False), (bq, True)):
         m = SimpleNamespace(lm="lm", pad_id=0, graphs=None)
@@ -805,13 +805,13 @@ def test_backbone_families(monkeypatch):
 
 def test_backbone_mlx_cache_copy():
     """The MLX copy rule follows the family: Qwen3.5's recurrent DeltaNet states are copied by mlx-lm's merge, Gemma 4's
-    plain and rotating KV caches by replicate (d1a.mlx_model)."""
+    plain and rotating KV caches by replicate (d1a.backends.mlx)."""
     from types import SimpleNamespace
-    from d1a.backbone import Attention, Gemma4, Qwen35
+    from d1a.backends.backbone import Attention, Gemma4, Qwen35
     assert Qwen35.mlx_cache_copy == "merge" and Attention.mlx_cache_copy == Gemma4.mlx_cache_copy == "replicate"
     pytest.importorskip("mlx_lm")
     from mlx_lm.models.cache import ArraysCache, KVCache, RotatingKVCache
-    from d1a.backbone import for_mlx
+    from d1a.backends.backbone import for_mlx
     assert type(for_mlx([KVCache(), RotatingKVCache(max_size=8)])) is Attention
     assert type(for_mlx([KVCache(), ArraysCache(size=2)])) is Qwen35
 
@@ -820,7 +820,7 @@ def test_media_audio_is_mono_16k_and_bounded():
     # the browser and phones record 44.1/48 kHz stereo; Gemma 4's feature extractor reads 16 kHz mono only
     sf = pytest.importorskip("soundfile")
     import io, numpy as np
-    from d1a.media import MAX_AUDIO_S, SAMPLE_RATE, decode_audio
+    from d1a.serving.media import MAX_AUDIO_S, SAMPLE_RATE, decode_audio
     def wav(seconds, sr, channels):
         buf = io.BytesIO(); sf.write(buf, np.full((int(seconds * sr), channels), 0.25, dtype="float32"), sr, format="WAV"); return buf.getvalue()
     out = decode_audio(wav(1.5, 48_000, 2))
@@ -843,7 +843,7 @@ def test_micro_batches_balance_length():
     micro-batch, its short ones the other) and each step holds its own records once; the plain plan cuts --batch
     consecutive records."""
     from types import SimpleNamespace
-    from d1a.train import microbatch_plan
+    from d1a.training.train import microbatch_plan
     reqs = [{"state": "s" * n, "questions": {"q": {"instr": "x"}}} for n in (1, 90, 5, 70, 3, 80, 2, 4, 6, 7)]
     knobs = lambda sort: SimpleNamespace(batch=2, accum=2, length_sort=sort, shared_prefix=1)
     plain = microbatch_plan(reqs, knobs(0))
@@ -858,8 +858,8 @@ def test_micro_batches_balance_length():
 
 
 def test_max_state_lifts_row_and_packed_limits_together():
-    from d1a.model import MAX_BRANCH, MAX_PACKED, MAX_STATE, MAX_TRAIN_STATE, SERVE_MAX_BRANCH, SERVE_MAX_STATE, training_context
-    from d1a.suite import CONTEXT
+    from d1a.backends.torch import MAX_BRANCH, MAX_PACKED, MAX_STATE, MAX_TRAIN_STATE, SERVE_MAX_BRANCH, SERVE_MAX_STATE, training_context
+    from d1a.eval.suite import CONTEXT
     assert training_context() == {k: v for k, v in CONTEXT.items() if k != "truncate"} == {"max_state": MAX_STATE, "max_branch": MAX_BRANCH, "max_packed": MAX_PACKED}
     long = 12 * MAX_STATE
     lifted = training_context(long)
@@ -874,9 +874,9 @@ def test_calibration_refuses_rows_from_the_checkpoints_own_training_unless_told(
     # a temperature fitted on held-out items of the checkpoint's own training corpus is in distribution and ships
     # overconfident; the fit must refuse such rows with the reasons, and an explicit override must be recorded in head.pt
     import json
-    from d1a import calibrate
-    from d1a.checkpoint import Meta, read_meta, write_meta
-    from d1a.suite import digest
+    from d1a.training import calibrate
+    from d1a.backends.checkpoint import Meta, read_meta, write_meta
+    from d1a.eval.suite import digest
     suite = "evals/v7/decision-v7"
     run = tmp_path / "ckpt"; run.mkdir()
     write_meta(run, Meta(base="b", extra={"suite_sha256": digest(f"{suite}/manifest.json"), "args": {"suite": suite}}))
@@ -909,7 +909,7 @@ def test_video_frames_are_sampled_evenly_and_never_repeated():
     av = pytest.importorskip("av")
     import io
     import numpy as np
-    from d1a.media import MAX_VIDEO_FRAMES, decode_video
+    from d1a.serving.media import MAX_VIDEO_FRAMES, decode_video
 
     def clip(n):
         buf = io.BytesIO()
@@ -931,7 +931,7 @@ def test_video_frames_are_sampled_evenly_and_never_repeated():
 
 def test_media_model_loads_on_demand_and_never_unloads_while_in_use():
     # an idle media server must give its ~10 GB back, but a request in flight keeps the model it is using
-    from d1a.media import OnDemand
+    from d1a.serving.media import OnDemand
     loads = []
     od = OnDemand(lambda: loads.append(1) or object(), idle_s=60, device="cpu")
     assert od.model is None and not loads
@@ -950,8 +950,8 @@ def test_idle_server_unloads_and_models_never_loads_it(monkeypatch):
     import gc, torch, weakref
     from types import SimpleNamespace
     from fastapi.testclient import TestClient
-    from d1a import serve
-    from d1a.media import OnDemand
+    from d1a.serving import serve
+    from d1a.serving.media import OnDemand
 
     class Model:
         prefix_min_tokens, backend, dtype = 0, "torch", "float32"
@@ -981,9 +981,9 @@ def test_media_span_joins_the_state_and_leaves_every_branch_as_it_was(tok):
     # offsets, its positions shifted by the span, and the prefix cache must not key the request by its token ids (two
     # photos of one size have the same placeholder ids)
     import numpy as np
-    from d1a.media import with_media
-    from d1a.model import encode, layout, rows_of
-    from d1a.serve import PrefixCache
+    from d1a.serving.media import with_media
+    from d1a.backends.torch import encode, layout, rows_of
+    from d1a.serving.serve import PrefixCache
     rec = {"state": "left at the door", "questions": [{"instr": "Damaged?", "options": ["yes", "no"], "label": 0}]}
     enc = encode(tok, rec)
     n_head = len(layout(tok)[0]) + 1
@@ -1003,7 +1003,7 @@ def test_ple_on_flash_matches_the_in_memory_table(tmp_path, bits):
     mx = pytest.importorskip("mlx.core")
     import mlx.nn as nn
     import numpy as np
-    from d1a.mlx_model import PLE, FlashEmbedding
+    from d1a.backends.mlx import PLE, FlashEmbedding
     mx.set_default_device(mx.cpu)
     emb = nn.Embedding(512, 128)
     emb.weight = emb.weight.astype(mx.bfloat16)
@@ -1032,11 +1032,11 @@ def test_the_package_version_has_release_notes():
 
 
 def test_d1a_suite_partitions_are_pinned_verified_and_eval_ones_never_train(tmp_path, monkeypatch):
-    """d1a.suites: `<suite>:<partition>` resolves to the dataset file at the manifest's revision only when its sha256 and
+    """d1a.eval.suites: `<suite>:<partition>` resolves to the dataset file at the manifest's revision only when its sha256 and
     record count match; an eval partition is refused for training (no held-out leakage); other arguments pass through."""
     import json
     import huggingface_hub
-    from d1a import suites
+    from d1a.eval import suites
     data = tmp_path / "hub"; data.mkdir()
     (data / "train.jsonl").write_text('{"a": 1}\n{"a": 2}\n', encoding="utf-8"); (data / "dev.jsonl").write_text('{"a": 3}\n', encoding="utf-8")
     fetched = []
@@ -1056,12 +1056,12 @@ def test_d1a_suite_partitions_are_pinned_verified_and_eval_ones_never_train(tmp_
 
 def test_gemma4_shared_layers_run_only_the_read_positions(tmp_path):
     """Gemma 4's KV-shared layers read keys and values from earlier layers, so the packed forward runs them over the
-    positions the head reads alone (d1a.backbone.Gemma4.picked_hidden): the same logits and, with a LoRA, the same
+    positions the head reads alone (d1a.backends.backbone.Gemma4.picked_hidden): the same logits and, with a LoRA, the same
     gradients as the whole sequence, over states past the sliding window."""
     from tokenizers import Tokenizer, models, pre_tokenizers
     from transformers import Gemma4ForCausalLM, Gemma4TextConfig, PreTrainedTokenizerFast
-    from d1a.data import materialize
-    from d1a.model import GEMMA_SPECIAL, load_tokenizer
+    from d1a.training.data import materialize
+    from d1a.backends.torch import GEMMA_SPECIAL, load_tokenizer
     words = "it is charged twice which team billing shipping refund angry the customer how calm annoyed".split()
     vocab = {t: i for i, t in enumerate(["<unk>", "<pad>", *GEMMA_SPECIAL, *words])}
     tk = Tokenizer(models.WordLevel(vocab, unk_token="<unk>")); tk.pre_tokenizer = pre_tokenizers.Whitespace()
@@ -1102,7 +1102,7 @@ def test_metrics_reports_the_server_without_loading_it():
     from queue import Queue
     from types import SimpleNamespace
     from fastapi.testclient import TestClient
-    from d1a import serve
+    from d1a.serving import serve
     serve.app.state.models = SimpleNamespace(model=None, idle_s=None)
     with TestClient(serve.app) as client:
         text = client.get("/metrics").text
@@ -1123,7 +1123,7 @@ def test_metrics_needs_the_api_key_when_one_is_set(monkeypatch):
     """With D1A_API_KEY set, /metrics is behind the same bearer check as /v1 (request counts, queue and memory are not public)."""
     from types import SimpleNamespace
     from fastapi.testclient import TestClient
-    from d1a import serve
+    from d1a.serving import serve
     monkeypatch.setattr(serve, "API_KEY", "secret")
     serve.app.state.models = SimpleNamespace(model=None, idle_s=None)
     with TestClient(serve.app) as client:

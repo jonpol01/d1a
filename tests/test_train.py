@@ -1,4 +1,4 @@
-"""d1a.train: the loss, how micro-batches weigh records, and that a run is reproducible from its seed (on the CPU, with
+"""d1a.training.train: the loss, how micro-batches weigh records, and that a run is reproducible from its seed (on the CPU, with
 the committed tiny Gemma 4 in tests/golden/tiny-gemma4)."""
 import json
 import sys
@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 import torch
 
-from d1a import train
+from d1a.training import train
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -46,13 +46,13 @@ def test_a_run_is_reproducible_from_its_seed(tmp_path, monkeypatch):
     monkeypatch.chdir(ROOT)
 
     def trained(name, seed):
-        argv = ["d1a.train", "--base", "tests/golden/tiny-gemma4/base", "--data", str(tmp_path / "data.jsonl"), "--device", "cpu", "--lora", "4",
+        argv = ["d1a.training.train", "--base", "tests/golden/tiny-gemma4/base", "--data", str(tmp_path / "data.jsonl"), "--device", "cpu", "--lora", "4",
                 "--batch", "2", "--accum", "2", "--p_none_pair", "0.5", "--seed", str(seed), "--out", str(tmp_path / name)]
         monkeypatch.setattr(sys, "argv", argv)
         train.main()
         from safetensors.torch import load_file
         adapter = load_file(str(tmp_path / name / "adapter_model.safetensors"))
-        from d1a.checkpoint import read_meta
+        from d1a.backends.checkpoint import read_meta
         head = read_meta(tmp_path / name).head
         return adapter, head
 

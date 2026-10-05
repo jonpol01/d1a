@@ -1,4 +1,4 @@
-"""d1a.checkpoint against the module at --ref: the path and metadata helpers, head.pt's bytes, MLX export configs and
+"""d1a.backends.checkpoint against the module at --ref: the path and metadata helpers, head.pt's bytes, MLX export configs and
 their refusals, LoadOptions.from_env, the backend decision for every device and option, every load-time refusal,
 warm_start, and loading tests/golden/tiny-gemma4 under a grid of options (merge, lora_scale, temperature, dtype) with
 the answers compared bit for bit.
@@ -18,7 +18,7 @@ import torch
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from common import ROOT, Checker, arguments, module_at  # noqa: E402
 
-import d1a.checkpoint as new  # noqa: E402
+import d1a.backends.checkpoint as new  # noqa: E402
 
 FIXTURE = "tests/golden/tiny-gemma4"
 
@@ -26,7 +26,7 @@ FIXTURE = "tests/golden/tiny-gemma4"
 def main():
     a = arguments(__doc__.split("\n")[0], "97706065", 200)
     os.chdir(ROOT)
-    old, rng, check = module_at(a.ref, "d1a/checkpoint.py"), random.Random(a.seed), Checker()
+    old, rng, check = module_at(a.ref, "d1a/backends/checkpoint.py"), random.Random(a.seed), Checker()
     for name in ("HUB_ID", "EXPORT_CONFIG", "EXPORT_HEAD", "EXPORT_FORMAT", "EXPORT_VERSION"):
         check.equal(name, getattr(old, name).pattern if name == "HUB_ID" else getattr(old, name), getattr(new, name).pattern if name == "HUB_ID" else getattr(new, name))
     check.equal("Meta.KNOWN", old.Meta.KNOWN, new.Meta.KNOWN)
@@ -85,7 +85,7 @@ def main():
             for dtype in (None, torch.float32, torch.bfloat16):
                 o, n = old.LoadOptions(backend=backend, dtype=dtype), new.LoadOptions(backend=backend, dtype=dtype)
                 check.same(f"backend {device} {backend} {dtype}", lambda: ck_old.backend(device, o), lambda: ck_new.backend(device, n))
-    from d1a.api import SystemOneRequest, to_record
+    from d1a.core.api import SystemOneRequest, to_record
     golden = json.loads(Path(FIXTURE, "golden.json").read_text(encoding="utf-8"))["records"][:12]
     for opts in ({}, {"merge": False}, {"lora_scale": 0.5}, {"temperature": 2.0}, {"dtype": torch.bfloat16}, {"lora_scale": 0.0, "merge": False}):
         def answers(m):
@@ -117,7 +117,7 @@ def main():
     check.same("warm_start from an export", lambda: old.Checkpoint(d).warm_start(None, None), lambda: new.Checkpoint(d).warm_start(None, None))
 
     # warm start
-    from d1a.model import DecisionModel, load_tokenizer
+    from d1a.backends.torch import DecisionModel, load_tokenizer
     tok = load_tokenizer(FIXTURE + "/base")
     for change in ({}, {"lora": 8}, {"head_dim": 64}, {"base_revision": "abc"}, {"base": "other"}):
         def warm(m):
@@ -127,7 +127,7 @@ def main():
             provenance = m.Checkpoint(run).warm_start(model, ours)
             return provenance, {k: v.tolist() for k, v in model.head.state_dict().items()}
         check.same(f"warm_start {change}", lambda: warm(old), lambda: warm(new))
-    print(f"d1a.checkpoint: identical to {a.ref} on {check.count} comparisons")
+    print(f"d1a.backends.checkpoint: identical to {a.ref} on {check.count} comparisons")
 
 
 if __name__ == "__main__":

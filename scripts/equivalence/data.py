@@ -1,4 +1,4 @@
-"""d1a.data against the module at --ref: every converter and build() on stand-in datasets (no download), augment and
+"""d1a.training.data against the module at --ref: every converter and build() on stand-in datasets (no download), augment and
 none_pair from seeded generators, load_records on generated files, materialize and api_request; records compared with
 their key order, and each generator's state compared after every call so the draws stay in step.
 
@@ -14,7 +14,7 @@ from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from common import Checker, arguments, module_at  # noqa: E402
 
-import d1a.data as new  # noqa: E402
+import d1a.training.data as new  # noqa: E402
 
 WORDS = ["Shoes", "arrived", "late", "Ünï", "twice", "charged", "refund", "the", "  ", "?", "wrong size", "Straße"]
 
@@ -48,7 +48,7 @@ def fake_datasets(rng):
 
 def main():
     a = arguments(__doc__.split("\n")[0], "b02d3545", 300)
-    old, rng, check = module_at(a.ref, "d1a/data.py"), random.Random(a.seed), Checker()
+    old, rng, check = module_at(a.ref, "d1a/training/data.py"), random.Random(a.seed), Checker()
     for name in ("REPOS", "NONE", "NONE_OPTIONS", "DISTRACTORS", "AG", "MNLI", "SST5", "YELP", "BANK_TEMPLATES", "EVAL_ONLY"):
         check.equal(name, getattr(old, name), getattr(new, name))
     check.equal("SOURCES", {k: v[1:] for k, v in old.SOURCES.items()}, {k: v[1:] for k, v in new.SOURCES.items()})
@@ -94,7 +94,7 @@ def main():
         path.write_text("\n".join(lines) + "\n", encoding="utf-8")
         check.same("load_records", lambda: old.load_records(path, "mine"), lambda: new.load_records(path, "mine"))
         check.equal("source_seed", old.source_seed(seed, "x"), new.source_seed(seed, "x"))
-    print(f"d1a.data: identical to {a.ref} on {check.count} comparisons")
+    print(f"d1a.training.data: identical to {a.ref} on {check.count} comparisons")
 
 
 if __name__ == "__main__":

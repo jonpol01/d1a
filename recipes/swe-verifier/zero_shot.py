@@ -107,7 +107,7 @@ def calibration(y, p, bins=10):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--n", type=int, default=600); ap.add_argument("--shards", type=int, default=1); ap.add_argument("--seed", type=int, default=0)
-    ap.add_argument("--run", default="JohnP1/d1a-e4b-mlx-q8", help="a repo takes its latest version (d1a.versions)"); ap.add_argument("--no-d1a", action="store_true")
+    ap.add_argument("--run", default="JohnP1/d1a-e4b-mlx-q8", help="a repo takes its latest version (d1a.core.versions)"); ap.add_argument("--no-d1a", action="store_true")
     ap.add_argument("--issue-chars", type=int, default=3000); ap.add_argument("--patch-chars", type=int, default=6000); ap.add_argument("--tail-chars", type=int, default=3000)
     ap.add_argument("--split", choices=["all", "train", "dev", "test"], default="all", help="only runs whose repository is in this split (split_of)")
     ap.add_argument("--mixed-only", action="store_true", help="with --per-issue: only issues whose runs include both outcomes (within-issue evaluation)")
@@ -147,7 +147,7 @@ def main():
     model = None
     if not a.no_d1a:
         from d1a import D1A
-        from d1a.versions import latest
+        from d1a.core.versions import latest
         a.run = a.run if Path(a.run).exists() else latest(a.run)   # a local run directory is used as is
         model = D1A.load(a.run)
     out = []

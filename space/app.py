@@ -1,6 +1,6 @@
 """D1A on a Hugging Face ZeroGPU Space: a few of the playground's demos (jonpol01/d1a-playground) on D1A-E4B.
 
-One model answers every card: d1a.media.MediaModel holds Gemma 4 E4B with D1A's LoRA merged in and the base's own vision
+One model answers every card: d1a.serving.media.MediaModel holds Gemma 4 E4B with D1A's LoRA merged in and the base's own vision
 and audio encoders, so text, photo and voice requests share one copy of the weights. The questions and presets are the
 playground's, so the answers match what it shows.
 """
@@ -17,9 +17,9 @@ import gradio as gr
 import spaces
 import torch
 
-from d1a.api import SystemOneRequest, to_answers, to_record
-from d1a.media import Media, MediaModel
-from d1a.versions import latest
+from d1a.core.api import SystemOneRequest, to_answers, to_record
+from d1a.serving.media import Media, MediaModel
+from d1a.core.versions import latest
 
 RUN = os.environ.get("D1A_RUN") or latest("JohnP1/d1a-e4b")
 SAMPLES = "https://raw.githubusercontent.com/jonpol01/d1a-playground/3fc4715ebd74675821c37f74a25dbde4bfbb2dad/public/samples"
@@ -146,9 +146,9 @@ PR_PRESETS = {
     "Docs only": ("Report: Apple Core AI and Foundation Models (macOS/iOS 27) vs D1A", "jonpol01",
                   "Assessment for #75: Foundation Models gives no token probabilities, so it is a routing target, not a backend. Core AI could host D1A on iPhone later.",
                   "added docs/reports/2026-10-apple-core-ai.md +118/-0"),
-    "New feature": ("d1a.media: load on demand, unload when idle", "jonpol01",
+    "New feature": ("d1a.serving.media: load on demand, unload when idle", "jonpol01",
                     "The media server starts empty, loads the model on the first photo or voice request, and drops it after --idle-unload seconds idle. A request in flight always keeps its model.",
-                    "modified d1a/media.py +62/-12\nmodified tests/test_unit.py +18/-0\nmodified README.md +1/-1"),
+                    "modified d1a/serving/media.py +62/-12\nmodified tests/test_unit.py +18/-0\nmodified README.md +1/-1"),
 }
 
 

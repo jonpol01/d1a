@@ -5,14 +5,24 @@ backbone + LoRA runs one prefill pass under a block-causal mask; a pointer head 
 the question's `<decide>` token. README.md is the user guide; docs/UPSTREAM.md records what came from Kev.
 
 ## Layout
-- `d1a/` the package: `model.py` (DecisionModel, encode, masks), `train.py` (trainer; default base Gemma 4 E2B),
-  `serve.py` (FastAPI System One server), `benchmark.py` (scores a checkpoint or a remote endpoint on a suite),
-  `checkpoint.py` (loading; `D1A_*` load options are read only by `LoadOptions.from_env`), `suite.py` (frozen suites,
-  Hub-mirrored partitions), `api.py` (request schema), `resume.py` (training resume points), `shared_prefix.py` (Qwen3.5 training through a shared state prefix),
-  `mlx_model.py` (Apple Silicon backend for Qwen3.5 and Gemma 4, and the MLX export folders `scripts/export_mlx.py` writes), `calibrate.py` (writes a checkpoint's temperature, refusing fit rows that are not held out from its training), `recipe.py` (training recipes: versioned YAML stages run through d1a.train, recorded beside each checkpoint).
+- `d1a/` the package, by subpackage (#60; the old flat module paths are one-release shims, removed in 0.5;
+  `d1a/_layout.py` maps them):
+  - `core/`: `api.py` (the System One request and answer schema), `versions.py`;
+  - `backends/`: `torch.py` (DecisionModel, encode, masks, the pointer head), `mlx.py` (Apple Silicon backend for Qwen3.5
+    and Gemma 4, and the MLX export folders `scripts/export_mlx.py` writes), `checkpoint.py` (loading; `D1A_*` load options
+    are read only by `LoadOptions.from_env`), `backbone.py`, `device.py`, `shared_prefix.py` (Qwen3.5 training through a
+    shared state prefix), `fused_qwen35.py`, `cuda_graphs.py`;
+  - `serving/`: `serve.py` (FastAPI System One server), `media.py`, `lib.py` (in-process `from d1a import D1A`);
+  - `learning/`: `feedback.py` (the decision log, outcomes, the outcome calibrator and its promotion gate);
+  - `training/`: `train.py` (trainer; default base Gemma 4 E2B), `data.py`, `resume.py` (training resume points),
+    `recipe.py` (versioned YAML stages run through d1a.training.train), `calibrate.py` (writes a checkpoint's temperature,
+    refusing fit rows that are not held out from its training), `composition.py`;
+  - `eval/`: `benchmark.py` (scores a checkpoint or a remote endpoint on a suite), `metrics.py`, `predictors.py`,
+    `suite.py` (frozen suites, Hub-mirrored partitions), `suites.py` (D1A's own suites);
+  - `agents/`: `presets.py`, `mcp_server.py`.
 - `evals/` frozen suites from Kev (manifests pin every partition's sha256; never edit them in place). `evals/d1a/` holds D1A's
-  own suites (`d1a/suites.py`): a manifest per dataset pins its Hub commit and each partition's sha256 and role
-  (train/eval); the text stays in the private dataset. Re-pin with `python -m d1a.suites freeze`, never by hand.
+  own suites (`d1a/eval/suites.py`): a manifest per dataset pins its Hub commit and each partition's sha256 and role
+  (train/eval); the text stays in the private dataset. Re-pin with `python -m d1a.eval.suites freeze`, never by hand.
 - `scripts/` suite builders and one-off tools;
   `clients/` the dependency-free Python and JS clients.
 
