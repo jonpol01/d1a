@@ -22,6 +22,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   question whose levels may repeat; it reports how far the answers are from uniform and how often the first slot is
   strictly the top one, with each control's answer in identical_options.json. The suite's own predictions and rows are
   unchanged.
+- Training recipes (#63): `python -m d1a.recipe run <recipe.yaml> --out <dir> --device <device>` runs a versioned YAML
+  file of stages (`format: d1a-recipe`, version 1), each one `d1a.train` run with the options it lists, a later stage
+  starting from the previous stage's checkpoint. Every option is checked by `d1a.train`'s own parser before anything
+  runs, machine settings (device, resume, save interval) come from the command, and each stage's directory gets
+  `recipe.json` (the recipe, its sha256, the stage and the exact command). `--dry-run` prints the commands.
+  `recipes/d1a-e2b.yaml` is the README's E2B run. `d1a.train`'s `parse_args` takes an argument list; PyYAML is now a
+  declared dependency.
 - `python -m d1a.feedback promote <log> --calibrator <file>` (#148): the promotion gate on a live decision log. Whole
   groups (an outcome's optional `group`, e.g. a pull request; `POST /v1/feedback` takes it) go to the fit or the
   held-out side. A calibrator fitted on the fit side replaces the served one for a question only if it passes the gate
@@ -90,6 +97,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- README: the benchmark example scores `--run runs/d1a-e2b`, where `d1a.train --out runs/d1a-e2b` writes the checkpoint (it named a `checkpoint/` folder that does not exist).
 - `scripts/golden_vectors.py compare` no longer crashes on a one-option question (a choice with one criterion or a
   one-level score), which has no second-best probability to measure a flip margin against.
 
