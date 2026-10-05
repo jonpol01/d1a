@@ -16,6 +16,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **`d1a.feedback`: learning from outcomes.** A `FeedbackLog` records each decision and, later, what actually happened
+  (a patch passed its tests, a label was corrected); `OutcomeCalibrator` refits each yes/no question on those outcomes
+  (Platt scaling on the logit, which also corrects a shifted base rate that one temperature cannot); `records()` turns
+  them into training data for a small LoRA update; `gate()` promotes a candidate only when its held-out log loss is
+  lower with a bootstrap interval clear of zero and no frozen suite regressed. `python -m d1a.feedback status | records |
+  calibrate`. Fitted values match scikit-learn's logistic regression on D1A-E4B v0.4's verifier outputs.
 - **`d1a.versions`: the newest released checkpoint in one place.** `latest("JohnP1/d1a-e4b-mlx-q8")` gives
   `JohnP1/d1a-e4b-mlx-q8@v0.4`; the Space takes its default from it. `tests/test_versions.py` fails when `LATEST` and
   the first row per model of the "Model versions" table below disagree, so a release cannot leave a default behind.
