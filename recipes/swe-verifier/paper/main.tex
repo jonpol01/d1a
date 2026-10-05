@@ -24,10 +24,10 @@ We study a small one: D1A-E4B (Gemma~4 E4B, a LoRA adapter and a pointer head), 
 and answers in one forward pass in a median 1.5\,s on a laptop.
 Our central observation is that the usual metric hides what matters. On 921 public agent runs from 83 unseen repositories,
 \emph{knowing how other runs of the same issue fared} already scores AUROC 0.958, so global AUROC mostly measures issue difficulty.
-Ranking runs \emph{of the same issue} (within-issue AUROC), cheap trajectory heuristics are near chance (0.536), while D1A reaches
-0.617 zero-shot and 0.661 after a 2.5-hour LoRA on a laptop.
-The same confound inflates learned verifiers evaluated on random splits of runs: in a first sample of 2{,}788 runs, a text verifier scores AUROC 0.96
-under a random split, 0.70 on unseen repositories, and 0.50 within issues.
+Ranking runs \emph{of the same issue} (within-issue AUROC) is the harder test: D1A reaches 0.617 zero-shot and 0.661 after a 2.5-hour LoRA on a laptop
+\pending{on more mixed issues; the heuristics reach 0.647 on 662 mixed issues but 0.536 on our 23}.
+The same confound inflates learned verifiers evaluated on random splits of runs: on 32{,}340 runs, a text verifier scores AUROC 0.946 under a random split
+and 0.736 on unseen repositories, and its within-issue AUROC falls from 0.643 to 0.493.
 Finally, D1A learns from outcomes through a loop that recalibrates, retrains and promotes a candidate only through a statistical gate;
 in the first round, recalibration halved the calibration error and the gate rejected a worse retrained candidate \pending{rounds 2--3}.
 All data is public and all code is open.
@@ -44,8 +44,7 @@ recognising which issues are easy.
 Verifiers for coding agents already exist (Section~\ref{sec:related}); we do not claim a new kind of verifier. Our contributions are:
 \begin{enumerate}
 \item \textbf{Separating issue difficulty from run quality.} On held-out repositories, an issue prior alone reaches global AUROC 0.958. We report
-within-issue AUROC next to global AUROC for every verifier, and show that cheap heuristics rank runs of one issue near chance while a small
-decision model does not (Section~\ref{sec:verifier}).
+within-issue AUROC next to global AUROC for every verifier, and compare cheap heuristics with a small decision model on that measure (Section~\ref{sec:verifier}).
 \item \textbf{Split leakage, measured.} On the same runs, random-run splits let a learned verifier score by recognising issues; grouping by issue removes
 the inflation (Section~\ref{sec:leakage}).
 \item \textbf{A local verifier that learns from outcomes}, with a statistical promotion gate, released as a library (\texttt{d1a.feedback})
@@ -103,9 +102,9 @@ $+0.051\,[+0.002, +0.101]$. Zero-shot D1A before recalibration: ECE 0.632.}\labe
 \end{table}
 
 \paragraph{Issue difficulty dominates global AUROC.} Most issues are resolved by all or none of their runs, so a scorer that recognises the issue ranks runs
-well globally without judging any run. Within issues the picture changes (Table~\ref{tab:verifier}): the heuristics fall to near chance (0.536), while D1A keeps
-real discrimination zero-shot (0.617) and more after training (0.661). With only 23 mixed issues these within-issue estimates are noisy
-\pending{intervals; Gemma-4-agent repeats will add tasks with mixed outcomes}.
+well globally without judging any run. Within issues the picture changes (Table~\ref{tab:verifier}): on our 23 mixed test issues the heuristics reach 0.536, D1A 0.617 zero-shot and 0.661 after training.
+These estimates are too noisy to rank the two: on the 662 mixed issues of the leakage study (Section~\ref{sec:leakage}) the heuristics reach 0.647.
+\pending{D1A on $\sim$130 mixed test issues across all shards, with intervals; Gemma-4-agent repeats will add more.}
 
 \paragraph{Picking one of several runs.} Picking one of 8 recorded runs per issue (97 issues, 23 with mixed outcomes; bootstrap over issues), compared with a random pick
 (14.7\% resolved): zero-shot D1A $+5.9$ points $[+2.2, +10.2]$, heuristics + r1 $+4.9\,[+0.5, +9.3]$, r1 alone $+2.8\,[-1.0, +6.6]$, heuristics
@@ -133,20 +132,21 @@ The issue-difficulty confound also inflates learned verifiers when runs of one i
 leakage by construction), the heuristics, a TF-IDF model of the issue and patch text, and both together.
 
 \begin{table}[h]\centering\small
-\begin{tabular}{lcccc}\toprule
-Verifier & random runs & by issue & by repository & within-issue, random runs \\\midrule
-Issue prior & 0.951 & 0.415 & 0.419 & -- \\
-Heuristics & 0.745 & 0.720 & 0.717 & 0.631 \\
-Text (TF-IDF) & 0.961 & 0.713 & 0.702 & 0.495 \\
-Heuristics + text & 0.950 & 0.756 & 0.756 & 0.547 \\\bottomrule
+\begin{tabular}{lcccccc}\toprule
+& \multicolumn{3}{c}{global AUROC} & \multicolumn{3}{c}{within-issue AUROC} \\
+Verifier & random & by issue & by repo & random & by issue & by repo \\\midrule
+Issue prior & 0.947 & 0.480 & 0.452 & -- & -- & -- \\
+Heuristics & 0.754 & 0.752 & 0.750 & 0.647 & 0.645 & 0.647 \\
+Text (TF-IDF) & 0.946 & 0.749 & 0.736 & \textbf{0.493} & 0.646 & 0.643 \\
+Heuristics + text & 0.944 & 0.792 & 0.787 & 0.538 & 0.665 & 0.661 \\\bottomrule
 \end{tabular}
-\caption{Global AUROC of out-of-fold predictions under three splits of the same 2{,}788 runs (307 issues, at most 10 runs each, from the first of 12 shards;
-\texttt{runs/swe-verifier/leakage-shard0/result.json}) \pending{full 80{,}036-run result}. Inflation over the by-repository split (95\% CI, bootstrap over
-repositories): issue prior $+0.53\,[+0.42, +0.64]$, text $+0.26\,[+0.20, +0.32]$, heuristics + text $+0.19\,[+0.15, +0.24]$, heuristics $+0.03\,[+0.01, +0.04]$;
-by-issue splits show none.}\label{tab:leakage}
+\caption{Out-of-fold AUROC under three 5-fold splits of the same 32{,}340 runs (3{,}591 issues, 1{,}276 repositories, at most 10 runs per issue, 10.6\% resolved;
+within-issue over the 662 issues with both outcomes; \texttt{runs/swe-verifier/leakage/result.json}). Inflation of global AUROC over the by-repository split
+(95\% CI, bootstrap over repositories): text $+0.210\,[+0.192, +0.229]$, heuristics + text $+0.158\,[+0.144, +0.174]$, heuristics $+0.005\,[+0.001, +0.009]$;
+by issue: text $+0.013\,[-0.004, +0.027]$, heuristics + text $+0.005\,[-0.006, +0.016]$.}\label{tab:leakage}
 \end{table}
 
-Under a random split the text model's global AUROC is 0.961, yet its within-issue AUROC is 0.495: it learned which issues are easy, not which runs are right.
+Under a random split the text model's global AUROC is 0.946, yet its within-issue AUROC falls to 0.493: when issues leak, it learns to recognise them \emph{instead of} judging runs, and loses the within-issue discrimination it has when issues cannot leak (0.643).
 Grouping by issue removes the inflation, and grouping by repository adds little beyond that in this data. Evaluations of learned verifiers should group by issue
 at least, and report within-issue discrimination. We have not checked whether any published verifier result used a random split.
 
