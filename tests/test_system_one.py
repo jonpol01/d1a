@@ -86,6 +86,7 @@ def test_confidence_formulas():
     assert score_confidence([0.0, 0.0, 1.0]) == 1.0
     assert score_confidence([0.5, 0.0, 0.5]) == 0.0                              # wider than uniform floors at 0
     assert score_confidence([3.0, 9.0, 0.0]) == score_confidence([0.25, 0.75, 0.0])   # read normalised
+    assert math.isclose(score_confidence([0.5, 0.5, 0.0]), 0.25)                 # docs/SPEC.md §5's example: D = 2/3 for three levels, not (L-1)/2
 
 
 @pytest.mark.parametrize("p, shown", [
