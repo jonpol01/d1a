@@ -84,6 +84,7 @@ the Apache License 2.0. This file records where D1A's code came from and what D1
   - `d1a/checkpoint.py`: the same decisions, refusals and on-disk formats; its tests are `tests/test_checkpoint.py`.
   - `d1a/data.py`: the same records from the same seeds (every draw in the same order); its tests are `tests/test_data.py`.
   - `d1a/metrics.py`: bit-identical results; its tests are `tests/test_metrics.py`.
+  - `d1a/model.py`: the same encodings, masks, probabilities and training gradients, bit for bit, on Gemma 4 and Qwen3.5.
   - `d1a/suite.py`: the same pins, partition checks, mirror rules and file formats; its tests are `tests/test_suite.py`.
   - `d1a/train.py`: the same training, bit for bit on the CPU, resumes included; its tests are `tests/test_train.py`.
 - **Rewritten**: `README.md`, `AGENTS.md`, `NOTICE`, `.gitignore`.
@@ -102,7 +103,6 @@ d1a/composition.py
 d1a/cuda_graphs.py
 d1a/fused_qwen35.py
 d1a/mlx_model.py
-d1a/model.py
 d1a/predictors.py
 d1a/serve.py
 d1a/shared_prefix.py

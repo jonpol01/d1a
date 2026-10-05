@@ -41,6 +41,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- `d1a/model.py` is rewritten in D1A's own code, no longer derived from Kev. Every public name stays, and the encoding,
+  the masks, every scoring path (batched, row form, prefix cache, shared prefix) and the training gradients are identical
+  to the previous version on tiny Gemma 4 and Qwen3.5 models (`scripts/equivalence/model.py`, new), and on real weights
+  (`scripts/equivalence/real_weights.py --module d1a/model.py`).
 - `d1a/train.py` is rewritten in D1A's own code, no longer derived from Kev. The run, its options, what it writes and how it
   resumes are unchanged: on the CPU the adapter, the head, the configs and the logs are identical to the previous version
   under 15 option sets, a stopped and resumed run included (`scripts/equivalence/train.py`, new). Its tests are rewritten

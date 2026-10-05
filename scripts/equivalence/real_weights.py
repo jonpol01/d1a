@@ -4,6 +4,7 @@ requests) scored by both, every probability compared, and load time and per-requ
 model.py, checkpoint.py and train.py rewrites: identical answers and equal-or-better latency, main against the branch.
 
     uv run python scripts/equivalence/real_weights.py --module d1a/checkpoint.py --run JohnP1/d1a-e2b --device mps
+    uv run python scripts/equivalence/real_weights.py --module d1a/model.py --run JohnP1/d1a-e2b --device mps
 """
 import argparse
 import gc
@@ -84,9 +85,13 @@ def main():
     os.chdir(ROOT)
     from golden_vectors import record_set
     import d1a.checkpoint as new_checkpoint
-    if a.module != "d1a/checkpoint.py":
-        raise SystemExit("only d1a/checkpoint.py is wired so far; model.py and train.py swap the module the checkpoint loads through")
-    old_checkpoint = module_at(a.ref, a.module)
+    if a.module == "d1a/checkpoint.py":
+        old_checkpoint = module_at(a.ref, a.module)
+    elif a.module == "d1a/model.py":   # the same loader, building the model from --ref
+        old_model, old_checkpoint = module_at(a.ref, a.module), module_at(a.ref, "d1a/checkpoint.py")
+        old_checkpoint.DecisionModel, old_checkpoint.load_tokenizer, old_checkpoint.pad_id = old_model.DecisionModel, old_model.load_tokenizer, old_model.pad_id
+    else:
+        raise SystemExit("only d1a/checkpoint.py and d1a/model.py are wired; train.py has scripts/equivalence/train_real_weights.py")
     dtype = {"fp32": torch.float32, "bf16": torch.bfloat16}[a.dtype]
     records = record_set()[: a.limit or None]
     if a.interleave:
