@@ -80,3 +80,19 @@ def test_single_home(what, pattern, allowed):
             if regex.search(code):
                 offenders.append(f"{rel}:{n}: {line.strip()}")
     assert not offenders, f"{what}\n" + "\n".join(offenders)
+
+
+def test_release_runs_the_same_unit_tests_as_ci():
+    """release.yml runs ci.yml's UNIT_TESTS rather than its own copy of the list: a copy went stale when test files were removed
+    (#123) and failed the v0.3.0 release. Every file in UNIT_TESTS exists, release.yml names no test file itself, and
+    release.yml parses with its pytest step reading UNIT_TESTS."""
+    import re
+    ci = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+    listed = re.search(r"^ *UNIT_TESTS: *(.+)$", ci, re.M).group(1).split()
+    assert listed and all((ROOT / f).is_file() for f in listed), [f for f in listed if not (ROOT / f).is_file()]
+    assert not re.search(r"tests/test_\w+\.py", release)
+    # parsed, not grepped: an unquoted run: holding "UNIT_TESTS: " is not valid YAML, and Actions would reject the workflow
+    import yaml
+    runs = [s.get("run", "") for s in yaml.safe_load(release)["jobs"]["release"]["steps"]]
+    assert any("pytest" in r and "UNIT_TESTS" in r for r in runs), runs

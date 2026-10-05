@@ -20,7 +20,9 @@ jobs:
           enable-cache: true
       - run: python3 scripts/release_notes.py --check "$GITHUB_REF_NAME"
       - run: uv sync --extra serve --extra media
-      - run: uv run python -m pytest tests/test_unit.py tests/test_research.py tests/test_generators.py tests/test_conventions.py tests/test_documents_tools.py tests/test_hard_v1.py tests/test_devtools_v1.py tests/test_breadth_v1.py tests/test_mlx_export.py -q
+      # the same unit tests as CI: ci.yml's UNIT_TESTS is the one list (a conventions test checks that no test file is listed here)
+      - run: |
+          uv run python -m pytest $(sed -n 's/^ *UNIT_TESTS: *//p' .github/workflows/ci.yml) -q
       - run: uv build
       - run: python3 scripts/release_notes.py "$GITHUB_REF_NAME" > release-notes.md
       - run: gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --title "D1A ${GITHUB_REF_NAME#v}" --notes-file release-notes.md
