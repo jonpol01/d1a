@@ -122,7 +122,18 @@ python -m d1a.feedback calibrate runs/feedback/verifier.jsonl --out runs/feedbac
 | trained on outcomes (LoRA, 800 runs, 2.5 h on a Mac) | **0.807** | **0.039** |
 | trajectory heuristics, for comparison | 0.768 | 0.019 |
 
-Trained on outcomes, it also picks better training data for an agent: the 10% of runs it trusts most are 40% truly resolved, against 23% for the heuristics. The round-by-round learning curve (batches of new outcomes, gated promotions) is being measured in [#119](https://github.com/jonpol01/d1a/issues/119).
+Trained on outcomes, it also picks better training data for an agent: the 10% of runs it trusts most are 40% truly resolved, against 23% for the heuristics.
+
+**The loop, run for three rounds** (300 new outcomes each, the verifier measured on test repositories after every round, [#119](https://github.com/jonpol01/d1a/issues/119)):
+
+| Round | Outcomes | Calibration error (ECE) | Gate on the retrained candidate |
+|---|---|---|---|
+| 0 | 0 | 0.068 | – |
+| 1 | 300 | 0.036 | rejected: clearly worse (log loss +0.026, 95% CI +0.016..+0.058) |
+| 2 | 600 | **0.017** | rejected: not clearly better (+0.010, CI −0.004..+0.050) |
+| 3 | 900 | 0.031 | rejected: not clearly better (−0.007, CI −0.016..+0.014) |
+
+Recalibration on outcomes works at once and needs no restart. Small retraining rounds have not yet produced a model that is clearly better, and the gate has kept every one that was not, so the loop has never shipped a regression. Ranking runs of the *same* issue against each other remains hard: on 119 issues with mixed outcomes, D1A reaches within-issue AUROC 0.64 against 0.62 for cheap trajectory heuristics, a difference within noise.
 
 ## What Works Today
 
