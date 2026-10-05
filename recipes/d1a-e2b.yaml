@@ -1,0 +1,20 @@
+# The D1A recipe on Gemma 4 E2B (README, Training): one L4 is enough, about 15 GB peak with a bf16 backbone.
+#   python -m d1a.recipe run recipes/d1a-e2b.yaml --out runs/d1a-e2b --device cuda
+format: d1a-recipe
+version: 1
+name: d1a-e2b
+description: Two epochs on decision-v7 from Gemma 4 E2B, bf16, with minimal pairs.
+base: google/gemma-4-E2B
+base_revision: d29ff6b45f081a49ee2733a859c9c9c2d95d1a6f
+stages:
+  - name: base
+    train:
+      suite: evals/v7/decision-v7
+      epochs: 2
+      lr: 1.0e-4
+      batch: 4
+      accum: 2
+      dtype: bf16
+      weights_dtype: bf16
+      checkpointing: 1
+      p_none_pair: 0.25

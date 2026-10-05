@@ -290,12 +290,18 @@ uv run python -m d1a.train --suite evals/v7/decision-v7 \
     --p_none_pair 0.25 --device cuda --out runs/d1a-e2b
 ```
 
+The same run as a recipe, [`recipes/d1a-e2b.yaml`](recipes/d1a-e2b.yaml): a versioned YAML file of stages (each one `d1a.train` run, a later stage starting from the one before), checked against `d1a.train`'s options before anything runs and recorded beside every checkpoint it writes (`recipe.json`: the recipe, its sha256 and the exact command). `--dry-run` prints the commands.
+
+```bash
+uv run python -m d1a.recipe run recipes/d1a-e2b.yaml --out runs/d1a-e2b --device cuda    # writes runs/d1a-e2b/base
+```
+
 For E4B pass `--base google/gemma-4-E4B --base_revision <sha>`. To fine-tune on your own data, start from a checkpoint: `--data mine.jsonl --init_from JohnP1/d1a-e2b`. `--data` (in `d1a.benchmark` too) also takes a D1A suite partition, `evals/d1a/<suite>:<partition>`: a dataset pinned to one Hub commit, fetched and checked against its sha256 before use, and refused for training when it is an eval partition (`python -m d1a.suites --help`). To train on several frozen suites in one run, add `--extra_suites evals/hard-v1,evals/devtools-v1` (each suite's own manifest rules apply to its records). For long runs add `--save_every_minutes 30`: a crash then loses at most 30 minutes, and `--resume 1` with the same arguments continues bit for bit. A single non-finite loss or gradient skips its batch instead of ending the run (three in a row still stop it). `python -m d1a.train --help` lists every option. Before you publish or serve a trained checkpoint, write its calibration temperature into it with `python -m d1a.calibrate` (training leaves it at 1.0 on purpose; `d1a.serve` warns and `/v1/models` reports `calibrated: false` until you do).
 
 Score a checkpoint on the frozen suites:
 
 ```bash
-uv run python -m d1a.benchmark --run runs/d1a-e2b/checkpoint --suite evals/v4/transfer-v4 --out runs/d1a-e2b-transfer
+uv run python -m d1a.benchmark --run runs/d1a-e2b --suite evals/v4/transfer-v4 --out runs/d1a-e2b-transfer
 ```
 
 The frozen suites (`evals/`) come from Kev. Their manifests and small partitions are in git; partitions over about 10 MB are fetched from Kev's Hugging Face dataset [`jaredpalmer/kev-suites`](https://huggingface.co/datasets/jaredpalmer/kev-suites) on first use and verified by sha256. A few held-out suites name a private mirror and cannot be loaded without access to it. The suites were admitted under Qwen tokenizers, so the trainer re-admits their records under Gemma's tokenizer with each suite's own rule (70 of decision-v7's 12,576 records are dropped).

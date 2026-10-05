@@ -27,6 +27,7 @@ dependencies = [
     "numpy>=2.5.3",
     "peft>=0.21",
     "pydantic>=2.9",
+    "pyyaml>=6",   # d1a.recipe
     "scikit-learn>=1.9.1",
     "torch>=2.6,<2.14",
     "transformers>=5.17,<6",

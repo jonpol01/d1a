@@ -346,7 +346,7 @@ def batch_loss(model, a, batch, dev, autocast):
 DEFAULT_BASE = ("google/gemma-4-E2B", "d29ff6b45f081a49ee2733a859c9c9c2d95d1a6f")   # D1A's base and its pinned commit
 
 
-def parse_args():
+def parse_args(argv=None):
     ap = argparse.ArgumentParser()
     add = ap.add_argument
     add("--base", default=DEFAULT_BASE[0], help="Hugging Face base model (default: Gemma 4 E2B, pinned to DEFAULT_BASE's commit)")
@@ -400,7 +400,7 @@ def parse_args():
     add("--resume", type=int, choices=[0, 1], default=0, help="continue from <out>/resume if it holds a resume point (same arguments), else start")
     add("--stop_after", type=int, default=0, help="exit after this optimizer step without saving the checkpoint (a run split across containers; tests)")
     add("--seed", type=int, default=0)
-    a = ap.parse_args()
+    a = ap.parse_args(argv)
     if min(a.epochs, a.accum, a.n_per_source, a.lora, a.batch, a.synthetic_repeat) < 1 or not 0 < a.public_frac <= 1:
         ap.error("epochs, accum, n_per_source, lora, batch and synthetic_repeat must be positive; 0 < public_frac <= 1")
     if a.dtype == "bf16" and a.device != "cuda":
