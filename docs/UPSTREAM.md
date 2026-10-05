@@ -83,6 +83,7 @@ the Apache License 2.0. This file records where D1A's code came from and what D1
   - `d1a/calibrate.py`: replaces Kev's calibration script; `scripts/calibrate_checkpoint.py` is now a wrapper around it.
   - `d1a/data.py`: the same records from the same seeds (every draw in the same order); its tests are `tests/test_data.py`.
   - `d1a/metrics.py`: bit-identical results; its tests are `tests/test_metrics.py`.
+  - `d1a/suite.py`: the same pins, partition checks, mirror rules and file formats; its tests are `tests/test_suite.py`.
 - **Rewritten**: `README.md`, `AGENTS.md`, `NOTICE`, `.gitignore`.
 - **Kept as is**: the frozen suites in `evals/` (large partitions still download from Kev's Hub dataset
   `jaredpalmer/kev-suites`), the suite builders in `scripts/`.
@@ -104,7 +105,6 @@ d1a/model.py
 d1a/predictors.py
 d1a/serve.py
 d1a/shared_prefix.py
-d1a/suite.py
 d1a/train.py
 pyproject.toml
 scripts/mlx_parity.py
