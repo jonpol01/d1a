@@ -1,7 +1,7 @@
 import numpy as np
 
 from d1a.data import materialize
-from d1a.feedback import FeedbackLog, OutcomeCalibrator, gate, log_loss, pairs, records
+from d1a.feedback import FeedbackLog, OutcomeCalibrator, choice_log_loss, choice_pairs, gate, gate_choice, log_loss, pairs, records
 
 Q = {"resolved": {"type": "noul", "instr": "Does the patch fix the issue?", "criteria": {"true": "fixes it", "false": "does not"}}}
 
@@ -39,6 +39,50 @@ def test_gate_promotes_only_a_clearly_better_candidate_without_suite_regressions
     assert not blocked["promote"] and "decision-v7" in blocked["regressions"]
 
 
+CQ = {"blast": {"type": "choice", "instructions": "How far a mistake spreads.", "criteria": {"contained": "one module", "moderate": "one subsystem", "broad": "shared code", "massive": "everything"}}}
+
+
+def test_choice_temperature_fixes_overconfidence_keeps_the_choice_and_passes_the_gate(tmp_path):
+    """A choice question twice as sure as it should be (P = softmax(2 x true logits)): the fitted inverse temperature comes
+    out near 0.5, recalibrated answers keep their chosen option, and the gate promotes them over the raw answers on
+    held-out outcomes, and not the other way round."""
+    log = FeedbackLog(tmp_path / "f.jsonl"); rng = np.random.default_rng(2); opts = list(CQ["blast"]["criteria"])
+    for i in range(1200):
+        z = rng.normal(0, 1.5, len(opts)); truth = np.exp(z) / np.exp(z).sum(); sure = np.exp(2 * z) / np.exp(2 * z).sum()
+        probs = dict(zip(opts, map(float, sure)))
+        did = log.decision(f"pr {i}", CQ, {"blast": {"choice": max(probs, key=probs.get), "probabilities": probs}}, run="JohnP1/d1a-e4b-mlx-q8@v0.4")
+        log.outcome(did, {"blast": str(rng.choice(opts, p=truth))}, {"src": "reviewer"})
+    res = log.resolved(); fit, held = res[:800], res[800:]
+    cal = OutcomeCalibrator().fit(fit)
+    assert abs(cal.params["blast"]["s"] - 0.5) < 0.1 and cal.params["blast"]["n"] == 800
+    raw, labels = choice_pairs(held, "blast")
+    new = [cal.probs("blast", pr) for pr in raw]
+    assert all(max(a, key=a.get) == max(b, key=b.get) for a, b in zip(raw, new)) and all(abs(sum(b.values()) - 1) < 1e-9 for b in new)
+    assert choice_log_loss(new, labels).mean() < choice_log_loss(raw, labels).mean()
+    groups = np.arange(len(labels)) % 20
+    assert gate_choice(labels, new, raw, groups)["promote"] and not gate_choice(labels, raw, new, groups)["promote"]
+    served = cal.apply(held[0]["answers"])["blast"]
+    assert served["choice"] == held[0]["answers"]["blast"]["choice"] and served["probabilities"] != held[0]["answers"]["blast"]["probabilities"]
+    cal.save(tmp_path / "c.json")
+    assert OutcomeCalibrator.load(tmp_path / "c.json").apply(held[0]["answers"]) == cal.apply(held[0]["answers"])
+
+
+def test_a_human_label_beats_a_later_reviewer_label_per_question(tmp_path):
+    """Outcomes merge per question: a person's label wins over another model's whatever arrived last, the reviewer's still
+    fills the questions the person left alone, records() carry each label's source, and src= keeps one source only."""
+    log = FeedbackLog(tmp_path / "f.jsonl")
+    did = log.decision("pr", {**CQ, "type": {"type": "choice", "instructions": "Change type.", "criteria": {"bug": "fix", "docs": "docs"}}},
+                       {"blast": {"choice": "contained", "probabilities": {"contained": 0.6, "moderate": 0.2, "broad": 0.1, "massive": 0.1}},
+                        "type": {"choice": "bug", "probabilities": {"bug": 0.7, "docs": 0.3}}}, run="r@v0.4")
+    log.outcome(did, {"type": "docs"}, {"src": "human"})
+    log.outcome(did, {"type": "bug", "blast": "broad"}, {"src": "reviewer"})
+    (d,) = log.resolved()
+    assert d["labels"] == {"type": "docs", "blast": "broad"} and d["label_src"] == {"type": "human", "blast": "reviewer"}
+    (rec,) = records([d])
+    assert rec["questions"]["type"]["src"] == "human" and rec["questions"]["blast"]["src"] == "reviewer"
+    assert log.resolved("reviewer")[0]["labels"] == {"type": "bug", "blast": "broad"}
+
+
 def test_serve_logs_decisions_accepts_outcomes_and_applies_a_reloaded_calibrator(tmp_path, monkeypatch):
     """d1a.serve's self-learning hooks: with a log, every answer carries a decision_id and POST /v1/feedback records its
     outcome; with a calibrator file, yes/no answers are recalibrated and a rewritten file takes effect on the next answer;
@@ -59,9 +103,10 @@ def test_serve_logs_decisions_accepts_outcomes_and_applies_a_reloaded_calibrator
     expected = round(OutcomeCalibrator({"resolved": [1.0, -2.0, 50]}).p("resolved", 0.8), 4)
     assert body["answers"]["resolved"]["noul"] == expected < 0.8 and body["decision_id"]
     with TestClient(serve.app) as client:
-        assert client.post("/v1/feedback", json={"decision_id": body["decision_id"], "labels": {"resolved": False}}).json() == {"ok": True}
+        assert client.post("/v1/feedback", json={"decision_id": body["decision_id"], "labels": {"resolved": False}, "src": "human"}).json() == {"ok": True}
     (d,) = serve.LEARNING.log.resolved()
     assert d["id"] == body["decision_id"] and d["labels"] == {"resolved": False} and d["run"] == "JohnP1/d1a-e4b-mlx-q8@v0.4"
+    assert d["label_src"] == {"resolved": "human"}
     assert d["answers"]["resolved"]["noul"] == 0.8 and d["meta"]["served"]["resolved"]["noul"] == expected   # the model's P is logged, the served one beside it
     assert d["questions"]["resolved"]["type"] == "noul"
     for i in range(30):                                                        # recalibrating on the live log fits the model's P, not the served one

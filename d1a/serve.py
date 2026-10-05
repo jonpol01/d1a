@@ -8,7 +8,7 @@ TypeSafe-compatible: POST /v1/systemone, GET /v1/models, the `x-typesafe-request
 when D1A_API_KEY is set (unset = open server, the local default). Demo extras: POST /v1/systemone/permute (one Choice
 under several option orders) and POST /v1/systemone/separate (each question in its own pass, for the packed-vs-separate
 comparison), self-learning (D1A_FEEDBACK_LOG=<path>: every answer gets a decision_id and is logged, POST /v1/feedback
-{decision_id, labels} records what actually happened; D1A_OUTCOME_CALIBRATOR=<file>: yes/no answers recalibrated by d1a.feedback's
+{decision_id, labels} records what actually happened; D1A_OUTCOME_CALIBRATOR=<file>: yes/no and choice answers recalibrated by d1a.feedback's
 calibrator, re-read when the file changes), POST /v1/systemone/media (a /v1/systemone request plus a photo, voice clip or video, d1a.media.MediaRequest,
 answered by the same model: an MLX export with its media/ folder, scripts/export_mlx.py --media).
 
@@ -42,7 +42,7 @@ PREFIX_MAX_TOKENS = int(os.environ.get("D1A_PREFIX_MAX_TOKENS", "65536"))  # sta
                                                                          # One 64k state (Kev-27B: ~1.3 GB of keys, values and DeltaNet states), or four 16k ones, not four 64k ones
 DATE_FACTS = os.environ.get("D1A_DATE_FACTS", "0") == "1"
 FEEDBACK_LOG = os.environ.get("D1A_FEEDBACK_LOG")                         # set = log every decision (d1a.feedback) and accept outcomes at POST /v1/feedback
-OUTCOME_CALIBRATOR = os.environ.get("D1A_OUTCOME_CALIBRATOR")             # set = apply this d1a.feedback calibrator to yes/no answers, reloaded when the file changes
+OUTCOME_CALIBRATOR = os.environ.get("D1A_OUTCOME_CALIBRATOR")             # set = apply this d1a.feedback calibrator to yes/no and choice answers, reloaded when the file changes
 API_KEY = os.environ.get("D1A_API_KEY")                                  # unset = open server; set = require Authorization: Bearer <key>, as the TypeSafe clients always send
 MAX_BATCH = 64                                                           # requests the model thread takes at once (d1a.cuda_graphs splits them to fit its buffers)
 KEEP_ALIVE_S = 75                                                        # idle keep-alive; above Node's pooled-socket reuse window, so a proxy (the playground's Next.js rewrite) never reuses a socket uvicorn just closed (ECONNRESET, #42); uvicorn's default is 5
@@ -263,8 +263,8 @@ class Learning:
         with self._lock: did = self.log.decision(req.state, questions, answers, run=run, meta={"served": served} if served is not answers else None)
         return served, did
 
-    def outcome(self, did, labels):
-        with self._lock: self.log.outcome(did, labels)
+    def outcome(self, did, labels, meta=None):
+        with self._lock: self.log.outcome(did, labels, meta)
 
     def card(self):
         cal = self.calibrator()
@@ -340,6 +340,7 @@ async def systemone_media(req: MediaRequest):
 class Feedback(BaseModel):
     decision_id: str
     labels: dict[str, bool | str | int]   # {question id: what actually happened}: bool for yes/no, the option key for choice
+    src: str | None = None                # where the outcome came from (d1a.feedback.PREFER: "human" beats e.g. "reviewer")
 
 
 @app.post("/v1/feedback")
@@ -347,7 +348,7 @@ def feedback(f: Feedback):
     """Report the real outcome of an earlier decision (its decision_id from /v1/systemone), for d1a.feedback to learn from."""
     if LEARNING.log is None:
         raise HTTPException(404, "feedback is off: start d1a.serve with D1A_FEEDBACK_LOG=<path>")
-    LEARNING.outcome(f.decision_id, f.labels)
+    LEARNING.outcome(f.decision_id, f.labels, {"src": f.src} if f.src else None)
     return {"ok": True}
 
 

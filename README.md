@@ -62,7 +62,7 @@ A causal LM backbone with a LoRA adapter runs one prefill pass over the document
   <img src="docs/arch/serving-light.svg" alt="Clients call d1a.serve; photos and voice notes go through the vision and audio encoders into the same model" width="100%">
 </picture>
 
-**5. Learning from outcomes.** Every decision is logged with the model that made it (`d1a.feedback.FeedbackLog`). When the outcome is known, three steps run, cheapest first: an `OutcomeCalibrator` refits each yes/no probability on the outcomes (Platt scaling, which also corrects a shifted base rate), a small LoRA update trains on the resolved decisions, and `gate()` promotes the candidate only if its held-out log loss is lower with a 95% bootstrap interval clear of zero and no frozen suite regressed. A promoted candidate becomes the next version through `d1a.versions`.
+**5. Learning from outcomes.** Every decision is logged with the model that made it (`d1a.feedback.FeedbackLog`). When the outcome is known, three steps run, cheapest first: an `OutcomeCalibrator` refits each yes/no probability on the outcomes (Platt scaling, which also corrects a shifted base rate) and each choice question's temperature (how sure it is, never which option it picks), a small LoRA update trains on the resolved decisions, and `gate()` promotes the candidate only if its held-out log loss is lower with a 95% bootstrap interval clear of zero and no frozen suite regressed. A promoted candidate becomes the next version through `d1a.versions`.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/arch/learning-dark.svg">
@@ -101,7 +101,7 @@ python -m d1a.feedback calibrate runs/feedback/verifier.jsonl --out cal.json    
 python -m d1a.feedback records runs/feedback/verifier.jsonl --out feedback.jsonl # data for a small LoRA update
 ```
 
-**As a service.** `d1a.serve` runs the loop for any client: with `D1A_FEEDBACK_LOG` set, every answer carries a `decision_id` and is logged, and `POST /v1/feedback` records what actually happened; with `D1A_OUTCOME_CALIBRATOR` set, yes/no answers go through the latest calibrator, re-read whenever the file changes, so recalibrating needs no restart.
+**As a service.** `d1a.serve` runs the loop for any client: with `D1A_FEEDBACK_LOG` set, every answer carries a `decision_id` and is logged, and `POST /v1/feedback` records what actually happened, with an optional `src` (a person's correction, `human`, outranks another model's, e.g. `reviewer`); with `D1A_OUTCOME_CALIBRATOR` set, yes/no and choice answers go through the latest calibrator, re-read whenever the file changes, so recalibrating needs no restart.
 
 ```bash
 D1A_FEEDBACK_LOG=runs/feedback/verifier.jsonl D1A_OUTCOME_CALIBRATOR=runs/feedback/cal.json \
