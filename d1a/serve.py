@@ -1,5 +1,5 @@
 # Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); serves d1a-latest and keeps kev-latest and jev-latest as compatibility names; model cards name D1A; serves MLX export folders; --device with a GPU usability probe; a startup self-check of the readout and a warning when serving an uncalibrated checkpoint; recent batch latency in /v1/models; a 75 s keep-alive for proxies in front of it; --idle-unload; photos and voice clips through the same model (POST /v1/systemone/media); prefix cache keyed by state ids only (option isolation removed); self-learning hooks (decision log, POST /v1/feedback, outcome calibrator); GET /metrics.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); serves d1a-latest and keeps kev-latest and jev-latest as compatibility names; model cards name D1A; serves MLX export folders; --device with a GPU usability probe; a startup self-check of the readout and a warning when serving an uncalibrated checkpoint; recent batch latency in /v1/models; a 75 s keep-alive for proxies in front of it; --idle-unload; photos and voice clips through the same model (POST /v1/systemone/media); prefix cache keyed by state ids only (option isolation removed); self-learning hooks (decision log with its query sidecar, POST /v1/feedback, outcome calibrator, outcome memory); GET /metrics.
 """FastAPI sidecar for the playground: loads one checkpoint, exposes prefill-only decisions.
 
 Run: uv run --extra serve python -m d1a.serve --run runs/d1a --port 8008
@@ -9,7 +9,8 @@ when D1A_API_KEY is set (unset = open server, the local default). Demo extras: P
 under several option orders) and POST /v1/systemone/separate (each question in its own pass, for the packed-vs-separate
 comparison), self-learning (D1A_FEEDBACK_LOG=<path>: every answer gets a decision_id and is logged, POST /v1/feedback
 {decision_id, labels} records what actually happened; D1A_OUTCOME_CALIBRATOR=<file>: yes/no and choice answers recalibrated by d1a.feedback's
-calibrator, re-read when the file changes), POST /v1/systemone/media (a /v1/systemone request plus a photo, voice clip or video, d1a.media.MediaRequest,
+calibrator, re-read when the file changes; D1A_OUTCOME_MEMORY=<file>: the choice questions d1a.feedback memory-fit promoted are
+answered from their blend with the most similar earlier outcomes), POST /v1/systemone/media (a /v1/systemone request plus a photo, voice clip or video, d1a.media.MediaRequest,
 answered by the same model: an MLX export with its media/ folder, scripts/export_mlx.py --media).
 
 --idle-unload N drops the model (and the media encoders) after N seconds without a request and loads it again on the
@@ -23,6 +24,7 @@ from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 from collections import deque
 from concurrent.futures import Future
+import numpy as np
 import torch
 from dataclasses import dataclass, field, replace
 from fastapi import FastAPI, HTTPException
@@ -32,7 +34,7 @@ from pydantic import BaseModel, Field
 from .api import SystemOneRequest, to_record, to_answers, output_tokens, with_date_facts
 from .checkpoint import EXPORT_CONFIG, Checkpoint, LoadOptions, fused_available, is_hub_id
 from .device import allocated_bytes, default_device, empty_cache, out_of_memory, sync
-from .feedback import FeedbackLog, OutcomeCalibrator
+from .feedback import FeedbackLog, OutcomeCalibrator, OutcomeMemory
 from .media import MEDIA_DIR, MediaEncoder, MediaRequest, OnDemand, with_media
 from .model import SERVE_MAX_BRANCH, SERVE_MAX_STATE, layout
 
@@ -43,6 +45,7 @@ PREFIX_MAX_TOKENS = int(os.environ.get("D1A_PREFIX_MAX_TOKENS", "65536"))  # sta
 DATE_FACTS = os.environ.get("D1A_DATE_FACTS", "0") == "1"
 FEEDBACK_LOG = os.environ.get("D1A_FEEDBACK_LOG")                         # set = log every decision (d1a.feedback) and accept outcomes at POST /v1/feedback
 OUTCOME_CALIBRATOR = os.environ.get("D1A_OUTCOME_CALIBRATOR")             # set = apply this d1a.feedback calibrator to yes/no and choice answers, reloaded when the file changes
+OUTCOME_MEMORY = os.environ.get("D1A_OUTCOME_MEMORY")                     # set = blend the choice questions d1a.feedback memory-fit promoted with their stored outcomes, reloaded when the file changes
 API_KEY = os.environ.get("D1A_API_KEY")                                  # unset = open server; set = require Authorization: Bearer <key>, as the TypeSafe clients always send
 MAX_BATCH = 64                                                           # requests the model thread takes at once (d1a.cuda_graphs splits them to fit its buffers)
 KEEP_ALIVE_S = 75                                                        # idle keep-alive; above Node's pooled-socket reuse window, so a proxy (the playground's Next.js rewrite) never reuses a socket uvicorn just closed (ECONNRESET, #42); uvicorn's default is 5
@@ -118,6 +121,10 @@ class Server:
         self.thread.start()
         atexit.register(self.close)   # a daemon thread killed inside a CUDA call at interpreter exit aborts the process
         self.media, self.media_lock = None, threading.Lock()
+        # the pointer head's query of every question, for the decision log's sidecar and the outcome memory; without
+        # either, nothing is installed and scoring runs exactly as it always did
+        head = getattr(self.model, "head", None)
+        self.tap = QueryTap(head) if head is not None and (LEARNING.log is not None or LEARNING.memory_path) else None
 
     def close(self):
         """Stop the model thread after its current batch; requests still queued fail, and so do later ones (submit)."""
@@ -175,6 +182,7 @@ class Server:
         sync(self.device); t = time.time()
         for retry in (False, True):
             keys, cached, keep = self.prefix_cache.plan(encs)
+            if self.tap is not None: self.tap.calls.clear()
             try: ps, prefixes = self.model.probs_batch(encs, cached, keep); break
             except Exception as e:
                 if retry or not self.prefix_cache.entries or not out_of_memory(e): raise
@@ -184,8 +192,11 @@ class Server:
         self.batch_ms.append(dt)
         self.prefix_cache.store(keys, cached, prefixes)
         self.batches += 1; self.batched_requests += len(encs)
-        return [([q.tolist() for q in p], {"tokens": len(enc["ids"]), "state_tokens": enc["seg"].count(0), "latency_ms": dt, "prefix_cache_hit": c is not None})
-                for enc, p, c in zip(encs, ps, cached)]
+        out = [([q.tolist() for q in p], {"tokens": len(enc["ids"]), "state_tokens": enc["seg"].count(0), "latency_ms": dt, "prefix_cache_hit": c is not None})
+               for enc, p, c in zip(encs, ps, cached)]
+        if self.tap is not None:
+            for p, m in out: m["queries"] = self.tap.match(p)
+        return out
 
     def wait_idle(self):
         """Block until every submitted request is answered and no CUDA graph waits to be captured (benchmarks, warm-up)."""
@@ -231,19 +242,54 @@ class Server:
         return self._body(req, meta, *await asyncio.wrap_future(self.submit(rec, media)))
 
     def _body(self, req, meta, ps, m):
-        answers, did = LEARNING.decide(req, to_answers(ps, meta), self.checkpoint.requested)
+        queries = {info["id"]: q for info, q in zip(meta, m["queries"]) if q is not None} if m.get("queries") else None
+        answers, did = LEARNING.decide(req, to_answers(ps, meta), self.checkpoint.requested, queries)
         body = {"model": req.model, "answers": answers, "usage": {"input_tokens": m["tokens"], "output_tokens": output_tokens(self.tok, answers)}, "latency_ms": m["latency_ms"]}
         if did is not None: body["decision_id"] = did
         return body
 
 
-class Learning:
-    """Self-learning hooks: the decision log and the outcome calibrator. The calibrator is re-read when its file changes, so
-    `python -m d1a.feedback calibrate <log> --out <file>` takes effect on the next request without a restart."""
+class QueryTap:
+    """Installed on a PointerHead, records each call's query q(h_decide) beside the probabilities its logits give, so a
+    question's query can be found by its answer (match): model.probs_batch's paths call the head in no fixed order. The
+    head's results are untouched; a question whose answer matches no call, or calls with different queries, gets None."""
 
-    def __init__(self, log_path=None, calibrator_path=None):
+    def __init__(self, head):
+        self.head, self.calls, self._forward, self._many = head, [], head.forward, head.many
+        head.forward, head.many = self.forward, self.many
+
+    def _record(self, q, z):
+        self.calls.append((q.detach().float().cpu().numpy(), torch.softmax(z.detach().float(), -1).cpu().numpy()))
+
+    def forward(self, h_decide, h_opts):
+        z = self._forward(h_decide, h_opts)
+        self._record(self.head.q(h_decide), z)
+        return z
+
+    def many(self, h_decide, h_opts, owner):
+        z = self._many(h_decide, h_opts, owner)
+        q = self.head.q(h_decide)
+        for j in range(q.shape[0]): self._record(q[j], z[owner == j])
+        return z
+
+    def match(self, probs, tol=1e-5):
+        out = []
+        for p in probs:
+            p = np.asarray(p, np.float32)
+            hits = [q for q, c in self.calls if c.shape == p.shape and np.abs(c - p).max() <= tol]
+            out.append(hits[0] if hits and all(np.allclose(h, hits[0], atol=1e-6) for h in hits) else None)
+        return out
+
+
+class Learning:
+    """Self-learning hooks: the decision log (with its query sidecar), the outcome calibrator and the outcome memory. The
+    calibrator and the memory are re-read when their files change, so `python -m d1a.feedback promote` or `memory-fit`
+    takes effect on the next request without a restart."""
+
+    def __init__(self, log_path=None, calibrator_path=None, memory_path=None):
         self.log = FeedbackLog(log_path) if log_path else None
         self.calibrator_path, self._mtime, self._cal, self._lock = calibrator_path, None, None, threading.Lock()
+        self.memory_path, self._mem_mtime, self._mem = memory_path, None, None
 
     def calibrator(self):
         if not self.calibrator_path: return None
@@ -253,14 +299,27 @@ class Learning:
             if mtime != self._mtime: self._cal, self._mtime = OutcomeCalibrator.load(self.calibrator_path), mtime
             return self._cal
 
-    def decide(self, req, answers, run):
-        """Answers as served (recalibrated when a calibrator is set), and the decision id when logging is on. The log keeps the
-        model's own answers, which the next `d1a.feedback calibrate` must fit; what was served is kept beside them in meta."""
+    def memory(self):
+        if not self.memory_path: return None
+        try: mtime = os.path.getmtime(self.memory_path)
+        except OSError: return self._mem
+        with self._lock:
+            if mtime != self._mem_mtime: self._mem, self._mem_mtime = OutcomeMemory.load(self.memory_path), mtime
+            return self._mem
+
+    def decide(self, req, answers, run, queries=None):
+        """Answers as served (recalibrated when a calibrator is set; a question the outcome memory holds is blended from its
+        raw answer instead), and the decision id when logging is on. The log keeps the model's own answers, which the next
+        fit must use; what was served is kept beside them in meta, and the questions' queries in the sidecar."""
         cal = self.calibrator()
         served = cal.apply(answers) if cal is not None else answers
+        mem = self.memory()
+        if mem is not None and queries: served = mem.apply(answers, served, queries)
         if self.log is None: return served, None
         questions = {qid: q.model_dump(exclude_none=True) for qid, q in req.questions.items()}
-        with self._lock: did = self.log.decision(req.state, questions, answers, run=run, meta={"served": served} if served is not answers else None)
+        with self._lock:
+            did = self.log.decision(req.state, questions, answers, run=run, meta={"served": served} if served is not answers else None)
+            if queries: self.log.queries(did, queries)
         return served, did
 
     def outcome(self, did, labels, meta=None):
@@ -268,10 +327,14 @@ class Learning:
 
     def card(self):
         cal = self.calibrator()
-        return {"log": self.log is not None, "outcome_calibrator": self.calibrator_path, "calibrated_questions": sorted(cal.params) if cal else []}
+        out = {"log": self.log is not None, "outcome_calibrator": self.calibrator_path, "calibrated_questions": sorted(cal.params) if cal else []}
+        if self.memory_path:
+            mem = self.memory()
+            out |= {"outcome_memory": self.memory_path, "memory_questions": sorted(mem.params) if mem else []}
+        return out
 
 
-LEARNING = Learning(FEEDBACK_LOG, OUTCOME_CALIBRATOR)
+LEARNING = Learning(FEEDBACK_LOG, OUTCOME_CALIBRATOR, OUTCOME_MEMORY)
 
 
 def latency_summary(ms):
