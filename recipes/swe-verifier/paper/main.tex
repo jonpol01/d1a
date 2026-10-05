@@ -7,11 +7,10 @@
 \usepackage{xcolor}
 \usepackage{enumitem}
 \setlist{nosep,leftmargin=*}
-\newcommand{\todo}[1]{\textcolor{red}{[TODO: #1]}}
 \newcommand{\pending}[1]{\textcolor{orange}{[pending: #1]}}
 
-\title{A Small, Calibrated Verifier That Learns From Outcomes:\\
-Judging Coding-Agent Runs Locally with Gemma~4, and the Split Leakage That Inflates Verifier Results}
+\title{A Small Verifier That Learns From Outcomes:\\
+\large Judging coding-agent runs locally with Gemma~4, and separating issue difficulty from run quality}
 \author{John Soliva\\\small D1A project, \url{https://github.com/jonpol01/d1a}}
 \date{DRAFT --- \today}
 
@@ -19,150 +18,145 @@ Judging Coding-Agent Runs Locally with Gemma~4, and the Split Leakage That Infla
 \maketitle
 
 \begin{abstract}
-A coding agent cannot see the hidden tests that decide whether its patch resolves an issue, so it must guess when it is done.
-We study a small verifier that runs locally and gives that guess a calibrated probability:
-D1A-E4B, Gemma~4 E4B with a LoRA adapter and a pointer head. It reads the issue, the agent's final patch and the end of its run,
-and answers ``does this patch resolve the issue?'' in one forward pass (median 1.5\,s on a laptop).
-On 921 public SWE-agent runs from 83 repositories it never saw, the trained verifier reaches AUROC 0.807
-(calibration error 0.039), and adding it to cheap trajectory heuristics raises AUROC from 0.768 to 0.819
-(+0.051, 95\% CI $[+0.002, +0.101]$, bootstrap over repositories).
-Two findings shape how such verifiers should be built and evaluated.
-First, \emph{split leakage}: runs of the same issue share most of their outcome, so a verifier evaluated with runs of one issue on both sides
-of the split can score well by recognising the issue rather than judging the run.
-In a first shard of 6{,}670 runs, a text verifier reaches AUROC 0.96 under a random split of runs but 0.70 on unseen repositories, and ranks runs \emph{within} an issue no better than chance \pending{full 80k-run numbers}.
-Second, \emph{learning from outcomes needs a gate}: in a loop that recalibrates and retrains on outcomes as they arrive,
-recalibration alone halved the calibration error on unseen repositories, while the first retrained candidate was worse and was rejected by a
-statistical promotion gate \pending{rounds 2--3}.
-All data is public, and all code is open.
+A coding agent cannot see the hidden tests that decide whether its patch resolves an issue. A verifier that estimates
+$P(\text{resolved})$ can pick among several runs, filter runs for training, and learn from outcomes as they arrive.
+We study a small one: D1A-E4B (Gemma~4 E4B, a LoRA adapter and a pointer head), which reads the issue, the agent's patch and the end of its run,
+and answers in one forward pass in a median 1.5\,s on a laptop.
+Our central observation is that the usual metric hides what matters. On 921 public agent runs from 83 unseen repositories,
+\emph{knowing how other runs of the same issue fared} already scores AUROC 0.958, so global AUROC mostly measures issue difficulty.
+Ranking runs \emph{of the same issue} (within-issue AUROC), cheap trajectory heuristics are near chance (0.536), while D1A reaches
+0.617 zero-shot and 0.661 after a 2.5-hour LoRA on a laptop.
+The same confound inflates learned verifiers evaluated on random splits of runs: in a first sample of 2{,}788 runs, a text verifier scores AUROC 0.96
+under a random split, 0.70 on unseen repositories, and 0.50 within issues.
+Finally, D1A learns from outcomes through a loop that recalibrates, retrains and promotes a candidate only through a statistical gate;
+in the first round, recalibration halved the calibration error and the gate rejected a worse retrained candidate \pending{rounds 2--3}.
+All data is public and all code is open.
 \end{abstract}
 
 \section{Introduction}
-LLM coding agents edit repositories in long runs of tool calls and then submit a patch. At submission time the agent does not know
-whether the hidden tests will pass. A verifier that estimates $P(\text{resolved})$ supports three decisions:
-whether to submit or keep working, which of several runs to submit, and which runs to keep as training data.
-Each decision needs the probability to mean what it says, not only to rank runs, and in many settings the verifier must be cheap and local.
+LLM coding agents edit repositories in long runs of tool calls and then submit a patch, without knowing whether the hidden tests will pass.
+This is the setting of the Gemma~4 Developer Agent challenge, where an agent runs offline on a fixed Gemma~4 model under a time budget per task:
+a small verifier on the same hardware is what such an agent can afford to consult.
+A verifier's value lies in decisions \emph{about a given issue}: which of several runs to submit, which runs to keep as training data, when to try again.
+These decisions compare runs of the same issue, yet verifiers are usually evaluated by global AUROC over runs of many issues, which also rewards
+recognising which issues are easy.
 
-This is the setting of the Gemma~4 Developer Agent challenge, where an agent runs offline on a fixed Gemma~4 model and is scored by hidden tests
-it never sees, under a time budget per task: a small verifier on the same hardware is what such an agent can afford to ask.
-Verifiers for coding agents already exist (Section~\ref{sec:related}); we do not claim a new kind of verifier. Our contributions are narrower:
+Verifiers for coding agents already exist (Section~\ref{sec:related}); we do not claim a new kind of verifier. Our contributions are:
 \begin{enumerate}
-\item \textbf{A small, local, calibrated verifier, evaluated on unseen repositories.} We report calibration (ECE, reliability, risk--coverage) next to ranking,
-all held out by repository, for a 4B-class model that answers in one forward pass on a laptop (Section~\ref{sec:verifier}).
-\item \textbf{A measurement of split leakage in verifier evaluation.} On the same runs, we compare random-run, by-issue and by-repository splits, and report
-the AUROC inflation and the within-issue AUROC that best-of-$k$ selection actually depends on (Section~\ref{sec:leakage}).
-\item \textbf{An outcome feedback loop with a statistical promotion gate}, released as a library (\texttt{d1a.feedback}), and its first measured
-rounds (Section~\ref{sec:loop}).
+\item \textbf{Separating issue difficulty from run quality.} On held-out repositories, an issue prior alone reaches global AUROC 0.958. We report
+within-issue AUROC next to global AUROC for every verifier, and show that cheap heuristics rank runs of one issue near chance while a small
+decision model does not (Section~\ref{sec:verifier}).
+\item \textbf{Split leakage, measured.} On the same runs, random-run splits let a learned verifier score by recognising issues; grouping by issue removes
+the inflation (Section~\ref{sec:leakage}).
+\item \textbf{A local verifier that learns from outcomes}, with a statistical promotion gate, released as a library (\texttt{d1a.feedback})
+(Section~\ref{sec:loop}).
 \end{enumerate}
 
 \section{Related Work}\label{sec:related}
 \paragraph{Verifiers for software-engineering agents.} SWE-Gym trains verifiers on agent trajectories and uses them for inference-time scaling, selecting
 among sampled trajectories~\cite{swegym}. SWE-RM is a 30B execution-free reward model that treats classification accuracy and calibration as crucial for
-reinforcement learning~\cite{swerm}. Agentic Rubrics derive contextual rubrics as a verification signal~\cite{rubrics}. Compared with these, our verifier is
-small enough to run on a laptop and is evaluated for calibration on repositories it never saw.
+reinforcement learning~\cite{swerm}. Agentic Rubrics derive contextual rubrics as a verification signal~\cite{rubrics}. Our verifier is small enough to run on a
+laptop, and we evaluate it on repositories it never saw, separating issue difficulty from run quality.
 
 \paragraph{Early failure prediction.} FailFast-RestartSmart trains a 0.6B monitor on trajectory prefixes and restarts runs predicted to fail~\cite{failfast};
-EarlyEval predicts outcomes early with gradient-boosted classifiers to stop runs and save evaluation cost~\cite{earlyeval}. Our anytime experiment is a weaker
-instance of the same idea and is reported as a contrast.
+EarlyEval predicts outcomes early with gradient-boosted classifiers~\cite{earlyeval}. Our anytime experiment is a weaker instance of this idea and is
+reported as a contrast.
 
 \paragraph{Self-improvement with gates.} Audited skill-graph self-improvement promotes a candidate only after verifier-backed replay~\cite{asgsi}, and
 self-authored verification is shown to be unreliable, motivating an external acceptance gate~\cite{seal}. Verification also has to keep up with the policy it
-judges~\cite{horizon}. Our promotion gate is external in the same sense but is driven by real outcomes and decides with a bootstrap interval over repositories.
+judges~\cite{horizon}. Our gate is external in the same sense, driven by real outcomes, and decides with a bootstrap interval over repositories.
 
 \section{The Verifier}\label{sec:verifier}
 \paragraph{Model.} D1A~\cite{d1a} is a decision model built on Kev~\cite{kev}: a causal LM backbone with a LoRA adapter runs one prefill over a document and
-typed questions under a block-causal mask, and a pointer head scores each option against the question's decision token. The backbone here is
-Gemma~4 E4B. D1A-E4B v0.4, released before this work, was trained on general decisions and pull-request labelling, never on agent runs.
+typed questions under a block-causal mask, and a pointer head scores each option against the question's decision token. The backbone is Gemma~4 E4B.
+D1A-E4B v0.4, released before this work, was trained on general decisions and pull-request labelling, never on agent runs.
 
-\paragraph{Input and question.} The document holds the issue (up to 3{,}000 characters), the agent's final patch (up to 6{,}000) and the last steps
-of its run (up to 3{,}000; each step up to 800). The question is a yes/no: ``does the patch correctly fix the issue, so that the repository's tests
-for it would pass?''. Inputs are 1.5k tokens at the median and 5.5k at most.
+\paragraph{Input.} The document holds the issue (up to 3{,}000 characters), the agent's final patch (up to 6{,}000) and the last steps of its run
+(up to 3{,}000; each step up to 800). The question asks whether the patch correctly fixes the issue, so that the repository's tests for it would pass.
+Inputs are 1.5k tokens at the median and 5.5k at most.
 
-\paragraph{Data.} We use nebius/SWE-agent-trajectories (CC-BY-4.0): 80{,}036 SWE-agent runs on 3{,}591 issues, each with \texttt{target}
-(resolved by the hidden tests), the trajectory and the patch. The test logs are never read. Repositories are assigned to train (70\%), dev (10\%) and test (20\%)
-by a hash of the name, so no repository is in two splits. Training uses 2{,}000 runs from 377 repositories (at most four per issue);
-dev holds 1{,}142 runs (8 per issue) from 56 repositories; test holds 921 runs (8 per issue) from 83 repositories, 12.4\% resolved.
+\paragraph{Data.} nebius/SWE-agent-trajectories (CC-BY-4.0) holds 80{,}036 SWE-agent runs on 3{,}591 issues, each with \texttt{target}
+(resolved by the hidden tests), the trajectory and the patch; the test logs are never read. Repositories are assigned to train (70\%), dev (10\%) and test (20\%)
+by a hash of the name. We prepared 2{,}000 training runs from 377 repositories (at most four per issue, successes first); dev holds 1{,}142 runs and test
+921 runs from 83 repositories (up to 8 per issue; 12.4\% resolved; 23 of 123 test issues have both outcomes).
 
-\paragraph{Training and calibration.} One LoRA run continues D1A-E4B v0.4 for 100 optimizer steps of 8 runs (800 runs, learning rate $5\cdot10^{-5}$),
-2.5\,h on an Apple M1 Max at no cost. Calibration (Platt scaling on the logit) is fitted on dev only. The heuristics baseline is a logistic regression
-over six trajectory features (patch size, a clean ``submitted'' exit, number of steps, error observations, printed success, test-file edits),
-fitted on training-split runs only.
-
-\paragraph{Results on unseen repositories.} Table~\ref{tab:verifier}. Zero-shot, D1A ranks reasonably but is badly overconfident; after training it ranks
-better than the heuristics and is nearly calibrated before any recalibration.
+\paragraph{Training and calibration.} One LoRA run continues D1A-E4B v0.4 for 100 optimizer steps of 8 runs (800 of the prepared runs; learning rate
+$5\cdot10^{-5}$), 2.5\,h on an Apple M1 Max at no cost. Platt scaling on the logit is fitted on dev only. The heuristics baseline is a logistic regression over six
+trajectory features (patch size, a clean ``submitted'' exit, number of steps, error observations, printed success, test-file edits), fitted on training-split runs.
+The ``+ heuristics'' combinations refit the heuristic weights jointly with D1A's logit on dev; refitting the heuristics alone on dev does not improve them.
 
 \begin{table}[h]\centering\small
-\begin{tabular}{lccc}\toprule
-& AUROC & ECE & Brier \\\midrule
-Heuristics (logistic regression) & 0.768 & 0.019 & 0.100 \\
-D1A-E4B v0.4 zero-shot, raw & 0.742 & 0.632 & 0.514 \\
-\quad recalibrated on dev & 0.742 & 0.043 & 0.103 \\
-\quad + heuristics & 0.765 & 0.047 & 0.101 \\
-D1A-E4B + verifier LoRA (r1), raw & 0.807 & 0.058 & 0.098 \\
-\quad recalibrated on dev & 0.807 & 0.039 & 0.097 \\
-\quad + heuristics & \textbf{0.819} & 0.037 & \textbf{0.094} \\\bottomrule
+\begin{tabular}{lcccc}\toprule
+& AUROC & within-issue AUROC & ECE & Brier \\\midrule
+Issue prior (other runs of the same issue) & 0.958 & -- & -- & -- \\\midrule
+Heuristics (logistic regression) & 0.768 & 0.536 & 0.019 & 0.100 \\
+D1A-E4B v0.4 zero-shot, recalibrated & 0.742 & 0.617 & 0.043 & 0.103 \\
+D1A-E4B + verifier LoRA (r1), recalibrated & 0.807 & 0.661 & 0.039 & 0.097 \\
+\quad + heuristics & \textbf{0.819} & \textbf{0.667} & 0.037 & \textbf{0.094} \\\bottomrule
 \end{tabular}
-\caption{Verifier quality on 921 runs from 83 repositories unseen in training (12.4\% resolved; base-rate Brier 0.108).
-AUROC differences against the heuristics, 95\% CI from a bootstrap over repositories: r1 $+0.039\,[-0.030, +0.109]$; heuristics + r1
-$+0.051\,[+0.002, +0.101]$; heuristics + zero-shot $-0.003\,[-0.043, +0.040]$.}\label{tab:verifier}
+\caption{921 test runs from 83 repositories unseen in training (base-rate Brier 0.108). Within-issue AUROC averages over the 23 issues with both outcomes.
+The issue prior is a reference, not a usable verifier: it needs other runs of the same issue with known outcomes.
+Global AUROC differences against the heuristics (95\% CI, bootstrap over repositories): r1 $+0.039\,[-0.030, +0.109]$, heuristics + r1
+$+0.051\,[+0.002, +0.101]$. Zero-shot D1A before recalibration: ECE 0.632.}\label{tab:verifier}
 \end{table}
 
-\paragraph{A gain that did not replicate.} Under 5-fold cross-validation grouped by repository on a separate random sample of 600 runs, zero-shot D1A
-appeared to add $+0.069$ AUROC to the heuristics (95\% CI $[+0.020, +0.114]$). On the fixed test split it added nothing ($-0.003$). Both evaluations
-were grouped by repository, so this is not leakage but a gain that did not survive a second sample; we report it as a caution.
+\paragraph{Issue difficulty dominates global AUROC.} Most issues are resolved by all or none of their runs, so a scorer that recognises the issue ranks runs
+well globally without judging any run. Within issues the picture changes (Table~\ref{tab:verifier}): the heuristics fall to near chance (0.536), while D1A keeps
+real discrimination zero-shot (0.617) and more after training (0.661). With only 23 mixed issues these within-issue estimates are noisy
+\pending{intervals; Gemma-4-agent repeats will add tasks with mixed outcomes}.
 
-\paragraph{What the probability is good for.}
-\begin{itemize}
-\item \emph{Training-data filtering.} Keeping the 10\% of test runs that the verifier trusts most gives 40.2\% truly resolved runs (37 runs), against
-22.8\% for the heuristics (21), 19.6\% for the agent's own clean ``submitted'' exit and 15.2\% at random. At 20\% and 30\% yield, heuristics + r1 keeps
-32.6\% and 31.2\% resolved runs against 29.9\% and 27.5\% for the heuristics.
-\item \emph{Best-of-$k$.} Picking one of 8 recorded runs per issue (97 issues), heuristics + r1 submits a resolving run 19.6\% of the time, against
-13.4\% for the heuristics, 14.7\% at random and 26.8\% for an oracle: $+0.062\,[0.000, +0.124]$ over the heuristics (bootstrap over issues).
-At $k=2$ and $k=4$ the gains ($+0.009$, $+0.018$) are not significant.
-\item \emph{Latency.} Median 1.48\,s and p95 2.79\,s per run (MLX, 8-bit, M1 Max).
-\end{itemize}
+\paragraph{Picking one of several runs.} Picking one of 8 recorded runs per issue (97 issues, 23 with mixed outcomes; bootstrap over issues), compared with a random pick
+(14.7\% resolved): zero-shot D1A $+5.9$ points $[+2.2, +10.2]$, heuristics + r1 $+4.9\,[+0.5, +9.3]$, r1 alone $+2.8\,[-1.0, +6.6]$, heuristics
+$-1.3\,[-5.0, +2.7]$; an oracle reaches 26.8\%. At $k=2$ and $k=4$ the gains are smaller and not significant. Training did not improve selection over the
+zero-shot model here.
 
-\paragraph{Anytime verification is weak here.} Scoring an unfinished run at its tenth action (patch absent, final exit hidden), trajectory heuristics are at chance
-(AUROC 0.40), while zero-shot D1A carries signal (0.66; $+0.26\,[+0.08, +0.44]$ over the heuristics). Replaying stop-and-restart policies on recorded runs under an
-action budget, the verifier gains at most 1.3 points (12.8\% vs 11.5\% for never stopping at a 90-action budget; oracle 15.9\%). FailFast-RestartSmart reports
-much larger gains with a dedicated 0.6B prefix monitor~\cite{failfast}; our verifier, trained only on finished runs, is not a substitute for one.
+\paragraph{Filtering training data.} Keeping the 10\% of test runs that r1 trusts most gives 40.2\% truly resolved runs (37), against 22.8\% for the
+heuristics (21), 19.6\% for the agent's own clean exit and 15.2\% at random.
 
-\section{Split Leakage in Verifier Evaluation}\label{sec:leakage}
-Agent runs of the same issue share most of their outcome: some issues are resolved by nearly every run, others by none. A learned verifier evaluated
-with runs of one issue in both training and test can therefore score well by recognising the issue. We measure this directly on the same runs under three
-5-fold protocols: random runs, grouped by issue, and grouped by repository. Four verifiers are refitted per fold: an \emph{issue prior} (the resolved rate
-of the same issue's training runs; pure leakage by construction), the heuristics, a TF-IDF model of the issue and patch text, and both together.
-Besides global AUROC we report \emph{within-issue AUROC}, the ranking of runs of the same issue against each other, which is what best-of-$k$ selection
-uses and what an issue prior cannot improve.
+\paragraph{Calibration, honestly.} After recalibration all scorers are reasonably calibrated, and the heuristics are best (ECE 0.019). No scorer is
+confident enough to decide ``submit or keep working'' on its own: the highest precision any threshold reaches with at least 10 runs submitted is 41\% for r1
+(9.0\% of runs) and 65\% for heuristics + r1 (1.8\% of runs). We therefore recommend the probability for comparing runs and filtering data, not as a
+stand-alone stop signal.
+
+\paragraph{Anytime verification is weak.} Scoring an unfinished run at its tenth action (patch absent, final exit hidden), the heuristics fall below chance
+(AUROC 0.40) and zero-shot D1A reaches 0.66, which is $+0.16$ over chance. Replaying stop-and-restart policies on recorded runs under an action budget, the
+verifier gains at most 1.3 points (12.8\% vs 11.5\% for never stopping at a 90-action budget; oracle 15.9\%), far less than FailFast-RestartSmart reports
+with a dedicated prefix monitor~\cite{failfast}.
+
+\paragraph{Latency.} Median 1.48\,s and p95 2.79\,s per run (MLX, 8-bit, M1 Max).
+
+\section{Split Leakage}\label{sec:leakage}
+The issue-difficulty confound also inflates learned verifiers when runs of one issue fall on both sides of a split. We measure this on the same runs under three
+5-fold protocols (random runs; grouped by issue; grouped by repository) with four verifiers refitted per fold: an issue prior from the training folds (pure
+leakage by construction), the heuristics, a TF-IDF model of the issue and patch text, and both together.
 
 \begin{table}[h]\centering\small
-\begin{tabular}{lccc}\toprule
-Verifier & random runs & by issue & by repository \\\midrule
-Issue prior & 0.95 & 0.42 & 0.42 \\
-Heuristics & 0.75 & 0.72 & 0.72 \\
-Text (TF-IDF) & 0.96 & 0.71 & 0.70 \\
-Heuristics + text & 0.95 & 0.76 & 0.76 \\\bottomrule
+\begin{tabular}{lcccc}\toprule
+Verifier & random runs & by issue & by repository & within-issue, random runs \\\midrule
+Issue prior & 0.951 & 0.415 & 0.419 & -- \\
+Heuristics & 0.745 & 0.720 & 0.717 & 0.631 \\
+Text (TF-IDF) & 0.961 & 0.713 & 0.702 & 0.495 \\
+Heuristics + text & 0.950 & 0.756 & 0.756 & 0.547 \\\bottomrule
 \end{tabular}
-\caption{Global AUROC of out-of-fold predictions under three splits of the same runs. \pending{replace with the 80{,}036-run result; these are from one
-shard, 6{,}670 runs on 307 issues.} Inflation over the by-repository split (95\% CI, bootstrap over repositories): issue prior $+0.53\,[+0.42, +0.64]$,
-text $+0.26\,[+0.20, +0.32]$, heuristics + text $+0.19\,[+0.15, +0.24]$, heuristics $+0.03\,[+0.01, +0.04]$; by-issue splits show none.}\label{tab:leakage}
+\caption{Global AUROC of out-of-fold predictions under three splits of the same 2{,}788 runs (307 issues, at most 10 runs each, from the first of 12 shards;
+\texttt{runs/swe-verifier/leakage-shard0/result.json}) \pending{full 80{,}036-run result}. Inflation over the by-repository split (95\% CI, bootstrap over
+repositories): issue prior $+0.53\,[+0.42, +0.64]$, text $+0.26\,[+0.20, +0.32]$, heuristics + text $+0.19\,[+0.15, +0.24]$, heuristics $+0.03\,[+0.01, +0.04]$;
+by-issue splits show none.}\label{tab:leakage}
 \end{table}
 
-Under a random split the text model's global AUROC is 0.96, yet its within-issue AUROC is 0.50: it has learned which issues are easy, not which runs are
-right. Grouping by issue removes the inflation; grouping by repository adds little beyond that in this data. \pending{confirm on the full set and on
-OpenHands and SWE-smith trajectories.}
+Under a random split the text model's global AUROC is 0.961, yet its within-issue AUROC is 0.495: it learned which issues are easy, not which runs are right.
+Grouping by issue removes the inflation, and grouping by repository adds little beyond that in this data. Evaluations of learned verifiers should group by issue
+at least, and report within-issue discrimination. We have not checked whether any published verifier result used a random split.
 
 \section{Learning From Outcomes}\label{sec:loop}
-D1A's decisions often get a ground truth later. \texttt{d1a.feedback} logs each decision with the model version that made it, records the outcome when it
-arrives, and improves the model in three steps, cheapest first:
-(1)~an \emph{outcome calibrator} refits each yes/no probability on the outcomes (Platt scaling~\cite{platt}, which also corrects a shifted base rate);
-(2)~a small LoRA update trains on the resolved decisions;
-(3)~a \emph{promotion gate} replaces the current model only if the candidate's held-out log loss is lower with a 95\% bootstrap interval (over repositories)
-entirely below zero and no frozen evaluation suite regressed by more than one point. This mirrors the external acceptance gates of~\cite{asgsi,seal}, here driven by
-real outcomes rather than self-authored tests.
+\texttt{d1a.feedback} logs each decision with the model version that made it, records the outcome when it arrives, and improves the model in three steps,
+cheapest first: (1) an outcome calibrator refits each yes/no probability on the outcomes (Platt scaling~\cite{platt}, which also corrects a shifted base rate);
+(2) a small LoRA update trains on the resolved decisions; (3) a promotion gate replaces the current model only if the candidate's held-out log loss is lower
+with a 95\% bootstrap interval over repositories entirely below zero, and no frozen evaluation suite regressed by more than one point.
 
-\paragraph{Rounds.} Starting from r1, batches of 300 unseen runs (train-split repositories of other shards) arrive with their outcomes. Each round, 80\% of the
-batch (by repository) becomes training records and 20\% a calibration slice; each model is recalibrated only on slices it never trained on; the gate decides on
-dev repositories; the served model is measured on test repositories.
+\paragraph{Rounds.} Starting from r1, batches of 300 unseen runs arrive with their outcomes. Each round, 80\% of the batch (by repository) becomes training
+records and 20\% a calibration slice; each model is recalibrated only on slices it never trained on; the gate decides on dev repositories; the served model is
+measured on test repositories.
 
 \begin{table}[h]\centering\small
 \begin{tabular}{lcccl}\toprule
@@ -172,17 +166,24 @@ Round & outcomes & test AUROC & test ECE & gate \\\midrule
 2 & 600 & \pending{} & \pending{} & \pending{} \\
 3 & 900 & \pending{} & \pending{} & \pending{} \\\bottomrule
 \end{tabular}
-\caption{The served verifier after each round on test repositories (four runs per issue). In round 1 recalibration alone halved the calibration error,
-while the retrained candidate was worse on dev and the gate kept the current model.}\label{tab:rounds}
+\caption{The served verifier after each round on test repositories (four runs per issue). Round 1: recalibration on 77 held-out outcomes halved the
+calibration error; the retrained candidate (30 steps on 223 records) was worse, and the gate kept the current model.}\label{tab:rounds}
 \end{table}
 
-\paragraph{Adapting to a new agent.} A verifier trained on one agent meets new agents as they appear, and a fixed reward function falls behind as the policy improves~\cite{horizon}. \pending{SWE-agent $\rightarrow$ OpenHands (\texttt{nebius/SWE-rebench-openhands-\allowbreak trajectories}): AUROC and ECE after
-$N \in \{25, 50, 100, 200, 400\}$ outcomes from the new agent, recalibration alone vs recalibration + LoRA, with gated promotion.}
+One rejected candidate does not show that retraining fails, only that the gate stops a worse model. \pending{candidates with other step counts and learning
+rates, so a rejection is not confounded with under-training.}
+
+\paragraph{Adapting to a new agent.} A verifier trained on one agent meets new agents as they appear, and a fixed reward function falls behind as the policy
+improves~\cite{horizon}. \pending{Gemma-4-31B agent runs from the challenge (repeated runs per task): within-issue AUROC and calibration after
+$N$ outcomes from the new agent, recalibration alone vs recalibration + LoRA, with gated promotion.}
 
 \section{Limitations}
-One agent family (SWE-agent with Llama models) and one public dataset carry the main results so far; the cross-agent study is pending. The challenge provides per-repository code graphs and embeddings; this verifier does not use them, because it judges a finished run from its issue, patch and trajectory, and in a separate study of ours a D1A localiser over the provided graphs did not beat BM25 at finding the code to change.
-The verifier sees truncated inputs (issue, patch, last steps). Test-split resolve rates are low (12.4\%), which widens intervals on best-of-$k$ and
-filtering numbers. The leakage table is preliminary. We report the zero-shot gain that did not replicate rather than only the one that did.
+One agent family (SWE-agent with Llama models) carries the results so far; the Gemma~4 agent study is pending. Only 23 test issues have mixed outcomes, so
+within-issue and best-of-$k$ estimates are noisy. The verifier sees truncated inputs. The challenge provides per-repository code graphs and embeddings; this
+verifier does not use them, because it judges a finished run from its issue, patch and trajectory, and in a separate study of ours a D1A localiser over the
+provided graphs did not beat BM25 at finding the code to change. Under 5-fold cross-validation on a separate sample of 600 runs, zero-shot D1A appeared to add
+$+0.069$ global AUROC to the heuristics; on the fixed test split it added nothing ($-0.003$). Both were grouped by repository, so this is a gain that did not
+replicate, not leakage.
 
 \section{Reproducibility}
 All code is in \url{https://github.com/jonpol01/d1a} (\texttt{recipes/swe-verifier}: \texttt{zero\_shot.py}, \texttt{to\_records.py}, \texttt{evaluate.py},
@@ -198,7 +199,7 @@ All code is in \url{https://github.com/jonpol01/d1a} (\texttt{recipes/swe-verifi
 \bibitem{earlyeval} Y.~Shi, Z.~Sun, J.~Dong, C.~Wan, D.~Lo, X.~Gu. EarlyEval: Cheaper Agent Evaluation via Early Outcome Prediction. arXiv:2609.02783, 2026.
 \bibitem{asgsi} K.~Huang, J.~Huang. Audited Skill-Graph Self-Improvement for Agentic LLMs via Verifiable Rewards, Experience Synthesis, and Continual Memory. arXiv:2512.23760, 2025.
 \bibitem{seal} D.~Guo, C.~Cao, F.~Yuan, Y.~Wang, Y.~Wang, D.~Wang. Self-Authored Verification Is Unreliable in Heuristic Self-Improving Agents. arXiv:2607.24300, 2026.
-\bibitem{horizon} B.~Wang et al. The Verification Horizon: No Silver Bullet for Coding Agent Rewards. arXiv:2606.26300, 2026.
+\bibitem{horizon} B.~Wang, C.~Zhang, D.~Liu, J.~Zhang, J.~Chen, M.~Li, M.~Chen, R.~Fang, S.~Zhang, X.~Wang, Y.~Jing, Z.~Ma, Z.~Cui. The Verification Horizon: No Silver Bullet for Coding Agent Rewards. arXiv:2606.26300, 2026.
 \bibitem{platt} J.~C.~Platt. Probabilistic Outputs for Support Vector Machines and Comparisons to Regularized Likelihood Methods. In \emph{Advances in Large Margin Classifiers}, MIT Press, 1999.
 \bibitem{kev} J.~Palmer. Kev. \url{https://github.com/jaredpalmer/kev} (Apache-2.0).
 \bibitem{d1a} J.~Soliva. D1A. \url{https://github.com/jonpol01/d1a} (Apache-2.0).

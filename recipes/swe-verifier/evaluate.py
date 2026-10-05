@@ -44,6 +44,21 @@ def risk_coverage(y, p, targets=(0.5, 0.6, 0.7, 0.8)):
     return rows
 
 
+def within_issue(y, p, issues):
+    """Mean AUROC over issues with both outcomes (runs of one issue ranked against each other), and how many issues."""
+    by = {}
+    for i, t in enumerate(issues): by.setdefault(t, []).append(i)
+    vals = [auroc(y[ix], p[ix]) for ix in map(np.array, by.values()) if 0 < y[ix].sum() < len(ix)]
+    return (float(np.mean(vals)) if vals else float("nan")), len(vals)
+
+
+def issue_prior_loo(y, issues):
+    """Each run scored by the resolved rate of the OTHER runs of its issue: how much of global AUROC issue difficulty alone explains."""
+    by = {}
+    for i, t in enumerate(issues): by.setdefault(t, []).append(i)
+    return np.array([(y[by[t]].sum() - y[i]) / (len(by[t]) - 1) if len(by[t]) > 1 else y.mean() for i, t in enumerate(issues)])
+
+
 def filter_purity(y, p, yields=(0.1, 0.2, 0.3)):
     """Rejection-sampling fine-tuning keeps the top share of runs by a score: per yield, the share of kept runs that
     truly resolved, and how many resolved runs were kept (ties broken by order)."""
@@ -75,8 +90,12 @@ def main():
         scores[f"{name} calibrated"] = platt.predict_proba(logit(pt)[:, None])[:, 1]
         scores[f"heuristics + {name}"] = combo.predict_proba(np.hstack([heuristic_features(rows), logit(pt)[:, None]]))[:, 1]
     print(f"test: {len(y)} runs, {y.sum()} resolved ({y.mean():.1%}), {len(set(groups))} repositories (none in train or dev); base-rate Brier {y.mean() * (1 - y.mean()):.3f}")
+    issues = np.array([r["instance_id"] for r in first])
     for name, p in scores.items():
-        e, b, _ = calibration(y, p); print(f"  {name:28s} AUROC {auroc(y, p):.3f}  ECE {e:.3f}  Brier {b:.3f}")
+        e, b, _ = calibration(y, p); w, nw = within_issue(y, p, issues)
+        print(f"  {name:28s} AUROC {auroc(y, p):.3f}  within-issue AUROC {w:.3f}  ECE {e:.3f}  Brier {b:.3f}")
+    print(f"  (within-issue AUROC over the {nw} issues with both outcomes; an issue prior from the other runs of each issue scores global AUROC "
+          f"{auroc(y, issue_prior_loo(y, issues)):.3f}: most of global AUROC is issue difficulty)")
     print("differences against the heuristics (95% CI, bootstrap over repositories):")
     for name, p in scores.items():
         if name == "heuristics (LR)": continue
@@ -85,6 +104,11 @@ def main():
     for name in [n for n in scores if n.endswith("calibrated") or n.startswith("heuristics")]:
         print(f"reliability {name}: {calibration(y, scores[name])[2]}")
         print(f"risk-coverage {name} (precision target, threshold, share submitted, resolved submitted): {risk_coverage(y, scores[name])}")
+    print("highest precision any threshold reaches (with at least 10 runs submitted):")
+    for name, p in scores.items():
+        order = np.argsort(-p); prec = np.cumsum(y[order]) / np.arange(1, len(y) + 1)
+        k = int(np.argmax(prec[9:])) + 10
+        print(f"  {name:28s} {prec[k - 1]:.3f} at {k / len(y):.1%} of runs submitted")
     print("fine-tuning data filter (yield kept, precision of kept runs, resolved runs kept):")
     filters = {"no filter (random)": np.random.default_rng(0).random(len(y)), "agent's clean submit": np.array([r["clean_submit"] for r in first], float)
                + 1e-3 * np.random.default_rng(1).random(len(y)), **scores}

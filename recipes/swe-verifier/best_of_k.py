@@ -57,6 +57,12 @@ def main():
         for name, v in per.items():
             b = np.sort([v[rng.integers(0, len(v), len(v))].mean() for _ in range(a.boot)])
             print(f"  {name:18s} resolve rate {v.mean():.3f}  [{b[int(0.025 * a.boot)]:.3f}, {b[int(0.975 * a.boot) - 1]:.3f}]")
+        mixed = sum(1 for iid in ids if 0 < y[issues[iid]].sum() < len(issues[iid]))
+        print(f"  ({mixed} of {len(ids)} issues have both outcomes; only those can change with the scorer)")
+        for name in [n for n in scorers if n != "random"]:
+            d = per[name] - per["random"]
+            b = np.sort([d[rng.integers(0, len(d), len(d))].mean() for _ in range(a.boot)])
+            print(f"  {name} - random: {d.mean():+.3f}  [{b[int(0.025 * a.boot)]:+.3f}, {b[int(0.975 * a.boot) - 1]:+.3f}]")
         for name in [n for n in scorers if n.startswith("p_")]:
             d = per[name] - per["heuristics (LR)"]
             b = np.sort([d[rng.integers(0, len(d), len(d))].mean() for _ in range(a.boot)])
