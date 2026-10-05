@@ -22,6 +22,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   through transformers. Ten mutation checks must fail: off-by-one readouts, a leaky question mask, the sliding window
   ignored, positions that do not restart, a dropped `<bos>`, temperature ignored, and three misread answer types (#33).
 
+### Changed
+
+- `d1a/benchmark.py` is rewritten in D1A's own code, no longer derived from Kev. Its rows, reports, the files it writes
+  (byte for byte), its failure and skip rules and its command line are unchanged: checked against the previous version
+  on about 34,000 generated cases and end to end on a frozen suite. Its tests are rewritten too, as
+  `tests/test_benchmark.py`.
+
 ### Removed
 
 - `python -m d1a.suite`, the suite freezer inherited from Kev, with `d1a/contrastive.py` and the record generator of
