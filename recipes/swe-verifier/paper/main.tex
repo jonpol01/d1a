@@ -188,8 +188,9 @@ and the gate kept the current model, so the served AUROC did not change.}\label{
 \end{table}
 
 Three rejections do not show that retraining cannot help, only that 30-step updates on a few hundred outcomes did not, and that the gate stops what is not
-clearly better. The gate's power is limited by the dev set (about 7\% resolved): only a sizable log-loss improvement can clear a 95\% interval. Larger outcome
-batches, several candidate settings per round, and a measured minimum detectable effect are the next steps.
+clearly better. The gate is not simply too strict: on the same dev set, with each model recalibrated out of fold, it would promote r1 over the zero-shot
+model (log loss $0.2385 \rightarrow 0.2143$, $-0.024\,[-0.058, -0.012]$), an improvement of the size full training gave. Larger outcome batches and several
+candidate settings per round are the next steps.
 
 \paragraph{Adapting to a new agent.} A verifier trained on one agent meets new agents as they appear, and a fixed reward function falls behind as the policy
 improves~\cite{horizon}. \pending{Gemma-4-31B agent runs from the challenge (repeated runs per task): within-issue AUROC and calibration after
