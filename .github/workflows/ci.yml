@@ -1,5 +1,5 @@
 # Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a; the removed research-round and skill tests left the unit-test list; the MLX export tests joined it; tests on Python 3.12 and 3.13 and on Apple Silicon (MLX), a lint pass, and a package build and install check.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a; the removed research-round and skill tests left the unit-test list; the MLX export tests joined it; tests on Python 3.12 and 3.13 and on Apple Silicon (MLX), a lint pass, and a package build and install check; the unit job runs every test file except tests/conftest.py's OUTSIDE_UNIT_TESTS (pytest tests --unit), and the Hugging Face cache is kept between runs.
 name: ci
 
 on:
@@ -13,10 +13,6 @@ permissions:
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
-
-env:
-  # Unit tests only: no model weights, no server. The tokenizer (~10 MB) is downloaded from the Hub.
-  UNIT_TESTS: tests/test_unit.py tests/test_system_one.py tests/test_metrics.py tests/test_benchmark.py tests/test_tiny_checkpoint.py tests/test_versions.py tests/test_feedback.py tests/test_research.py tests/test_conventions.py tests/test_frozen_suites.py tests/test_mlx_export.py
 
 jobs:
   python:
@@ -33,7 +29,15 @@ jobs:
           enable-cache: true
           python-version: ${{ matrix.python }}
       - run: uv sync --extra serve --extra media
-      - run: uv run python -m pytest $UNIT_TESTS -q
+      # the Hugging Face files the unit tests read (pinned tokenizers), kept on GitHub's cache between runs: faster, and a
+      # slow or unreachable Hub does not fail CI
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: huggingface-${{ runner.os }}-${{ hashFiles('tests/**/*.py') }}
+          restore-keys: huggingface-${{ runner.os }}-
+      # every test file except those tests/conftest.py's OUTSIDE_UNIT_TESTS lists (they need a server or real weights)
+      - run: uv run python -m pytest tests --unit -q
 
   apple-silicon:
     name: tests on Apple Silicon (MLX)
@@ -45,6 +49,13 @@ jobs:
         with:
           enable-cache: true
       - run: uv sync --extra serve --extra media --extra mlx
+      # the Hugging Face files the unit tests read (pinned tokenizers), kept on GitHub's cache between runs: faster, and a
+      # slow or unreachable Hub does not fail CI
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: huggingface-${{ runner.os }}-${{ hashFiles('tests/**/*.py') }}
+          restore-keys: huggingface-${{ runner.os }}-
       # MLX itself works on this runner (a virtual machine): fail in a few minutes instead of hanging the job
       - name: MLX smoke check
         timeout-minutes: 3

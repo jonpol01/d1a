@@ -18,7 +18,8 @@ the question's `<decide>` token. README.md is the user guide; docs/UPSTREAM.md r
 
 ## Commands
 - Env: `uv sync --extra serve` (Python 3.12 or 3.13).
-- Unit tests (no weights): the list in `.github/workflows/ci.yml`.
+- Unit tests (no weights): `uv run python -m pytest tests --unit -q`, every test file but `tests/conftest.py`'s `OUTSIDE_UNIT_TESTS`;
+  a new test file runs in CI without being listed anywhere.
 - License and provenance: `python scripts/check_license.py` (add `--skip-upstream` offline). See CONTRIBUTING.md.
 
 ## Rules

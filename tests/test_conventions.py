@@ -1,5 +1,5 @@
 # Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); dropped the published-claims check and the removed space/ app; modal_app.py left the scanned sources; the rules of the removed Kev research modules (experiment, rounds) left with them, and calibration's moved to d1a.calibrate; every test file runs in CI's UNIT_TESTS or is listed with the reason it does not.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); dropped the published-claims check and the removed space/ app; modal_app.py left the scanned sources; the rules of the removed Kev research modules (experiment, rounds) left with them, and calibration's moved to d1a.calibrate; CI runs every test file but tests/conftest.py's OUTSIDE_UNIT_TESTS (pytest tests --unit).
 """Source conventions: facts that have one canonical home must not be re-derived elsewhere.
 
 Each rule is (what it guards, regex, files allowed to match). A failure means a second copy of a rule that already has
@@ -82,35 +82,32 @@ def test_single_home(what, pattern, allowed):
     assert not offenders, f"{what}\n" + "\n".join(offenders)
 
 
-def test_release_runs_the_same_unit_tests_as_ci():
-    """release.yml runs ci.yml's UNIT_TESTS rather than its own copy of the list: a copy went stale when test files were removed
-    (#123) and failed the v0.3.0 release. Every file in UNIT_TESTS exists, release.yml names no test file itself, and
-    release.yml parses with its pytest step reading UNIT_TESTS."""
-    import re
-    ci = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
-    release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
-    listed = re.search(r"^ *UNIT_TESTS: *(.+)$", ci, re.M).group(1).split()
-    assert listed and all((ROOT / f).is_file() for f in listed), [f for f in listed if not (ROOT / f).is_file()]
-    assert not re.search(r"tests/test_\w+\.py", release)
-    # parsed, not grepped: an unquoted run: holding "UNIT_TESTS: " is not valid YAML, and Actions would reject the workflow
+def unit_runs(workflow, job):
+    """The pytest commands of one job of a workflow, parsed (an unquoted run: holding ": " is not valid YAML, and Actions
+    would reject the workflow)."""
     import yaml
-    runs = [s.get("run", "") for s in yaml.safe_load(release)["jobs"]["release"]["steps"]]
-    assert any("pytest" in r and "UNIT_TESTS" in r for r in runs), runs
+    steps = yaml.safe_load((ROOT / ".github/workflows" / workflow).read_text(encoding="utf-8"))["jobs"][job]["steps"]
+    return [step["run"] for step in steps if "pytest" in step.get("run", "")]
 
 
-# Test files CI's unit job does not run, and why. Every other tests/test_*.py must be in UNIT_TESTS.
-OUTSIDE_UNIT_TESTS = {
-    "tests/test_api.py": "needs a running d1a.serve (pytest -m server)",
-    "tests/test_model.py": "needs real weights and the smoke checkpoint",
-    "tests/test_mlx.py": "needs MLX and real weights; its weight-free tests run in the Apple Silicon job",
-}
-
-
-def test_every_test_file_runs_in_ci():
-    """A merge that resolves a UNIT_TESTS conflict by keeping one side drops the other side's new suite silently (#136: two
-    PRs each added a file to the same line); a file left out of UNIT_TESTS must be listed above with its reason."""
+def test_ci_and_the_release_run_every_test_file():
+    """CI's unit job and the release run `pytest tests --unit`: every test file except tests/conftest.py's
+    OUTSIDE_UNIT_TESTS, each listed with why. A list naming every file went stale when files were removed (#123, which
+    failed the v0.3.0 release) and made any two pull requests adding a test file conflict on its one line (#136, #138)."""
     import re
-    ci = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
-    listed = set(re.search(r"^ *UNIT_TESTS: *(.+)$", ci, re.M).group(1).split())
-    files = {str(f.relative_to(ROOT)) for f in (ROOT / "tests").glob("test_*.py")}
-    assert files - listed == set(OUTSIDE_UNIT_TESTS), sorted(files - listed - set(OUTSIDE_UNIT_TESTS))
+    from conftest import OUTSIDE_UNIT_TESTS
+    assert unit_runs("ci.yml", "python") == ["uv run python -m pytest tests --unit -q"]
+    assert unit_runs("release.yml", "release") == ["uv run python -m pytest tests --unit -q"]
+    for workflow in ("ci.yml", "release.yml"):
+        assert not re.search(r"(?<![A-Z_])UNIT_TESTS", (ROOT / ".github/workflows" / workflow).read_text(encoding="utf-8"))
+    assert all((ROOT / path).is_file() and reason for path, reason in OUTSIDE_UNIT_TESTS.items()), OUTSIDE_UNIT_TESTS
+
+
+def test_the_unit_run_skips_exactly_the_listed_files():
+    """--unit leaves out the OUTSIDE_UNIT_TESTS files and nothing else; without it, every file is collected."""
+    from types import SimpleNamespace
+    import conftest
+    skipped = lambda unit: {str(f.relative_to(ROOT)) for f in (ROOT / "tests").glob("test_*.py")
+                            if conftest.pytest_ignore_collect(f, SimpleNamespace(getoption=lambda name: unit))}
+    assert skipped(True) == set(conftest.OUTSIDE_UNIT_TESTS) and skipped(False) == set()
+    assert conftest.pytest_ignore_collect(ROOT / "tests", SimpleNamespace(getoption=lambda name: True)) is None
