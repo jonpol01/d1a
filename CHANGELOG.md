@@ -14,6 +14,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-05
+
+**D1A learns from outcomes.** Every decision can be logged with the model that made it; when the real outcome comes back
+(the tests passed, a maintainer corrected a label), D1A recalibrates on it at once and promotes a retrained model only
+through a statistical gate. Measured first on a coding-agent verifier: three rounds of 300 outcomes cut the calibration
+error from 0.068 to 0.017, and the gate kept the model each time retraining was not clearly better. This release also
+makes D1A more its own: Kev's playground, study harness, training-history suites and suite builders are gone (70% of the
+code is Kev-derived, from 77%), and Gemma 4 runs about a third faster on torch and 20–30% faster on Apple Silicon.
+
 ### Added
 
 - **`recipes/swe-verifier`: D1A as a verifier of coding-agent runs** (issue, patch and the end of the run → P(the patch resolves the
@@ -260,5 +269,6 @@ Checkpoints on Hugging Face, newest first. Each version continues training the p
 Retired, kept for reproducibility: JohnP1/d1a-e4b-routing and its MLX build (now part of v0.2), and
 JohnP1/d1a-e4b-pr-labeler-mlx-q8 (now v0.3).
 
-[Unreleased]: https://github.com/jonpol01/d1a/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/jonpol01/d1a/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/jonpol01/d1a/releases/tag/v0.3.0
 [0.2.0]: https://github.com/jonpol01/d1a/releases/tag/v0.2.0

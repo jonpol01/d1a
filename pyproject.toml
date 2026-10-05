@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "d1a"
-version = "0.2.0"
+version = "0.3.0"
 description = "D1A: a small decision model on Gemma 4 with a TypeSafe-compatible /v1/systemone API, built on Kev"
 readme = "README.md"
 license = "Apache-2.0"
