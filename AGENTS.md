@@ -34,10 +34,13 @@ John, 2026-10-06: every PR and every deploy is checked against the test suite, w
 stripped off, and new features come with their tests.
 - **Numbers in every PR body**, from the PR's own head:
   - the unit run and the golden vectors (`tests/test_conformance.py`);
-  - for a change to the model, loading or serving code: real-weight answers and interleaved latency
-    (`scripts/equivalence/real_weights.py --interleave`);
-  - the demo smoke test (`scripts/demo_smoke.mjs` in jonpol01/d1a-playground) and the labeler replay
-    (`runs/labeler-replay`).
+  - for a change to the model, loading or serving code, and before a playground pin move: **`scripts/quality_gate.py`**
+    (required; its table and PASS line go in the PR). It runs base and head on real weights, interleaved: every demo
+    example (`--playground <d1a-playground checkout>`) and the labeler replay (`runs/labeler-replay`, private, never
+    committed), with flips, max |dp| and latency against a base/base floor, plus frozen suites with `--suites`. For a
+    torch-only path, also `scripts/equivalence/real_weights.py --interleave`;
+  - after a pin move, the Mac mini's demo smoke test (`./mini.sh update` ends with `scripts/demo_smoke.mjs` in
+    jonpol01/d1a-playground).
 - **No downgrade.** The answers stay identical, or the PR shows they are better on held-out data. Accuracy and
   calibration never drop, and latency stays within run-to-run noise (measured interleaved, against main).
 - **No stripping.** No endpoint, demo, example, CLI flag or feature disappears silently. A removal updates a failing

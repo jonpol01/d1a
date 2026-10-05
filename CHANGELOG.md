@@ -37,6 +37,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   file names MLX exports already use. `d1a.train` and `d1a.calibrate` write it, and loading it unpickles nothing. A run
   that has both it and a `head.pt` must say the same in both, or loading stops and names the field. Runs saved before
   it (head.pt only) load as before, with no end date; published checkpoints are unchanged.
+- `scripts/quality_gate.py --base <ref> [--head <ref>]` (#156): the quality gate for model, loading and serving changes.
+  Two `d1a.serve` instances, one per version, on the same real weights answer every demo example (regenerated from a
+  d1a-playground checkout with `--playground`) and the labeler replay, alternating which goes first. A base/base run
+  measures the noise floor. It fails on a changed choice, a probability moving more than `--tol` (1e-6), a request only
+  one side answers, latency above the floor, or, with `--suites`, a frozen suite whose accuracy or calibration gets
+  worse; exit 1 on FAIL. AGENTS.md makes it the required step for model and serving PRs and playground pin moves.
 - `python -m d1a.feedback promote <log> --calibrator <file>` (#148): the promotion gate on a live decision log. Whole
   groups (an outcome's optional `group`, e.g. a pull request; `POST /v1/feedback` takes it) go to the fit or the
   held-out side. A calibrator fitted on the fit side replaces the served one for a question only if it passes the gate
