@@ -253,13 +253,14 @@ class Learning:
             return self._cal
 
     def decide(self, req, answers, run):
-        """Answers as served (recalibrated when a calibrator is set), and the decision id when logging is on."""
+        """Answers as served (recalibrated when a calibrator is set), and the decision id when logging is on. The log keeps the
+        model's own answers, which the next `d1a.feedback calibrate` must fit; what was served is kept beside them in meta."""
         cal = self.calibrator()
-        if cal is not None: answers = cal.apply(answers)
-        if self.log is None: return answers, None
+        served = cal.apply(answers) if cal is not None else answers
+        if self.log is None: return served, None
         questions = {qid: q.model_dump(exclude_none=True) for qid, q in req.questions.items()}
-        with self._lock: did = self.log.decision(req.state, questions, answers, run=run)
-        return answers, did
+        with self._lock: did = self.log.decision(req.state, questions, answers, run=run, meta={"served": served} if served is not answers else None)
+        return served, did
 
     def outcome(self, did, labels):
         with self._lock: self.log.outcome(did, labels)

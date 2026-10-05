@@ -1,7 +1,7 @@
 import numpy as np
 
 from d1a.data import materialize
-from d1a.feedback import FeedbackLog, OutcomeCalibrator, gate, log_loss, records
+from d1a.feedback import FeedbackLog, OutcomeCalibrator, gate, log_loss, pairs, records
 
 Q = {"resolved": {"type": "noul", "instr": "Does the patch fix the issue?", "criteria": {"true": "fixes it", "false": "does not"}}}
 
@@ -62,7 +62,15 @@ def test_serve_logs_decisions_accepts_outcomes_and_applies_a_reloaded_calibrator
         assert client.post("/v1/feedback", json={"decision_id": body["decision_id"], "labels": {"resolved": False}}).json() == {"ok": True}
     (d,) = serve.LEARNING.log.resolved()
     assert d["id"] == body["decision_id"] and d["labels"] == {"resolved": False} and d["run"] == "JohnP1/d1a-e4b-mlx-q8@v0.4"
-    assert d["answers"]["resolved"]["noul"] == expected and d["questions"]["resolved"]["type"] == "noul"
+    assert d["answers"]["resolved"]["noul"] == 0.8 and d["meta"]["served"]["resolved"]["noul"] == expected   # the model's P is logged, the served one beside it
+    assert d["questions"]["resolved"]["type"] == "noul"
+    for i in range(30):                                                        # recalibrating on the live log fits the model's P, not the served one
+        did = serve.Server._body(fake, req, meta, [[0.2, 0.8]], {"tokens": 10, "latency_ms": 1.0})["decision_id"]
+        serve.LEARNING.outcome(did, {"resolved": i < 6})
+    p_logged, y_logged = pairs(serve.LEARNING.log.resolved(), "resolved")
+    assert set(p_logged) == {0.8}
+    refit = OutcomeCalibrator().fit(serve.LEARNING.log.resolved(), min_outcomes=10)
+    assert abs(refit.p("resolved", 0.8) - y_logged.mean()) < 0.02            # applied to the raw P the next request gives, it lands on the outcome rate
     OutcomeCalibrator({"resolved": [1.0, 0.0, 50]}).save(cal_path)                 # a new calibrator, picked up without a restart
     os.utime(cal_path, (os.path.getmtime(cal_path) + 5,) * 2)
     again = serve.Server._body(fake, req, meta, [[0.2, 0.8]], {"tokens": 10, "latency_ms": 1.0})
