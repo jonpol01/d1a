@@ -84,7 +84,8 @@ def test_a_planted_overconfident_question_is_promoted(tmp_path):
     mem, report = memory_fit(res, vectors)
     r = report["route"]
     assert r["promote"] and r["lam"] > 0 and r["ci"][1] < 0, r
-    assert r["accuracy"]["memory"] > r["accuracy"]["temperature"]
+    assert r["accuracy"]["memory"] > r["accuracy"]["temperature"] == r["accuracy"]["raw"]   # a temperature never changes the choice
+    assert r["log_loss"]["memory"] < r["log_loss"]["temperature"] and r["flips"]["wrong_to_right"] > r["flips"]["right_to_wrong"]
     assert set(mem.params) == {"route"} and len(mem.params["route"]["bank"]) == 240
     raw = {"route": choice({"a": 0.9, "b": 0.1})}
     served = mem.apply(raw, raw, {"route": np.array([1.0, 0.0, 0.0], np.float32)})

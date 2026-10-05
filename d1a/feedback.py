@@ -389,10 +389,15 @@ def memory_fit(resolved, vectors, share=0.3, min_outcomes=20, grid=MEMORY_GRID, 
         labels = [r["label"] for r in test]
         cand, inc = prequential(test, rows, center, k, tau, lam), [_rescale(r["probs"], s) for r in test]
         g = gate_choice(labels, cand, inc, [r["group"] for r in test], **gate_kw)
-        acc = {"memory": _top1(cand, labels), "temperature": _top1(inc, labels)}
+        raw = [r["probs"] for r in test]
+        acc = {"raw": _top1(raw, labels), "temperature": _top1(inc, labels), "memory": _top1(cand, labels)}
+        ll = {name: float(choice_log_loss(ps, labels).mean()) for name, ps in (("raw", raw), ("temperature", inc), ("memory", cand))}
+        right = [(max(r, key=r.get) == y, max(c, key=c.get) == y) for r, c, y in zip(raw, cand, labels)]
+        flips = {"right_to_wrong": sum(a and not b for a, b in right), "wrong_to_right": sum(b and not a for a, b in right)}
         reasons = g["reasons"] + ([f"top-choice accuracy drops ({acc['temperature']:.3f} -> {acc['memory']:.3f})"] if acc["memory"] < acc["temperature"] else [])
         report[qid] = {"promote": not reasons and lam > 0, "fit": len(fit), "held_out": len(test), "k": k, "tau": tau, "lam": lam,
-                       "delta_log_loss": g["delta_log_loss"], "ci": g["ci"], "accuracy": acc, "reasons": reasons or ([] if lam > 0 else ["lam 0: memory adds nothing"])}
+                       "delta_log_loss": g["delta_log_loss"], "ci": g["ci"], "log_loss": ll, "accuracy": acc, "flips": flips,
+                       "reasons": reasons or ([] if lam > 0 else ["lam 0: memory adds nothing"])}
         if report[qid]["promote"]:
             params[qid] = {"k": k, "tau": tau, "lam": lam, "keys": list(rows[-1]["probs"]), "center": encode_vector(center),
                            "bank": [{"q": encode_vector(r["q"]), "label": r["label"], "outcome_ts": r["outcome_ts"]} for r in rows]}
