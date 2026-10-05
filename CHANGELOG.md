@@ -16,6 +16,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **README: Self-Learning.** A section on how D1A learns from outcomes (usage, CLI, the verifier's measured numbers), step 5 in How It Works, and an animated diagram of the loop (`docs/arch/learning-{light,dark}.svg` from `make_svgs.py`).
 - **`d1a.feedback`: learning from outcomes.** A `FeedbackLog` records each decision and, later, what actually happened
   (a patch passed its tests, a label was corrected); `OutcomeCalibrator` refits each yes/no question on those outcomes
   (Platt scaling on the logit, which also corrects a shifted base rate that one temperature cannot); `records()` turns
