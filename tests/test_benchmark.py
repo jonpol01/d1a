@@ -278,9 +278,31 @@ def test_identical_option_controls(tmp_path, monkeypatch):
         return {"probabilities": {"reason": {key: 1 / len(keys) for key in keys}}, "latency_ms": 1.0}
     report, _ = B.evaluate_records(records, predictor, tmp_path / "out", identical=10)
     assert report["identical_options"]["n"] == 2 and report["identical_options"]["max_max_deviation"] == pytest.approx(0.0)
+    assert (report["identical_options"]["requested"], report["identical_options"]["skipped_overlong"]) == (2, 0)
     assert [c["id"] for c in read_json(tmp_path / "out" / "identical_options.json")] == ["item-0#identical:reason", "item-2#identical:reason"]
     report, _ = B.evaluate_records(records, predictor, tmp_path / "none", identical=0)
     assert "identical_options" not in report and not (tmp_path / "none" / "identical_options.json").exists()
+
+
+def test_an_overlong_control_is_skipped_not_fatal(tmp_path):
+    """A control repeats its first option K times, so it can be longer than the question it came from: it is skipped and
+    counted, and the suite's report is still written (d1a.benchmark crashed after scoring decision-v2 on E4B)."""
+    def predictor(r):
+        q = next(iter(r["questions"].values()))
+        if q["type"] == "score" and r["_meta"]["id"].startswith("item-0#"):
+            raise ContextOverflow("branch too long: 1012 tokens with a 15-token state (row limit 1024)")
+        keys = question_keys(q["type"], q["criteria"])
+        return {"probabilities": {"reason": {key: 1 / len(keys) for key in keys}}, "latency_ms": 1.0}
+    report, _ = B.evaluate_records([record(0), record(1)], predictor, tmp_path / "out", identical=10)
+    assert {k: report["identical_options"][k] for k in ("requested", "skipped_overlong", "n")} == {"requested": 2, "skipped_overlong": 1, "n": 1}
+    assert [c["id"] for c in read_json(tmp_path / "out" / "identical_options.json")] == ["item-1#identical:reason"]
+    assert (tmp_path / "out" / "report.json").exists()
+    def always_long(r):
+        if next(iter(r["questions"].values()))["type"] == "score":
+            raise ContextOverflow("too long")
+        return predictor(r)
+    report, _ = B.evaluate_records([record(0), record(1)], always_long, tmp_path / "all", identical=10)
+    assert report["identical_options"] == {"requested": 2, "skipped_overlong": 2, "n": 0}   # every one skipped: said so, not hidden
 
 
 def test_identical_options_reach_the_model_as_the_same_tokens(monkeypatch):

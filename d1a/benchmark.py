@@ -278,9 +278,17 @@ def evaluate_records(records, predictor, directory, temperature=1.0, heldout_sou
     if identical:
         skipped = {r["id"] for r in rejected}
         controls = [c for c in identical_controls(records, identical + len(skipped)) if c["_meta"]["id"].split("#identical:")[0] not in skipped][:identical]
-        answers = [next(iter(call()["probabilities"].values())) for call in predictions(controls, predictor)]
-        report["identical_options"] = identical_report(answers)
-        write_json(directory / "identical_options.json", [{"id": c["_meta"]["id"], "p": a} for c, a in zip(controls, answers)])
+        kept, answers = [], []
+        for control, call in zip(controls, predictions(controls, predictor)):
+            try:
+                answers.append(next(iter(call()["probabilities"].values())))
+                kept.append(control)
+            except ContextOverflow:   # the first option repeated K times can outgrow the row its question fit in
+                pass
+        # how many were asked and skipped sits beside the results, so a mostly skipped set never reads as a clean one
+        report["identical_options"] = {"requested": len(controls), "skipped_overlong": len(controls) - len(kept),
+                                       **(identical_report(answers) or {"n": 0})} if controls else None
+        write_json(directory / "identical_options.json", [{"id": c["_meta"]["id"], "p": a} for c, a in zip(kept, answers)])
     long = [row for row in rows if "kernels" in row]
     if long:   # absent when every row ran the exact kernels, so those reports are unchanged
         report["long_rows"] = {"count": len(long), "records": len({row["id"] for row in long}), "kernels": sorted({row["kernels"] for row in long}),
