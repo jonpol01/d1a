@@ -22,6 +22,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   through transformers. Ten mutation checks must fail: off-by-one readouts, a leaky question mask, the sliding window
   ignored, positions that do not restart, a dropped `<bos>`, temperature ignored, and three misread answer types (#33).
 
+### Changed
+
+- `d1a/metrics.py` is rewritten in D1A's own code, no longer derived from Kev. Every figure, report (key order included),
+  fitted temperature and bootstrap interval is bit-identical to the previous version: checked on about 300,000 generated
+  calls and on saved benchmark rows. Its tests are rewritten too, as `tests/test_metrics.py`.
+
 ### Removed
 
 - `python -m d1a.suite`, the suite freezer inherited from Kev, with `d1a/contrastive.py` and the record generator of
