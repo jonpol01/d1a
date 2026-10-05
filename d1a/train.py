@@ -478,7 +478,7 @@ def build_model(a, dev, tok, revision, holdout):
     if a.checkpointing:
         model.lm.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
     model.lm.config.use_cache = False
-    # what this run will save as head.pt, and the architecture a warm start must match
+    # what this run will save (d1a_config.json, head.safetensors), and the architecture a warm start must match
     meta = Meta(base=a.base, base_revision=revision, lora=a.lora, head_dim=a.head_dim, weights_dtype=a.weights_dtype, holdout=holdout)
     init_source = None
     if a.init_from:
@@ -644,7 +644,7 @@ def main():
 
 
 def save_run(a, model, tok, meta, progress, out_dir, resume_dir, t0, reqs, suite_hash, init_source, skipped, resume_seconds, write_seconds, dev):
-    """The checkpoint (adapter, head.pt, tokenizer) and training_metrics.json; the resume points it supersedes go."""
+    """The checkpoint (adapter, d1a_config.json and head.safetensors, the head.pt D1A 0.3 reads, tokenizer) and training_metrics.json; the resume points it supersedes go."""
     wall = time.time() - t0
     model.lm.save_pretrained(a.out)
     backbone_seconds = time.time() - t0 - wall

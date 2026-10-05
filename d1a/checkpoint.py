@@ -2,8 +2,10 @@
 
 Two layouts, told apart by their files:
 - a training run (a local directory or a Hub repo, `owner/name@revision`): a LoRA adapter (adapter_config.json,
-  adapter_model.safetensors) for the base named in head.pt (`meta.base` at `meta.base_revision`, whose tokenizer it
-  uses), and head.pt itself: the pointer head's weights and the run's metadata (Meta);
+  adapter_model.safetensors) for the base its metadata names (`meta.base` at `meta.base_revision`, whose tokenizer it
+  uses), the pointer head and the run's metadata (Meta). A run is saved as d1a_config.json (format "d1a-torch",
+  versioned; the metadata, read without unpickling anything) with head.safetensors (the head), and, for D1A 0.4 only,
+  also as the head.pt older versions read; runs saved before 0.4 have head.pt alone, which stays readable;
 - an MLX export (d1a_config.json, written by scripts/export_mlx.py): the adapter already merged into the base and saved
   by mlx-lm (config.json + model*.safetensors, perhaps quantized), the head in fp32 in head.safetensors and the
   tokenizer. It needs neither the base nor the adapter and runs on the MLX backend only.
@@ -29,8 +31,10 @@ from .backbone import for_config
 from .model import DecisionModel, load_tokenizer, pad_id
 
 HUB_ID = re.compile(r"[\w.-]+/[\w.-]+(@[\w.-]+)?")
-EXPORT_CONFIG, EXPORT_HEAD = "d1a_config.json", "head.safetensors"   # an MLX export folder's two D1A files
+EXPORT_CONFIG, EXPORT_HEAD = "d1a_config.json", "head.safetensors"   # an MLX export folder's two D1A files, and a training run's
 EXPORT_FORMAT, EXPORT_VERSION = "d1a-mlx", 1
+TORCH_FORMAT, TORCH_VERSION = "d1a-torch", 1
+HEAD_PT_LAST_WRITTEN = "0.4"   # the last release that also writes head.pt (CHANGELOG, Deprecated); reading it has no end
 
 
 # --- where a checkpoint is ----------------------------------------------------------------------------------------------
@@ -56,9 +60,9 @@ def resolve_run(run):
 
 @dataclass
 class Meta:
-    """head.pt's contents. Fields older checkpoints did not write read as these defaults everywhere; `extra` keeps the rest
-    of the file (training arguments, suite hash, init provenance, the temperature fit), so reading and rewriting it loses
-    nothing."""
+    """A run's metadata and head: d1a_config.json's fields (or head.pt's, for older runs). Fields older checkpoints did not
+    write read as these defaults everywhere; `extra` keeps the rest (training arguments, suite hash, init provenance, the
+    temperature fit), so reading and rewriting it loses nothing."""
     base: str
     head: dict | None = None
     base_revision: str | None = None
@@ -83,13 +87,75 @@ class Meta:
         return {**self.extra, **{k: getattr(self, k) for k in self.KNOWN}}   # a known field wins over a stray key in extra
 
 
-def read_meta(run):
+def _read_head_pt(run):
     # weights_only: head.pt holds tensors and plain data, and may come from any Hub repo, so nothing in it is ever executed
     # (torch >= 2.6 defaults to this; explicit, it also holds under TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD)
     return Meta.from_dict(torch.load(f"{run}/head.pt", map_location="cpu", weights_only=True))
 
 
+def read_torch_config(run):
+    """A training run's checked d1a_config.json, or None when it has none (a run saved before D1A 0.4) or is an MLX export."""
+    path = Path(run) / EXPORT_CONFIG
+    if not path.exists():
+        return None
+    cfg = json.loads(path.read_text(encoding="utf-8"))
+    if cfg.get("format") == EXPORT_FORMAT:
+        return None
+    version = cfg.get("format_version")
+    if cfg.get("format") != TORCH_FORMAT or not isinstance(version, int) or not 1 <= version <= TORCH_VERSION:
+        raise ValueError(f"{path}: format {cfg.get('format')!r} version {version!r}; this D1A reads {TORCH_FORMAT} versions 1-{TORCH_VERSION} and {EXPORT_FORMAT}")
+    return cfg
+
+
+def read_meta(run):
+    """A training run's Meta: from d1a_config.json and head.safetensors when it has them, else from head.pt. A run that has
+    both must say the same in both (an older D1A recalibrating it rewrote head.pt alone, for example)."""
+    cfg = read_torch_config(run)
+    if cfg is None:
+        return _read_head_pt(run)
+    from safetensors.torch import load_file
+    head = load_file(str(Path(run) / cfg["head"])) if cfg.get("head") else None   # None: a run saved without a head (metadata only)
+    meta = Meta.from_dict({**{k: cfg[k] for k in Meta.KNOWN if k in cfg and k != "head"}, **cfg.get("extra", {}), "head": head})
+    if (Path(run) / "head.pt").exists():
+        old = _read_head_pt(run)
+        for name in Meta.KNOWN:
+            a, b = getattr(meta, name), getattr(old, name)
+            same = (a is b is None or a is not None and b is not None and a.keys() == b.keys() and all(torch.equal(a[k], b[k]) for k in a)) if name == "head" else a == b
+            if not same:
+                raise ValueError(f"{run}: {name} differs between {EXPORT_CONFIG} and head.pt" + ("" if name == "head" else f" ({a!r} and {b!r})")
+                                 + f"; {EXPORT_CONFIG} is the one D1A writes, so rewrite the run with d1a.checkpoint.write_meta, or remove the stale file")
+    return meta
+
+
+def _json_safe(value, where):
+    if isinstance(value, dict):
+        for k, v in value.items():
+            if not isinstance(k, str): raise ValueError(f"{where}: key {k!r} is not a string; {EXPORT_CONFIG} holds JSON only")
+            _json_safe(v, f"{where}.{k}")
+    elif isinstance(value, (list, tuple)):
+        for i, v in enumerate(value): _json_safe(v, f"{where}[{i}]")
+    elif not (value is None or isinstance(value, (str, bool, int, float))):
+        raise ValueError(f"{where} is a {type(value).__name__}; {EXPORT_CONFIG} holds JSON only, so convert it before saving")
+
+
+def torch_config(meta):
+    """The d1a_config.json of a training run (format d1a-torch): every known field, the head's file, and `extra`."""
+    if meta.weights != "lora":
+        raise ValueError(f"weights {meta.weights!r}: D1A saves LoRA runs only (full-weight training was removed, docs/removed-tools.md)")
+    _json_safe(meta.extra, "extra")
+    known = {k: getattr(meta, k) for k in Meta.KNOWN if k != "head"}
+    _json_safe(known, "meta")
+    return {"format": TORCH_FORMAT, "format_version": TORCH_VERSION, **known, "head": EXPORT_HEAD if meta.head is not None else None, "extra": meta.extra}
+
+
 def write_meta(run, meta):
+    """Save a run's metadata and head: d1a_config.json and head.safetensors, and head.pt for D1A <= 0.3 readers (written
+    through HEAD_PT_LAST_WRITTEN). Everything is checked before any file is written."""
+    from safetensors.torch import save_file
+    cfg = torch_config(meta)
+    if meta.head is not None:
+        save_file({k: v.contiguous() for k, v in meta.head.items()}, str(Path(run) / EXPORT_HEAD))
+    (Path(run) / EXPORT_CONFIG).write_text(json.dumps(cfg, indent=1) + "\n", encoding="utf-8")
     torch.save(meta.to_dict(), f"{run}/head.pt")
 
 
@@ -117,6 +183,8 @@ def read_export(path):
     if not config.exists():
         return None
     cfg = json.loads(config.read_text(encoding="utf-8"))
+    if cfg.get("format") == TORCH_FORMAT:   # a training run's metadata (read_torch_config), not an export
+        return None
     version = cfg.get("format_version")
     if cfg.get("format") != EXPORT_FORMAT or not isinstance(version, int) or not 1 <= version <= EXPORT_VERSION:
         raise ValueError(f"{config}: format {cfg.get('format')!r} version {version!r}; this D1A reads {EXPORT_FORMAT} versions 1-{EXPORT_VERSION}")
@@ -254,7 +322,7 @@ class Checkpoint:
 
     def release_date(self):
         """The ISO date on the TypeSafe model card: the Hub commit date for a Hub checkpoint (the cached file's date when
-        offline), else the date head.pt (or an export's d1a_config.json) was written."""
+        offline), else the date its d1a_config.json (or a run's head.pt, before D1A 0.4) was written."""
         if is_hub_id(self.requested):
             from huggingface_hub import HfApi
             repo, _, revision = self.requested.partition("@")
@@ -262,7 +330,7 @@ class Checkpoint:
                 return HfApi().model_info(repo, revision=revision or None).last_modified.date().isoformat()
             except Exception:
                 pass
-        written = self.file(EXPORT_CONFIG if self.export else "head.pt").stat().st_mtime
+        written = self.file(EXPORT_CONFIG if self.file(EXPORT_CONFIG).exists() else "head.pt").stat().st_mtime
         return datetime.date.fromtimestamp(written).isoformat()
 
     def text_config(self):
@@ -378,7 +446,7 @@ class Checkpoint:
         tensors = self._load_adapter_into(model.lm)
         model.head.load_state_dict(self.meta.head)
         return {"init_from": self.requested, "resolved": self.path, "weights_sha256": self.weights_sha256(),
-                "head_sha256": digest(self.file("head.pt")), "tensors": tensors}
+                "head_sha256": digest(self.file("head.pt") if self.file("head.pt").exists() else self.file(EXPORT_HEAD)), "tensors": tensors}
 
     def _load_adapter_into(self, lm):
         from peft import get_peft_model_state_dict, load_peft_weights, set_peft_model_state_dict

@@ -94,7 +94,7 @@ What D1A assumes, so you can tell a vulnerability from a configuration choice:
   - Put TLS in front (a reverse proxy) for either one.
   - Request size and length are bounded: states are truncated to the serving limit; media is limited to 12 MB (photos, audio up to 30 s) and 32 MB for video, of which 16 frames are read.
 - **Checkpoints are code you choose to run.**
-  - Load checkpoints only from sources you trust. D1A reads `head.pt` with PyTorch's `torch.load`, which defaults to weights-only loading in the supported PyTorch versions (2.6 and later), and it reads weights from safetensors.
+  - Load checkpoints only from sources you trust. A run saved by D1A 0.4 or later is read from `d1a_config.json` (JSON) and safetensors, with no unpickling. An older run's `head.pt` is read with PyTorch's `torch.load` in weights-only mode, explicitly, so it can hold only tensors and plain data; weights are always read from safetensors.
   - Report any way a crafted checkpoint, export folder or Hub repo runs code or reads files outside its own folder.
 - **Answers are inputs to your decisions, not access control.**
   - Use D1A's probabilities with thresholds and a human for decisions that matter. The PR labeler's `review:needs-human` below p 0.7 is one example.
