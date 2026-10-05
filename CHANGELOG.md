@@ -29,6 +29,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `recipe.json` (the recipe, its sha256, the stage and the exact command). `--dry-run` prints the commands.
   `recipes/d1a-e2b.yaml` is the README's E2B run. `d1a.train`'s `parse_args` takes an argument list; PyYAML is now a
   declared dependency.
+- A versioned format for training runs (#64): `d1a_config.json` (format `d1a-torch`, version 1: the base, the head's size,
+  the temperature, `weights`, and the run's recorded arguments as JSON) with the pointer head in `head.safetensors`, the
+  file names MLX exports already use. `d1a.train` and `d1a.calibrate` write it, and loading it unpickles nothing. A run
+  that has both it and a `head.pt` must say the same in both, or loading stops and names the field. Runs saved before
+  it (head.pt only) load as before, with no end date; published checkpoints are unchanged.
 - `python -m d1a.feedback promote <log> --calibrator <file>` (#148): the promotion gate on a live decision log. Whole
   groups (an outcome's optional `group`, e.g. a pull request; `POST /v1/feedback` takes it) go to the fit or the
   held-out side. A calibrator fitted on the fit side replaces the served one for a question only if it passes the gate
@@ -51,6 +56,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   serving batch) and the served answers must match an independent reference: each question as a plain causal row
   through transformers. Ten mutation checks must fail: off-by-one readouts, a leaky question mask, the sliding window
   ignored, positions that do not restart, a dropped `<bos>`, temperature ignored, and three misread answer types (#33).
+
+### Deprecated
+
+- Writing `head.pt`. D1A 0.4 still writes it beside `d1a_config.json`, so D1A 0.3 and older can load new runs; D1A 0.5
+  stops writing it. Reading `head.pt` stays, for every run saved before 0.4.
 
 ### Changed
 

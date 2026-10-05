@@ -1,4 +1,4 @@
-"""Calibrate a checkpoint: fit one temperature on held-out scored rows and write it into the checkpoint (head.pt), so
+"""Calibrate a checkpoint: fit one temperature on held-out scored rows and write it into the checkpoint (d1a_config.json, and the head.pt D1A 0.3 reads), so
 every loader serves calibrated probabilities. Argmax never changes, so accuracy is the same before and after.
 
     python -m d1a.calibrate --run runs/new --rows runs/cal/rows.json --rows runs/calpr/rows.json:src_a,src_b
@@ -12,9 +12,9 @@ own training data is in distribution and comes out overconfident on anything els
 development rows gave ECE 0.059 elsewhere; a pool of held-out datasets gave 0.0085). So the fit is refused when a rows
 file (a) comes from a suite the checkpoint trained on, (b) pools a source it trained on, or (c) reads the calibration or
 development partition of a training corpus, and when a rows file's suite or the checkpoint's training cannot be placed.
---allow-in-distribution fits anyway, warns, and records every reason in head.pt["temperature_fit"]["in_distribution"].
+--allow-in-distribution fits anyway, warns, and records every reason in the checkpoint's temperature_fit.in_distribution.
 
-What the checkpoint trained on comes from head.pt (d1a.train records the suite's manifest hash, its args and --data) or a
+What the checkpoint trained on comes from its metadata (d1a.train records the suite's manifest hash, its args and --data) or a
 provenance.json beside it; where rows came from, from the report.json d1a.benchmark writes beside them.
 """
 import argparse
@@ -90,7 +90,7 @@ def training_of(suite_sha256=None, suite=None, data=None):
 
 
 def checkpoint_training(run):
-    """Training of a checkpoint: what d1a.train recorded in head.pt, else the provenance.json beside it."""
+    """Training of a checkpoint: what d1a.train recorded in its metadata, else the provenance.json beside it."""
     extra = read_meta(run).extra
     args = extra.get("args") or {}
     training = training_of(extra.get("suite_sha256"), args.get("suite"), args.get("data"))
@@ -137,7 +137,7 @@ def in_distribution(fitted, training, run):
     out = [f"{f['rows']}: cannot tell which suite these rows were scored on (no d1a.benchmark report.json with a suite of this checkout beside them)"
            for f in fitted if f["suite"] is None]
     if training is None:
-        return out + [f"{run}: cannot tell what this checkpoint was trained on (head.pt names no suite of this checkout, no provenance.json beside it)"]
+        return out + [f"{run}: cannot tell what this checkpoint was trained on (its metadata names no suite of this checkout, no provenance.json beside it)"]
     for f in fitted:
         if f["suite"] is None: continue
         d, m = f["suite"], manifest(f["suite"])
@@ -170,7 +170,7 @@ def calibrate(run, rows, exclude=(), transfer=None, allow_in_distribution=False,
     problems = in_distribution(fitted, training, run)
     if problems and not allow_in_distribution:
         raise SystemExit("refusing to fit a temperature on rows that are not held out from the checkpoint's training:\n  " + "\n  ".join(problems)
-                         + "\nFit on held-out datasets, or pass --allow-in-distribution to fit anyway (recorded in head.pt).")
+                         + "\nFit on held-out datasets, or pass --allow-in-distribution to fit anyway (recorded in the checkpoint).")
     for line in problems: print(f"!!! IN DISTRIBUTION (--allow-in-distribution): {line}", flush=True)
     fit = [raw_row(recorded(r)) for r in select(reads, exclude) if r["variant"] == "clean"]
     T = fit_temperature(fit, **TEMPERATURE_FIT)
@@ -187,7 +187,7 @@ def calibrate(run, rows, exclude=(), transfer=None, allow_in_distribution=False,
                                      "fit_rows": fitted, "training_suites": sorted(training.suites) if training else None,
                                      **({"in_distribution": {"allowed": True, "problems": problems}} if problems else {})}
     write_meta(run, meta)
-    print(f"wrote temperature {T:.2f} to {run}/head.pt")
+    print(f"wrote temperature {T:.2f} to {run}/d1a_config.json")
     return T
 
 
@@ -197,23 +197,23 @@ def write_manual(run, temperature, reason):
     meta.temperature = temperature
     meta.extra["temperature_fit"] = {"method": "manual", "reason": reason.strip()}
     write_meta(run, meta)
-    print(f"wrote temperature {temperature:.2f} to {run}/head.pt")
+    print(f"wrote temperature {temperature:.2f} to {run}/d1a_config.json")
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--run", required=True, help="checkpoint directory (its head.pt is rewritten)")
+    ap.add_argument("--run", required=True, help="checkpoint directory (its metadata is rewritten: d1a_config.json, and head.pt)")
     ap.add_argument("--rows", action="append", default=[], help="fit set: a rows.json, optionally path:source,...; repeat to pool")
     ap.add_argument("--exclude_rows", action="append", default=[], help="rows.json whose record ids are dropped from the fit set; repeatable")
     ap.add_argument("--transfer", help="out-of-domain rows.json, reported before and after (never fitted)")
     ap.add_argument("--temperature", type=float, help="write this value without fitting; needs --reason")
-    ap.add_argument("--reason", help="with --temperature: where the value comes from (recorded in head.pt)")
+    ap.add_argument("--reason", help="with --temperature: where the value comes from (recorded in the checkpoint)")
     ap.add_argument("--allow-in-distribution", action="store_true", help="fit even on rows that share data with the checkpoint's training; warned and recorded")
     ap.add_argument("--folds", type=int, default=5)
     ap.add_argument("--seed", type=int, default=0)
     a = ap.parse_args(argv)
     if a.temperature is not None:
-        if not (a.reason or "").strip(): ap.error("--temperature needs --reason: where the value comes from (recorded in head.pt)")
+        if not (a.reason or "").strip(): ap.error("--temperature needs --reason: where the value comes from (recorded in the checkpoint)")
         return write_manual(a.run, a.temperature, a.reason)
     if not a.rows: ap.error("--rows is required unless --temperature is given")
     return calibrate(a.run, a.rows, a.exclude_rows, a.transfer, a.allow_in_distribution, a.folds, a.seed)

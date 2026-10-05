@@ -51,13 +51,68 @@ def test_head_pt_never_runs_code(tmp_path):
 
 
 def test_unsupported_checkpoints_are_refused(tmp_path):
+    """Kev's runs D1A no longer loads, as they arrive: a head.pt saying so. D1A itself never writes a full-weight run."""
     meta = Meta(base="b", head={})
     for change, message in (({"option_isolation": True}, "option_isolation"), ({"weights": "full"}, "full-weight")):
         run = tmp_path / message
         run.mkdir()
-        write_meta(run, dataclasses.replace(meta, **change))
+        torch.save(dataclasses.replace(meta, **change).to_dict(), run / "head.pt")
         with pytest.raises(ValueError, match=message):
             Checkpoint(run)
+    with pytest.raises(ValueError, match="LoRA runs only"):
+        write_meta(tmp_path / "full-weight", dataclasses.replace(meta, weights="full"))
+
+
+# --- the d1a-torch format (#64) -----------------------------------------------------------------------------------------
+
+def converted_fixture(tmp_path):
+    """The committed tiny checkpoint (head.pt only, as saved before D1A 0.4) rewritten by write_meta: both formats."""
+    run = copy_of_fixture(tmp_path) / "checkpoint"
+    write_meta(run, read_meta(run))
+    return run
+
+
+def same(a, b):
+    return all(torch.equal(a.head[k], b.head[k]) for k in a.head) and a.head.keys() == b.head.keys() and \
+        dataclasses.replace(a, head=None) == dataclasses.replace(b, head=None)
+
+
+def test_every_reader_path(at_root, tmp_path, monkeypatch):
+    import json
+    legacy = read_meta(FIXTURE + "/checkpoint")                                    # head.pt alone
+    both = converted_fixture(tmp_path)
+    cfg = json.loads((both / "d1a_config.json").read_text(encoding="utf-8"))
+    assert (cfg["format"], cfg["format_version"], cfg["weights"], cfg["head"]) == ("d1a-torch", 1, "lora", "head.safetensors")
+    assert same(read_meta(both), legacy)                                           # both, agreeing
+    (both / "head.pt").unlink()
+    def no_pickle(*a, **k): raise AssertionError("torch.load on the d1a-torch path")
+    monkeypatch.setattr(torch, "load", no_pickle)
+    assert same(read_meta(both), legacy)                                           # the new files alone: nothing unpickled
+    monkeypatch.undo()
+    torch.save(dataclasses.replace(legacy, temperature=legacy.temperature + 1).to_dict(), both / "head.pt")
+    with pytest.raises(ValueError, match=f"temperature differs between d1a_config.json and head.pt \\({legacy.temperature!r} and {legacy.temperature + 1!r}\\)"):
+        read_meta(both)                                                            # both, disagreeing: never a silent pick
+    cfg["format_version"] = 2
+    (both / "d1a_config.json").write_text(json.dumps(cfg), encoding="utf-8")
+    with pytest.raises(ValueError, match="d1a-torch versions 1-1"):
+        read_meta(both)
+
+
+def test_the_new_format_answers_as_the_old(at_root, tmp_path):
+    """The golden requests' probabilities through the converted run, bit for bit those of its head.pt."""
+    run = converted_fixture(tmp_path)
+    (run / "head.pt").unlink()
+    tok, old = Checkpoint(FIXTURE + "/checkpoint").load("cpu", LoadOptions(backend="torch"))
+    _, new = Checkpoint(run).load("cpu", LoadOptions(backend="torch"))
+    assert torch.equal(probs(tok, old), probs(tok, new))
+
+
+def test_metadata_must_be_json(tmp_path):
+    from pathlib import PurePosixPath
+    meta = Meta(base="b", head={"w": torch.zeros(1)}, extra={"args": {"lr": 1e-4, "data": PurePosixPath("runs/x.jsonl")}})
+    with pytest.raises(ValueError, match=r"extra\.args\.data is a PurePosixPath"):
+        write_meta(tmp_path, meta)
+    assert not any(tmp_path.iterdir())                                             # checked before anything is written
 
 
 def test_hub_ids():
