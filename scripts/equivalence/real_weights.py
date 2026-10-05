@@ -44,6 +44,30 @@ def score(checkpoint_module, run, device, dtype, records, rounds):
     return probs, loaded, times
 
 
+def interleaved(old_module, new_module, run, device, dtype, records, rounds):
+    """Latency with both versions in memory at once, alternating per request and swapping which goes first on every item,
+    so the machine's background load falls on both alike (a sequential main-then-branch run on a loaded Mac once showed a
+    fake +43%). -> {"old": [ms], "new": [ms]}, and the load time of each."""
+    from golden_vectors import encode
+    from d1a.device import sync
+    loaded, models = {}, {}
+    for name, module in (("old", old_module), ("new", new_module)):
+        t = time.perf_counter()
+        models[name] = module.Checkpoint(run).load(device, module.LoadOptions(backend="torch", dtype=dtype))
+        sync(device); loaded[name] = round(time.perf_counter() - t, 2)
+    times = {"old": [], "new": []}
+    with torch.no_grad():
+        for r in range(rounds):
+            for i, (_, _, rec, _) in enumerate(records):
+                order = ("old", "new") if (i + r) % 2 == 0 else ("new", "old")
+                for name in order:
+                    tok, model = models[name]
+                    enc = encode(model, tok, rec)
+                    sync(device); t = time.perf_counter(); model.probs(enc); sync(device)
+                    times[name].append((time.perf_counter() - t) * 1000)
+    return times, loaded
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--module", default="d1a/checkpoint.py", help="the rewritten module whose old version is loaded from --ref")
@@ -54,6 +78,7 @@ def main():
     ap.add_argument("--rounds", type=int, default=2)
     ap.add_argument("--limit", type=int, default=0, help="score only the first N records (0: all)")
     ap.add_argument("--out", default="")
+    ap.add_argument("--interleave", action="store_true", help="latency only: both versions in memory, alternating per request (needs twice the memory)")
     a = ap.parse_args()
     import os
     os.chdir(ROOT)
@@ -64,6 +89,15 @@ def main():
     old_checkpoint = module_at(a.ref, a.module)
     dtype = {"fp32": torch.float32, "bf16": torch.bfloat16}[a.dtype]
     records = record_set()[: a.limit or None]
+    if a.interleave:
+        times, loaded = interleaved(old_checkpoint, new_checkpoint, a.run, a.device, dtype, records, a.rounds)
+        report = {"module": a.module, "ref": a.ref, "run": a.run, "device": a.device, "dtype": a.dtype, "records": len(records), "mode": "interleaved",
+                  "load_s": loaded, **{name: {"median_ms": round(statistics.median(t), 2), "p90_ms": round(sorted(t)[int(0.9 * len(t))], 2), "n": len(t)}
+                                       for name, t in times.items()},
+                  "new_over_old_median": round(statistics.median(times["new"]) / statistics.median(times["old"]), 4)}
+        print(json.dumps(report, indent=2))
+        if a.out: Path(a.out).write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+        return
     results = {}
     for name, module in (("old", old_checkpoint), ("new", new_checkpoint), ("old again", old_checkpoint), ("new again", new_checkpoint)):
         probs, loaded, times = score(module, a.run, a.device, dtype, records, a.rounds)
