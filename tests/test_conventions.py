@@ -42,7 +42,7 @@ RULES = [
     ("which partitions stay out of git is d1a.suite.GIT_LIMIT",
      r"10 \* 1024 \* 1024", {"d1a/suite.py"}),
     ("the pinned Qwen3.5 tokenizer suite builders admit records under is d1a.suite.ADMISSION_TOKENIZER",
-     r"1001bb4d826a52d1f399e183466143f4da7b741b", {"d1a/suite.py", "d1a/transfer_v9.py"}),   # transfer_v9 pins every Qwen3.5 base it scores
+     r"1001bb4d826a52d1f399e183466143f4da7b741b", {"d1a/suite.py"}),
     ("calibration by state-token length is d1a.metrics.calibration_by_length (LENGTH_EDGES), and whether a temperature fit set "
      "shares data with a checkpoint's training is d1a.calibrate.in_distribution",
      r"\(8192, 16384, 32768, 65536\)|def (in_distribution|calibration_by_length)\(|HELD_OUT_SPLITS = ", {"d1a/metrics.py", "d1a/calibrate.py"}),

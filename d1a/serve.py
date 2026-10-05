@@ -1,5 +1,5 @@
 # Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); serves d1a-latest and keeps kev-latest and jev-latest as compatibility names; model cards name D1A; serves MLX export folders; --device with a GPU usability probe; a startup self-check of the readout and a warning when serving an uncalibrated checkpoint; recent batch latency in /v1/models; a 75 s keep-alive for proxies in front of it; --idle-unload; photos and voice clips through the same model (POST /v1/systemone/media); prefix cache keyed by state ids only (option isolation removed).
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); serves d1a-latest and keeps kev-latest and jev-latest as compatibility names; model cards name D1A; serves MLX export folders; --device with a GPU usability probe; a startup self-check of the readout and a warning when serving an uncalibrated checkpoint; recent batch latency in /v1/models; a 75 s keep-alive for proxies in front of it; --idle-unload; photos and voice clips through the same model (POST /v1/systemone/media); prefix cache keyed by state ids only (option isolation removed); self-learning hooks (decision log, POST /v1/feedback, outcome calibrator).
 """FastAPI sidecar for the playground: loads one checkpoint, exposes prefill-only decisions.
 
 Run: uv run --extra serve python -m d1a.serve --run runs/d1a --port 8008
@@ -7,7 +7,9 @@ Run: uv run --extra serve python -m d1a.serve --run runs/d1a --port 8008
 TypeSafe-compatible: POST /v1/systemone, GET /v1/models, the `x-typesafe-request-id` response header, and bearer auth
 when D1A_API_KEY is set (unset = open server, the local default). Demo extras: POST /v1/systemone/permute (one Choice
 under several option orders) and POST /v1/systemone/separate (each question in its own pass, for the packed-vs-separate
-comparison), POST /v1/systemone/media (a /v1/systemone request plus a photo, voice clip or video, d1a.media.MediaRequest,
+comparison), self-learning (D1A_FEEDBACK_LOG=<path>: every answer gets a decision_id and is logged, POST /v1/feedback
+{decision_id, labels} records what actually happened; D1A_OUTCOME_CALIBRATOR=<file>: yes/no answers recalibrated by d1a.feedback's
+calibrator, re-read when the file changes), POST /v1/systemone/media (a /v1/systemone request plus a photo, voice clip or video, d1a.media.MediaRequest,
 answered by the same model: an MLX export with its media/ folder, scripts/export_mlx.py --media).
 
 --idle-unload N drops the model (and the media encoders) after N seconds without a request and loads it again on the
@@ -29,6 +31,7 @@ from pydantic import BaseModel, Field
 from .api import SystemOneRequest, to_record, to_answers, output_tokens, with_date_facts
 from .checkpoint import EXPORT_CONFIG, Checkpoint, LoadOptions, fused_available, is_hub_id
 from .device import default_device, empty_cache, out_of_memory, sync
+from .feedback import FeedbackLog, OutcomeCalibrator
 from .media import MEDIA_DIR, MediaEncoder, MediaRequest, OnDemand, with_media
 from .model import SERVE_MAX_BRANCH, SERVE_MAX_STATE, layout
 
@@ -37,6 +40,8 @@ PREFIX_MIN_TOKENS = os.environ.get("D1A_PREFIX_MIN_TOKENS")               # stat
 PREFIX_MAX_TOKENS = int(os.environ.get("D1A_PREFIX_MAX_TOKENS", "65536"))  # state tokens the cache holds in all (least recently used evicted first); a longer state is not cached.
                                                                          # One 64k state (Kev-27B: ~1.3 GB of keys, values and DeltaNet states), or four 16k ones, not four 64k ones
 DATE_FACTS = os.environ.get("D1A_DATE_FACTS", "0") == "1"
+FEEDBACK_LOG = os.environ.get("D1A_FEEDBACK_LOG")                         # set = log every decision (d1a.feedback) and accept outcomes at POST /v1/feedback
+OUTCOME_CALIBRATOR = os.environ.get("D1A_OUTCOME_CALIBRATOR")             # set = apply this d1a.feedback calibrator to yes/no answers, reloaded when the file changes
 API_KEY = os.environ.get("D1A_API_KEY")                                  # unset = open server; set = require Authorization: Bearer <key>, as the TypeSafe clients always send
 MAX_BATCH = 64                                                           # requests the model thread takes at once (d1a.cuda_graphs splits them to fit its buffers)
 KEEP_ALIVE_S = 75                                                        # idle keep-alive; above Node's pooled-socket reuse window, so a proxy (the playground's Next.js rewrite) never reuses a socket uvicorn just closed (ECONNRESET, #42); uvicorn's default is 5
@@ -225,8 +230,47 @@ class Server:
         return self._body(req, meta, *await asyncio.wrap_future(self.submit(rec, media)))
 
     def _body(self, req, meta, ps, m):
-        answers = to_answers(ps, meta)
-        return {"model": req.model, "answers": answers, "usage": {"input_tokens": m["tokens"], "output_tokens": output_tokens(self.tok, answers)}, "latency_ms": m["latency_ms"]}
+        answers, did = LEARNING.decide(req, to_answers(ps, meta), self.checkpoint.requested)
+        body = {"model": req.model, "answers": answers, "usage": {"input_tokens": m["tokens"], "output_tokens": output_tokens(self.tok, answers)}, "latency_ms": m["latency_ms"]}
+        if did is not None: body["decision_id"] = did
+        return body
+
+
+class Learning:
+    """Self-learning hooks: the decision log and the outcome calibrator. The calibrator is re-read when its file changes, so
+    `python -m d1a.feedback calibrate <log> --out <file>` takes effect on the next request without a restart."""
+
+    def __init__(self, log_path=None, calibrator_path=None):
+        self.log = FeedbackLog(log_path) if log_path else None
+        self.calibrator_path, self._mtime, self._cal, self._lock = calibrator_path, None, None, threading.Lock()
+
+    def calibrator(self):
+        if not self.calibrator_path: return None
+        try: mtime = os.path.getmtime(self.calibrator_path)
+        except OSError: return self._cal
+        with self._lock:
+            if mtime != self._mtime: self._cal, self._mtime = OutcomeCalibrator.load(self.calibrator_path), mtime
+            return self._cal
+
+    def decide(self, req, answers, run):
+        """Answers as served (recalibrated when a calibrator is set), and the decision id when logging is on. The log keeps the
+        model's own answers, which the next `d1a.feedback calibrate` must fit; what was served is kept beside them in meta."""
+        cal = self.calibrator()
+        served = cal.apply(answers) if cal is not None else answers
+        if self.log is None: return served, None
+        questions = {qid: q.model_dump(exclude_none=True) for qid, q in req.questions.items()}
+        with self._lock: did = self.log.decision(req.state, questions, answers, run=run, meta={"served": served} if served is not answers else None)
+        return served, did
+
+    def outcome(self, did, labels):
+        with self._lock: self.log.outcome(did, labels)
+
+    def card(self):
+        cal = self.calibrator()
+        return {"log": self.log is not None, "outcome_calibrator": self.calibrator_path, "calibrated_questions": sorted(cal.params) if cal else []}
+
+
+LEARNING = Learning(FEEDBACK_LOG, OUTCOME_CALIBRATOR)
 
 
 def latency_summary(ms):
@@ -289,6 +333,20 @@ async def systemone_media(req: MediaRequest):
         return await s.answer_media_async(req)
 
 
+class Feedback(BaseModel):
+    decision_id: str
+    labels: dict[str, bool | str | int]   # {question id: what actually happened}: bool for yes/no, the option key for choice
+
+
+@app.post("/v1/feedback")
+def feedback(f: Feedback):
+    """Report the real outcome of an earlier decision (its decision_id from /v1/systemone), for d1a.feedback to learn from."""
+    if LEARNING.log is None:
+        raise HTTPException(404, "feedback is off: start d1a.serve with D1A_FEEDBACK_LOG=<path>")
+    LEARNING.outcome(f.decision_id, f.labels)
+    return {"ok": True}
+
+
 class PermuteSystemOne(BaseModel):
     request: SystemOneRequest
     question: str
@@ -333,7 +391,7 @@ def models():
     client polling it does not keep an idle model in memory."""
     od = app.state.models
     s, card = od.model, dict(app.state.card)
-    card["loaded"], card["idle_unload_s"] = s is not None, od.idle_s
+    card["loaded"], card["idle_unload_s"], card["learning"] = s is not None, od.idle_s, LEARNING.card()
     if s is not None:
         card.update({"cuda_graphs": graphs.stats() if (graphs := getattr(s.model, "graphs", None)) else None,
                      "prefix_cache": {"size": s.prefix_cache.size, "min_state_tokens": s.prefix_cache.min_tokens, "max_tokens": s.prefix_cache.max_tokens, "hits": s.prefix_cache.hits,

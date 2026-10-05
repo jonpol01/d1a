@@ -25,3 +25,20 @@ the question's `<decide>` token. README.md is the user guide; docs/UPSTREAM.md r
 - A file taken from Kev and changed keeps its "Modified from Kev" header and stays listed in docs/UPSTREAM.md.
 - Do not brand anything "Kev"; product, package, CLI and model names are D1A. `kev-latest` is only a compatibility alias.
 - Never load a model or start training in a unit test.
+
+## Project board (mandatory)
+Every piece of D1A work is tracked on GitHub Project #14 "D1A" (https://github.com/users/jonpol01/projects/14), and its card
+moves at every step, without being asked:
+- Columns: **Backlog** (not planned yet) → **Ready** (scoped, planned next) → **In progress** → **In review** (PR open,
+  waiting for CI and review) → **Done** (merged or closed).
+- New work, a finding or a follow-up becomes an issue with a milestone and a card in Backlog or Ready as soon as it is agreed.
+- Starting work moves its card to In progress. Opening a PR adds the PR's card to In review and moves the issue with it.
+  Merging or closing moves both to Done, and closes or updates the issue the PR completes.
+- Every PR gets a card. Before ending a session, check that no open PR sits outside In review and no merged PR or closed
+  issue outside Done.
+
+## Pull requests (mandatory)
+Every PR is watched from the moment it opens until it is merged; the watch ends only with the merge:
+- CI green and the reviewer (hermes-prbot) clean on the **exact head** → merge, then move the cards (above).
+- Findings → verify them against the code, fix with a test that fails without the fix, push, reply on the PR, and keep
+  watching for the re-review of the new head. Never leave a reviewed PR waiting.

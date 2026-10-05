@@ -16,6 +16,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Self-learning as a service** (`d1a.serve`): `D1A_FEEDBACK_LOG` logs every decision and returns a `decision_id`; `POST /v1/feedback` records its real outcome; `D1A_OUTCOME_CALIBRATOR` applies `d1a.feedback`'s calibrator to yes/no answers and re-reads it when the file changes. `/v1/models` reports the learning state.
+- **README: Self-Learning.** A section on how D1A learns from outcomes (usage, CLI, the verifier's measured numbers), step 5 in How It Works, and an animated diagram of the loop (`docs/arch/learning-{light,dark}.svg` from `make_svgs.py`).
+- **`d1a.feedback`: learning from outcomes.** A `FeedbackLog` records each decision and, later, what actually happened
+  (a patch passed its tests, a label was corrected); `OutcomeCalibrator` refits each yes/no question on those outcomes
+  (Platt scaling on the logit, which also corrects a shifted base rate that one temperature cannot); `records()` turns
+  them into training data for a small LoRA update; `gate()` promotes a candidate only when its held-out log loss is
+  lower with a bootstrap interval clear of zero and no frozen suite regressed. `python -m d1a.feedback status | records |
+  calibrate`. Fitted values match scikit-learn's logistic regression on D1A-E4B v0.4's verifier outputs.
 - **`d1a.versions`: the newest released checkpoint in one place.** `latest("JohnP1/d1a-e4b-mlx-q8")` gives
   `JohnP1/d1a-e4b-mlx-q8@v0.4`; the Space takes its default from it. `tests/test_versions.py` fails when `LATEST` and
   the first row per model of the "Model versions" table below disagree, so a release cannot leave a default behind.
@@ -85,6 +93,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Downloading a model from the Hub skips an export's `media/` folder (1 GB) until a photo or voice request needs it.
 
 ### Removed
+
+- **Kev's suite builders** (about 6,900 lines, 93-100% Kev's): the hard-v1, breadth-v1, devtools-v1, longdoc-v1,
+  documents-v1/v2 and transfer-v9 builders and generators, `build_binding_diagnostic.py`, `devtools_v1_licences.json`,
+  and the tests that only exercised them. The suites stay as frozen data; `tests/test_frozen_suites.py` (new, in CI)
+  checks every partition in git against its manifest's sha256 and record count, plus the eval-only suites' contracts.
+  `docs/removed-tools.md` says which commit rebuilds each suite.
 
 - **Kev's training-history suites** (20 of them: `decision-v1`, `public-pool-v5`/`v6`, `round3`-`round15`, `sft-v1`,
   `sft-v2` and its rounds, `transfer-v1`, `v3`, `v5`, `v6`, `v8`) and six builders that only served retired or moved
