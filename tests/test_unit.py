@@ -1237,3 +1237,41 @@ def test_gemma4_shared_layers_run_only_the_read_positions(tmp_path):
     whole, gw = run()
     assert all(torch.allclose(a, b, atol=1e-5) for a, b in zip(picked, whole))
     assert sum((a - b).abs().sum() for a, b in zip(gp, gw)) / sum(b.abs().sum() for b in gw) < 1e-5
+
+
+def test_metrics_reports_the_server_without_loading_it():
+    """GET /metrics: Prometheus text; an unloaded model gives d1a_loaded 0 and no per-model lines; a loaded one adds requests,
+    batches, queue, batch latency quantiles and the prefix cache."""
+    from collections import deque
+    from queue import Queue
+    from types import SimpleNamespace
+    from fastapi.testclient import TestClient
+    from d1a import serve
+    serve.app.state.models = SimpleNamespace(model=None, idle_s=None)
+    with TestClient(serve.app) as client:
+        text = client.get("/metrics").text
+    assert "d1a_loaded 0" in text and "# TYPE d1a_loaded gauge" in text and "d1a_requests_total" not in text
+    q = Queue(); q.put(1); q.put(2)
+    loaded = SimpleNamespace(batched_requests=7, batches=3, queue=q, batch_ms=deque([10.0, 20.0, 30.0]), device="cpu",
+                             prefix_cache=SimpleNamespace(hits=4, misses=1, entries={"a": 1}), model=SimpleNamespace(backend="torch"))
+    serve.app.state.models = SimpleNamespace(model=loaded, idle_s=None)
+    with TestClient(serve.app) as client:
+        text = client.get("/metrics").text
+    for line in ("d1a_loaded 1", "d1a_requests_total 7", "d1a_batches_total 3", "d1a_queue_depth 2", 'd1a_batch_latency_ms{quantile="0.5"} 20.0',
+                 'd1a_batch_latency_ms{quantile="1"} 30.0', "d1a_prefix_cache_hits_total 4", "d1a_prefix_cache_misses_total 1", "d1a_prefix_cache_states 1",
+                 "d1a_device_memory_bytes 0", "# TYPE d1a_requests_total counter"):
+        assert line in text, line
+
+
+def test_metrics_needs_the_api_key_when_one_is_set(monkeypatch):
+    """With D1A_API_KEY set, /metrics is behind the same bearer check as /v1 (request counts, queue and memory are not public)."""
+    from types import SimpleNamespace
+    from fastapi.testclient import TestClient
+    from d1a import serve
+    monkeypatch.setattr(serve, "API_KEY", "secret")
+    serve.app.state.models = SimpleNamespace(model=None, idle_s=None)
+    with TestClient(serve.app) as client:
+        assert client.get("/metrics").status_code == 401
+        assert client.get("/metrics", headers={"authorization": "Bearer wrong"}).status_code == 401
+        ok = client.get("/metrics", headers={"authorization": "Bearer secret"})
+    assert ok.status_code == 200 and "d1a_loaded 0" in ok.text

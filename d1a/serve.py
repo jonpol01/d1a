@@ -1,5 +1,5 @@
 # Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); serves d1a-latest and keeps kev-latest and jev-latest as compatibility names; model cards name D1A; serves MLX export folders; --device with a GPU usability probe; a startup self-check of the readout and a warning when serving an uncalibrated checkpoint; recent batch latency in /v1/models; a 75 s keep-alive for proxies in front of it; --idle-unload; photos and voice clips through the same model (POST /v1/systemone/media); prefix cache keyed by state ids only (option isolation removed); self-learning hooks (decision log, POST /v1/feedback, outcome calibrator).
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); serves d1a-latest and keeps kev-latest and jev-latest as compatibility names; model cards name D1A; serves MLX export folders; --device with a GPU usability probe; a startup self-check of the readout and a warning when serving an uncalibrated checkpoint; recent batch latency in /v1/models; a 75 s keep-alive for proxies in front of it; --idle-unload; photos and voice clips through the same model (POST /v1/systemone/media); prefix cache keyed by state ids only (option isolation removed); self-learning hooks (decision log, POST /v1/feedback, outcome calibrator); GET /metrics.
 """FastAPI sidecar for the playground: loads one checkpoint, exposes prefill-only decisions.
 
 Run: uv run --extra serve python -m d1a.serve --run runs/d1a --port 8008
@@ -13,7 +13,8 @@ calibrator, re-read when the file changes), POST /v1/systemone/media (a /v1/syst
 answered by the same model: an MLX export with its media/ folder, scripts/export_mlx.py --media).
 
 --idle-unload N drops the model (and the media encoders) after N seconds without a request and loads it again on the
-next one; GET /v1/models answers either way without loading it. D1A_PREFIX_CACHE / D1A_PREFIX_MIN_TOKENS / D1A_PREFIX_MAX_TOKENS size the state-prefix cache; D1A_DATE_FACTS=1 opts into the
+next one; GET /v1/models answers either way without loading it, and so does GET /metrics (Prometheus text: loaded, requests,
+batches, queue depth, batch latency, prefix cache, memory). D1A_PREFIX_CACHE / D1A_PREFIX_MIN_TOKENS / D1A_PREFIX_MAX_TOKENS size the state-prefix cache; D1A_DATE_FACTS=1 opts into the
 date preprocessing (api.with_date_facts). Backend and precision follow LoadOptions (D1A_BACKEND, D1A_DTYPE, ...): on Apple
 Silicon the hybrid Qwen3.5 checkpoints run on MLX by default, elsewhere on torch in bf16.
 """
@@ -26,11 +27,11 @@ import torch
 from dataclasses import dataclass, field, replace
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 from .api import SystemOneRequest, to_record, to_answers, output_tokens, with_date_facts
 from .checkpoint import EXPORT_CONFIG, Checkpoint, LoadOptions, fused_available, is_hub_id
-from .device import default_device, empty_cache, out_of_memory, sync
+from .device import allocated_bytes, default_device, empty_cache, out_of_memory, sync
 from .feedback import FeedbackLog, OutcomeCalibrator
 from .media import MEDIA_DIR, MediaEncoder, MediaRequest, OnDemand, with_media
 from .model import SERVE_MAX_BRANCH, SERVE_MAX_STATE, layout
@@ -289,11 +290,14 @@ app = FastAPI(title="d1a")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"], expose_headers=["x-typesafe-request-id", "server-timing"])
 
 
+PROTECTED = ("/v1", "/metrics")   # paths that need the bearer key when D1A_API_KEY is set: the API and the operational metrics
+
+
 @app.middleware("http")
 async def typesafe(request, call_next):
     """Bearer auth (when API_KEY is set) and the request id every TypeSafe client reads off the response."""
     started = time.perf_counter()
-    if API_KEY and request.url.path.startswith("/v1") and not hmac.compare_digest(request.headers.get("authorization", ""), f"Bearer {API_KEY}"):
+    if API_KEY and request.url.path.startswith(PROTECTED) and not hmac.compare_digest(request.headers.get("authorization", ""), f"Bearer {API_KEY}"):
         resp = JSONResponse({"detail": "missing or invalid API key; send Authorization: Bearer <D1A_API_KEY>"}, 401, {"www-authenticate": "Bearer"})
     else:
         resp = await call_next(request)
@@ -398,6 +402,49 @@ def models():
                                       "misses": s.prefix_cache.misses, "cached_states": len(s.prefix_cache.entries), "oom_retries": s.prefix_cache.oom_retries},
                      "batches": {"count": s.batches, "requests": s.batched_requests, "queued": s.queue.qsize(), "latency": latency_summary(s.batch_ms)}})
     return {"models": [{"name": name, **card} for name in MODEL_NAMES]}
+
+
+def peak_rss_bytes():
+    """The process's peak resident memory (ru_maxrss is bytes on macOS, kilobytes on Linux)."""
+    import resource
+    v = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    return v if sys.platform == "darwin" else v * 1024
+
+
+def device_bytes(s):
+    """Memory the loaded model holds on its device: MLX active memory, or torch's allocator (d1a.device.allocated_bytes)."""
+    if s.model.backend == "mlx":
+        import mlx.core as mx
+        return (mx.get_active_memory() if hasattr(mx, "get_active_memory") else mx.metal.get_active_memory())
+    return allocated_bytes(s.device)
+
+
+@app.get("/metrics", response_class=PlainTextResponse)
+def metrics():
+    """Prometheus text format: whether the model is loaded, requests and batches served, the queue, recent batch latency,
+    the prefix cache and memory. Answers without loading the model, like /v1/models."""
+    s, lines = app.state.models.model, []
+    def m(name, value, help_, kind="gauge", labels=""):
+        if value is None: return
+        if not any(l.startswith(f"# HELP {name} ") for l in lines): lines.extend([f"# HELP {name} {help_}", f"# TYPE {name} {kind}"])
+        lines.append(f"{name}{labels} {value}")
+    m("d1a_loaded", int(s is not None), "1 when the model is in memory (--idle-unload frees it)")
+    m("d1a_process_peak_rss_bytes", peak_rss_bytes(), "peak resident memory of the server process")
+    if s is not None:
+        m("d1a_requests_total", s.batched_requests, "requests answered", "counter")
+        m("d1a_batches_total", s.batches, "batches (forward passes) run", "counter")
+        m("d1a_queue_depth", s.queue.qsize(), "requests waiting for the model")
+        lat = latency_summary(s.batch_ms)
+        if lat:
+            for q, key in (("0.5", "p50_ms"), ("0.95", "p95_ms"), ("1", "max_ms")):
+                m("d1a_batch_latency_ms", lat[key], f"model time of the last {lat['recent']} batches", labels=f'{{quantile="{q}"}}')
+        pc = s.prefix_cache
+        m("d1a_prefix_cache_hits_total", pc.hits, "state-prefix cache hits", "counter")
+        m("d1a_prefix_cache_misses_total", pc.misses, "state-prefix cache misses", "counter")
+        m("d1a_prefix_cache_states", len(pc.entries), "states held in the prefix cache")
+        try: m("d1a_device_memory_bytes", device_bytes(s), "memory the model holds on its device")
+        except Exception: pass
+    return "\n".join(lines) + "\n"
 
 
 def card(s):

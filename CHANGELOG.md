@@ -16,6 +16,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **`GET /metrics`** (`d1a.serve`): Prometheus text format: whether the model is loaded, requests and batches served, queue depth, recent batch latency (p50, p95, max), prefix-cache hits, misses and states, peak process memory and the model's device memory. Like `/v1/models`, it does not load an unloaded model.
 - **README: the self-learning loop's measured rounds** (calibration error 0.068 → 0.017; the gate kept the model when retraining was not clearly better), also on the diagram.
 - **Self-learning as a service** (`d1a.serve`): `D1A_FEEDBACK_LOG` logs every decision and returns a `decision_id`; `POST /v1/feedback` records its real outcome; `D1A_OUTCOME_CALIBRATOR` applies `d1a.feedback`'s calibrator to yes/no answers and re-reads it when the file changes. `/v1/models` reports the learning state.
 - **README: Self-Learning.** A section on how D1A learns from outcomes (usage, CLI, the verifier's measured numbers), step 5 in How It Works, and an animated diagram of the loop (`docs/arch/learning-{light,dark}.svg` from `make_svgs.py`).
