@@ -6,6 +6,8 @@ All notable changes to D1A's code (the `d1a` package, its server and its tools) 
   change an API; every such change is listed under *Upgrade notes*. The version lives in `pyproject.toml`.
 - **Releases** are cut by pushing a `vX.Y.Z` tag. CI then checks that the tag, `pyproject.toml` and this file agree,
   runs the tests, builds the package and publishes a GitHub release whose text is that version's section below.
+- **Unreleased changes** are files in [`changes/`](changes/), one per pull request, so pull requests never conflict here;
+  `scripts/release_notes.py assemble` moves them into a version's section at release.
 - **Model checkpoints are versioned separately**: one Hugging Face repository per size and format, one tag per model
   version (for example `JohnP1/d1a-e4b@v0.4`). Each release lists the checkpoints it was tested with; the table under
   *Model versions* at the end of this file lists them all.
@@ -13,115 +15,6 @@ All notable changes to D1A's code (the `d1a` package, its server and its tools) 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
-
-### Added
-
-- Position bias in every benchmark report (#38). `position_bias`: how often a clean choice question's answer is its first
-  option, against how often its label is. `identical_options` (`d1a.benchmark --identical-options N`, default 100; 0
-  for none): the first N clean choice questions asked again with every option the first option's text, as a score
-  question whose levels may repeat; it reports how far the answers are from uniform and how often the first slot is
-  strictly the top one, with each control's answer in identical_options.json. The suite's own predictions and rows are
-  unchanged.
-- Training recipes (#63): `python -m d1a.recipe run <recipe.yaml> --out <dir> --device <device>` runs a versioned YAML
-  file of stages (`format: d1a-recipe`, version 1), each one `d1a.train` run with the options it lists, a later stage
-  starting from the previous stage's checkpoint. Every option is checked by `d1a.train`'s own parser before anything
-  runs, machine settings (device, resume, save interval) come from the command, and each stage's directory gets
-  `recipe.json` (the recipe, its sha256, the stage and the exact command). `--dry-run` prints the commands.
-  `recipes/d1a-e2b.yaml` is the README's E2B run. `d1a.train`'s `parse_args` takes an argument list; PyYAML is now a
-  declared dependency.
-- `docs/SPEC.md` (#7): what an implementation must do to give D1A's answers: how a System One request becomes model
-  input, the attention rule, the pointer head, the answer formats, calibration, the checkpoint formats (`d1a-torch`,
-  `head.pt`, `d1a-mlx`) and the conformance test (#9).
-- A versioned format for training runs (#64): `d1a_config.json` (format `d1a-torch`, version 1: the base, the head's size,
-  the temperature, `weights`, and the run's recorded arguments as JSON) with the pointer head in `head.safetensors`, the
-  file names MLX exports already use. `d1a.train` and `d1a.calibrate` write it, and loading it unpickles nothing. A run
-  that has both it and a `head.pt` must say the same in both, or loading stops and names the field. Runs saved before
-  it (head.pt only) load as before, with no end date; published checkpoints are unchanged.
-- `scripts/quality_gate.py --base <ref> [--head <ref>]` (#156): the quality gate for model, loading and serving changes.
-  Two `d1a.serve` instances, one per version, on the same real weights answer every demo example (regenerated from a
-  d1a-playground checkout with `--playground`) and the labeler replay, alternating which goes first. A base/base run
-  measures the noise floor. It fails on a changed choice, a probability moving more than `--tol` (1e-6), a request only
-  one side answers, latency above the floor, or, with `--suites`, a frozen suite whose accuracy or calibration gets
-  worse; exit 1 on FAIL. AGENTS.md makes it the required step for model and serving PRs and playground pin moves.
-- `python -m d1a.feedback promote <log> --calibrator <file>` (#148): the promotion gate on a live decision log. Whole
-  groups (an outcome's optional `group`, e.g. a pull request; `POST /v1/feedback` takes it) go to the fit or the
-  held-out side. A calibrator fitted on the fit side replaces the served one for a question only if it passes the gate
-  on the held-out side; the file is written whole and renamed into place, so `d1a.serve` reloads it safely.
-- Self-learning for choice questions (#139). `d1a.feedback`'s `OutcomeCalibrator` fits one temperature per choice
-  question on the outcomes, which changes how sure an answer is but never which option it picks; `gate_choice()` applies
-  the promotion rule to the multi-class log loss. Outcomes name their source (`POST /v1/feedback`'s `src`, or
-  `meta["src"]`): labels merge per question, and a person's (`human`) beats another model's (e.g. `reviewer`) whatever
-  arrived last. `python -m d1a.feedback status|records|calibrate --src` keeps one source. First stream: the PR labeler's
-  type and blast-radius questions, with the review bot's labels as outcomes.
-- Conformance against committed golden vectors (#64): `tests/golden/tiny-gemma4/` holds a tiny Gemma 4 checkpoint
-  (weights in git, 556 KB, built by `tests/golden/build_tiny_gemma4.py`) and `golden.json`, with 40 requests and 154
-  questions. `tests/test_conformance.py` requires its token ids exactly and every probability to 1e-5, through the model,
-  `d1a.serve` and `scripts/golden_vectors.py compare`.
-- `scripts/equivalence/` (`api.py`, `metrics.py`, `benchmark.py`, `suite.py`): each runs a rewritten module and the same
-  module at a git commit (`--ref`; the default is the last commit before its rewrite) on generated inputs, and stops at
-  the first difference: types, float bits, key order, files byte for byte, error messages.
-- `tests/test_tiny_checkpoint.py` (in CI): a random 6-layer Gemma 4, with sliding and KV-shared layers, goes through
-  `d1a.train`, `d1a.checkpoint` and `d1a.serve` with no download. Every scoring path (packed, rows, prefix miss and hit,
-  serving batch) and the served answers must match an independent reference: each question as a plain causal row
-  through transformers. Ten mutation checks must fail: off-by-one readouts, a leaky question mask, the sliding window
-  ignored, positions that do not restart, a dropped `<bos>`, temperature ignored, and three misread answer types (#33).
-
-### Deprecated
-
-- Writing `head.pt`. D1A 0.4 still writes it beside `d1a_config.json`, so D1A 0.3 and older can load new runs; D1A 0.5
-  stops writing it. Reading `head.pt` stays, for every run saved before 0.4.
-
-### Changed
-
-- `d1a/model.py` is rewritten in D1A's own code, no longer derived from Kev. Every public name stays, and the encoding,
-  the masks, every scoring path (batched, row form, prefix cache, shared prefix) and the training gradients are identical
-  to the previous version on tiny Gemma 4 and Qwen3.5 models (`scripts/equivalence/model.py`, new), and on real weights
-  (`scripts/equivalence/real_weights.py --module d1a/model.py`).
-- `d1a/train.py` is rewritten in D1A's own code, no longer derived from Kev. The run, its options, what it writes and how it
-  resumes are unchanged: on the CPU the adapter, the head, the configs and the logs are identical to the previous version
-  under 15 option sets, a stopped and resumed run included (`scripts/equivalence/train.py`, new). Its tests are rewritten
-  too, as `tests/test_train.py`, with a check that a seed reproduces a run bit for bit.
-- `d1a/checkpoint.py` is rewritten in D1A's own code, no longer derived from Kev. Its decisions (backend, dtype, merge),
-  refusals, metadata and on-disk formats are unchanged (`scripts/equivalence/checkpoint.py`, new), and `head.pt` is read
-  with `weights_only=True` explicitly, so it can hold only tensors and plain data even under
-  `TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD`. Its tests are rewritten too, as `tests/test_checkpoint.py`.
-- `d1a/suite.py` is rewritten in D1A's own code, no longer derived from Kev. The pins, the partition checks, the Hub
-  mirror rules, the file formats (byte for byte) and the training-source guard are unchanged (`scripts/equivalence/suite.py`).
-  Its tests are rewritten too, as `tests/test_suite.py`.
-- `d1a/data.py` is rewritten in D1A's own code, no longer derived from Kev. Every converter, `build`, `augment`,
-  `none_pair`, `load_records` and `materialize` gives the same records from the same seeds, every random draw in the same
-  order (`scripts/equivalence/data.py`, new). Its tests are rewritten too, as `tests/test_data.py`.
-- CI runs every test file (`pytest tests --unit`) except the few `tests/conftest.py`'s `OUTSIDE_UNIT_TESTS` lists with
-  why, instead of a list naming each file: a new test file runs without being listed, and two pull requests adding test
-  files no longer conflict on that list. The release runs the same command. CI keeps the Hugging Face cache (the pinned
-  tokenizers the tests read) between runs. `docs/UPSTREAM.md` lists rewritten files one per line.
-- `d1a/api.py` is rewritten in D1A's own code, no longer derived from Kev. The schema, the text the model reads, the
-  answers and the validation errors are unchanged: they were checked identical to the previous version on 166,718
-  generated requests, distributions and dates. Its tests are rewritten too, as `tests/test_system_one.py`.
-- `d1a/metrics.py` is rewritten in D1A's own code, no longer derived from Kev. Every figure, report (key order included),
-  fitted temperature and bootstrap interval is bit-identical to the previous version: checked on about 300,000 generated
-  calls and on saved benchmark rows. Its tests are rewritten too, as `tests/test_metrics.py`.
-- `d1a/benchmark.py` is rewritten in D1A's own code, no longer derived from Kev. Its rows, reports, the files it writes
-  (byte for byte), its failure and skip rules and its command line are unchanged: checked against the previous version
-  on about 34,000 generated cases and end to end on a frozen suite. Its tests are rewritten too, as
-  `tests/test_benchmark.py`.
-
-### Removed
-
-- `python -m d1a.suite`, the suite freezer inherited from Kev, with `d1a/contrastive.py` and the record generator of
-  `d1a/composition.py`. D1A loads its frozen suites as data and never rebuilds them; `paired_flip` moved to
-  `d1a.benchmark`, and the rule shapes that `d1a.suite.validate_training` checks stay. See docs/removed-tools.md (#65).
-- The `d1a.data` converters only that freezer read (13 sources; `build()` keeps its six defaults) and
-  `scripts/longdoc_serving.py`, which ran only through Kev's removed Modal app (#65).
-
-### Fixed
-
-- `d1a.benchmark` no longer crashes after scoring a suite when an identical-option control (#38) is too long: the
-  first option repeated K times can outgrow the row its question fit in (20 of decision-v2's first 100 on Gemma 4).
-  Such controls are skipped and counted in `identical_options.skipped_overlong`, and the report is written.
-- README: the benchmark example scores `--run runs/d1a-e2b`, where `d1a.train --out runs/d1a-e2b` writes the checkpoint (it named a `checkpoint/` folder that does not exist).
-- `scripts/golden_vectors.py compare` no longer crashes on a one-option question (a choice with one criterion or a
-  one-level score), which has no second-best probability to measure a flip margin against.
 
 ## [0.3.0] - 2026-10-05
 
