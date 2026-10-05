@@ -1,5 +1,5 @@
 # Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: Gemma 4 tests (from jonpol01/kev); package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); the tests of the removed Modal app and autoresearch left; the d1a.api tests rewritten as tests/test_system_one.py; the d1a.data tests rewritten as tests/test_data.py.
+# Changes for D1A Copyright 2026 John Soliva: Gemma 4 tests (from jonpol01/kev); package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); the tests of the removed Modal app and autoresearch left; the d1a.api tests rewritten as tests/test_system_one.py; the d1a.data tests rewritten as tests/test_data.py; the d1a.checkpoint tests rewritten as tests/test_checkpoint.py.
 """Fast tests with no model weights and no server: mask rule, token sanitizing, loading, training and serving.
 Run: uv run --extra serve python -m pytest tests/test_unit.py -q
 """
@@ -107,51 +107,6 @@ def test_soft_targets_and_date_facts():
     assert abs(question_loss(z, rec["questions"][0], "cpu").item() - (-(torch.log_softmax(z, -1) / 3).sum()).item()) < 1e-6
     assert date_facts("Due July 4, 2026. Received June 26, 2026. Shipped 2026-07-01.") == "June 26, 2026 is 8 days before July 4, 2026. 2026-07-01 is 3 days before July 4, 2026. 2026-07-01 is 5 days after June 26, 2026."
     assert with_date_facts({"case": "one date: May 1, 2026"}) == {"case": "one date: May 1, 2026"}
-
-
-def test_checkpoint_meta_round_trip_and_defaults(tmp_path):
-    """head.pt has one schema (d1a.checkpoint.Meta): old files get the same defaults everywhere, unknown keys survive a
-    read-modify-write, and LoadOptions.from_env is the only place the D1A_* variables are read. A Kev checkpoint trained
-    with option_isolation is refused (encode() no longer isolates option spans, so its answers would be wrong), and so is
-    a full-weight checkpoint."""
-    import dataclasses
-    import torch
-    from d1a.checkpoint import Checkpoint, LoadOptions, Meta, read_meta, write_meta
-    old = {"head": {"w": torch.zeros(1)}, "base": "Qwen/Qwen2.5-0.5B", "lora": 16, "args": {"lr": 1}, "suite_sha256": "abc"}
-    m = Meta.from_dict(old)
-    assert (m.head_dim, m.option_isolation, m.temperature, m.holdout, m.weights_dtype) == (256, False, 1.0, [], "fp32")
-    assert m.extra == {"args": {"lr": 1}, "suite_sha256": "abc"}
-    m.temperature = 2.3; m.extra["temperature_fit"] = {"n": 10}
-    write_meta(tmp_path, m); back = read_meta(tmp_path)
-    assert back.temperature == 2.3 and back.extra["args"] == {"lr": 1} and back.extra["temperature_fit"] == {"n": 10} and back.lora == 16
-    (tmp_path / "isolated").mkdir(); write_meta(tmp_path / "isolated", dataclasses.replace(m, option_isolation=True))
-    with pytest.raises(ValueError, match="option_isolation"): Checkpoint(tmp_path / "isolated")
-    (tmp_path / "full").mkdir(); write_meta(tmp_path / "full", dataclasses.replace(m, weights="full"))
-    with pytest.raises(ValueError, match="full-weight"): Checkpoint(tmp_path / "full")
-    assert LoadOptions.from_env({}) == LoadOptions()
-    opts = LoadOptions.from_env({"D1A_DTYPE": "bf16", "D1A_MERGE": "0", "D1A_ATTN": "sdpa", "D1A_TEMPERATURE": "1.0", "D1A_LORA_SCALE": "0.5"})
-    assert opts == LoadOptions(dtype=torch.bfloat16, merge=False, attn="sdpa", lora_scale=0.5, temperature=1.0)
-    assert LoadOptions.from_env({"D1A_DTYPE": "fp32"}).dtype is torch.float32   # explicit fp32 survives, so d1a.serve's bf16 default can be declined
-    assert LoadOptions.from_env({}).backend is None and LoadOptions.from_env({"D1A_BACKEND": "mlx"}).backend == "mlx"
-    assert [LoadOptions.from_env(e).cuda_graphs for e in ({}, {"D1A_CUDA_GRAPHS": "0"}, {"D1A_CUDA_GRAPHS": "1"})] == [None, False, True]   # an explicit 0 declines d1a.serve's default
-    assert [LoadOptions.from_env(e).fused for e in ({}, {"D1A_FUSED": "0"}, {"D1A_FUSED": "1"})] == [None, False, True]
-    with pytest.raises(ValueError, match="D1A_BACKEND"):
-        LoadOptions.from_env({"D1A_BACKEND": "metal"})
-
-
-def test_fused_default_needs_pinned_fla(monkeypatch):
-    """d1a.serve's CUDA fused default (checkpoint.fused_available): on only with flash-linear-attention importable at
-    fused_qwen35.FLA_VERSION; it is not in the serve extra, so a plain install serves unfused instead of failing to import fla."""
-    import importlib.machinery, sys, types
-    from d1a.checkpoint import fused_available
-    monkeypatch.setitem(sys.modules, "fla", None)   # not installed
-    assert not fused_available()
-    fla = types.ModuleType("fla"); fla.__spec__ = importlib.machinery.ModuleSpec("fla", None); fla.__version__ = "9.9.9"
-    monkeypatch.setitem(sys.modules, "fla", fla)
-    monkeypatch.setitem(sys.modules, "d1a.fused_qwen35", types.SimpleNamespace(FLA_VERSION="9.9.9"))
-    assert fused_available()
-    fla.__version__ = "9.9.8"   # another version: fuse() would refuse it
-    assert not fused_available()
 
 
 def test_head_temperature_scales_logits_at_eval_only():
