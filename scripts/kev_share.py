@@ -16,7 +16,9 @@ BASE = "0fe8fc9"
 ROOT = Path(__file__).resolve().parents[1]
 CACHE = Path.home() / ".cache" / "d1a" / f"kev-{BASE}"
 TEXT = (".py", ".ts", ".tsx", ".js", ".md", ".toml", ".yml", ".yaml", ".json", ".css", ".txt", ".html", ".sh")
-AREAS = [("d1a/", "model code (d1a/)"), ("tests/", "tests"), ("scripts/", "scripts"), ("evals/", "frozen eval suites")]
+# generated test data (tests/golden: golden vectors, a committed checkpoint): shown, never counted in TOTAL
+FIXTURES = "test fixtures (generated)"
+AREAS = [("d1a/", "model code (d1a/)"), ("tests/golden/", FIXTURES), ("tests/", "tests"), ("scripts/", "scripts"), ("evals/", "frozen eval suites")]
 
 
 def kev_tree():
@@ -62,7 +64,8 @@ def main():
         s["kept"] += kept; s["changed"] += len(lines) - kept; s["files_from_kev"] += 1
     pruned = sum(1 for p in kev if ("d1a/" + p[4:] if p.startswith("kev/") else p) not in d1a)
     total = defaultdict(int)
-    for s in stats.values():
+    for name, s in stats.items():
+        if name == FIXTURES: continue
         for k, v in s.items(): total[k] += v
     if a.json:
         print(json.dumps({"base": BASE, "areas": stats, "total": total, "pruned_kev_files": pruned}, indent=1)); return
