@@ -24,6 +24,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- `d1a/metrics.py` is rewritten in D1A's own code, no longer derived from Kev. Every figure, report (key order included),
+  fitted temperature and bootstrap interval is bit-identical to the previous version: checked on about 300,000 generated
+  calls and on saved benchmark rows. Its tests are rewritten too, as `tests/test_metrics.py`.
 - `d1a/benchmark.py` is rewritten in D1A's own code, no longer derived from Kev. Its rows, reports, the files it writes
   (byte for byte), its failure and skip rules and its command line are unchanged: checked against the previous version
   on about 34,000 generated cases and end to end on a frozen suite. Its tests are rewritten too, as
