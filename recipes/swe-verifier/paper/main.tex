@@ -29,8 +29,7 @@ On 921 public SWE-agent runs from 83 repositories it never saw, the trained veri
 Two findings shape how such verifiers should be built and evaluated.
 First, \emph{split leakage}: runs of the same issue share most of their outcome, so a verifier evaluated with runs of one issue on both sides
 of the split can score well by recognising the issue rather than judging the run.
-A text verifier reaches AUROC 0.96 under a random split of runs but 0.70 on unseen repositories, and ranks runs \emph{within} an issue no better than chance
-\pending{full 80k-run numbers}.
+In a first shard of 6{,}670 runs, a text verifier reaches AUROC 0.96 under a random split of runs but 0.70 on unseen repositories, and ranks runs \emph{within} an issue no better than chance \pending{full 80k-run numbers}.
 Second, \emph{learning from outcomes needs a gate}: in a loop that recalibrates and retrains on outcomes as they arrive,
 recalibration alone halved the calibration error on unseen repositories, while the first retrained candidate was worse and was rejected by a
 statistical promotion gate \pending{rounds 2--3}.
@@ -43,11 +42,9 @@ whether the hidden tests will pass. A verifier that estimates $P(\text{resolved}
 whether to submit or keep working, which of several runs to submit, and which runs to keep as training data.
 Each decision needs the probability to mean what it says, not only to rank runs, and in many settings the verifier must be cheap and local.
 
-Verifiers for software-engineering agents are an active topic. SWE-Gym trains verifiers on agent trajectories for inference-time scaling~\cite{swegym},
-SWE-RM builds a 30B execution-free reward model and stresses calibration~\cite{swerm}, Agentic Rubrics derive contextual rubric verifiers~\cite{rubrics},
-and FailFast-RestartSmart and EarlyEval predict failure from a trajectory prefix to stop or restart runs early~\cite{failfast,earlyeval}.
-Self-improving systems gate their own updates on verifier evidence~\cite{asgsi,seal}.
-We do not claim a new kind of verifier. Our contributions are narrower:
+This is the setting of the Gemma~4 Developer Agent challenge, where an agent runs offline on a fixed Gemma~4 model and is scored by hidden tests
+it never sees, under a time budget per task: a small verifier on the same hardware is what such an agent can afford to ask.
+Verifiers for coding agents already exist (Section~\ref{sec:related}); we do not claim a new kind of verifier. Our contributions are narrower:
 \begin{enumerate}
 \item \textbf{A small, local, calibrated verifier, evaluated on unseen repositories.} We report calibration (ECE, reliability, risk--coverage) next to ranking,
 all held out by repository, for a 4B-class model that answers in one forward pass on a laptop (Section~\ref{sec:verifier}).
@@ -56,6 +53,20 @@ the AUROC inflation and the within-issue AUROC that best-of-$k$ selection actual
 \item \textbf{An outcome feedback loop with a statistical promotion gate}, released as a library (\texttt{d1a.feedback}), and its first measured
 rounds (Section~\ref{sec:loop}).
 \end{enumerate}
+
+\section{Related Work}\label{sec:related}
+\paragraph{Verifiers for software-engineering agents.} SWE-Gym trains verifiers on agent trajectories and uses them for inference-time scaling, selecting
+among sampled trajectories~\cite{swegym}. SWE-RM is a 30B execution-free reward model that treats classification accuracy and calibration as crucial for
+reinforcement learning~\cite{swerm}. Agentic Rubrics derive contextual rubrics as a verification signal~\cite{rubrics}. Compared with these, our verifier is
+small enough to run on a laptop and is evaluated for calibration on repositories it never saw.
+
+\paragraph{Early failure prediction.} FailFast-RestartSmart trains a 0.6B monitor on trajectory prefixes and restarts runs predicted to fail~\cite{failfast};
+EarlyEval predicts outcomes early with gradient-boosted classifiers to stop runs and save evaluation cost~\cite{earlyeval}. Our anytime experiment is a weaker
+instance of the same idea and is reported as a contrast.
+
+\paragraph{Self-improvement with gates.} Audited skill-graph self-improvement promotes a candidate only after verifier-backed replay~\cite{asgsi}, and
+self-authored verification is shown to be unreliable, motivating an external acceptance gate~\cite{seal}. Verification also has to keep up with the policy it
+judges~\cite{horizon}. Our promotion gate is external in the same sense but is driven by real outcomes and decides with a bootstrap interval over repositories.
 
 \section{The Verifier}\label{sec:verifier}
 \paragraph{Model.} D1A~\cite{d1a} is a decision model built on Kev~\cite{kev}: a causal LM backbone with a LoRA adapter runs one prefill over a document and
@@ -165,11 +176,11 @@ Round & outcomes & test AUROC & test ECE & gate \\\midrule
 while the retrained candidate was worse on dev and the gate kept the current model.}\label{tab:rounds}
 \end{table}
 
-\paragraph{Adapting to a new agent.} \pending{SWE-agent $\rightarrow$ OpenHands (\texttt{nebius/SWE-rebench-openhands-\allowbreak trajectories}): AUROC and ECE after
+\paragraph{Adapting to a new agent.} A verifier trained on one agent meets new agents as they appear, and a fixed reward function falls behind as the policy improves~\cite{horizon}. \pending{SWE-agent $\rightarrow$ OpenHands (\texttt{nebius/SWE-rebench-openhands-\allowbreak trajectories}): AUROC and ECE after
 $N \in \{25, 50, 100, 200, 400\}$ outcomes from the new agent, recalibration alone vs recalibration + LoRA, with gated promotion.}
 
 \section{Limitations}
-One agent family (SWE-agent with Llama models) and one public dataset carry the main results so far; the cross-agent study is pending.
+One agent family (SWE-agent with Llama models) and one public dataset carry the main results so far; the cross-agent study is pending. The challenge provides per-repository code graphs and embeddings; this verifier does not use them, because it judges a finished run from its issue, patch and trajectory, and in a separate study of ours a D1A localiser over the provided graphs did not beat BM25 at finding the code to change.
 The verifier sees truncated inputs (issue, patch, last steps). Test-split resolve rates are low (12.4\%), which widens intervals on best-of-$k$ and
 filtering numbers. The leakage table is preliminary. We report the zero-shot gain that did not replicate rather than only the one that did.
 
@@ -181,13 +192,13 @@ All code is in \url{https://github.com/jonpol01/d1a} (\texttt{recipes/swe-verifi
 \sloppy
 \begin{thebibliography}{99}\small
 \bibitem{swegym} J.~Pan, X.~Wang, G.~Neubig, N.~Jaitly, H.~Ji, A.~Suhr, Y.~Zhang. Training Software Engineering Agents and Verifiers with SWE-Gym. arXiv:2412.21139, 2024.
-\bibitem{swerm} K.~Shum, B.~Hui, J.~Chen, L.~Zhang, X.~W., J.~Yang, Y.~Huang, J.~Lin, J.~He. SWE-RM: Execution-free Feedback for Software Engineering Agents. arXiv:2512.21919. \todo{confirm author ``X.~W.'' and year}
+\bibitem{swerm} K.~Shum, B.~Hui, J.~Chen, L.~Zhang, X.~W., J.~Yang, Y.~Huang, J.~Lin, J.~He. SWE-RM: Execution-free Feedback for Software Engineering Agents. arXiv:2512.21919, 2025. (The author ``X.~W.'' is listed in this form on arXiv.)
 \bibitem{rubrics} M.~Raghavendra, A.~Gunjal, B.~Liu, Y.~He. Agentic Rubrics as Contextual Verifiers for SWE Agents. arXiv:2601.04171, 2026.
 \bibitem{failfast} C.~Wang, Y.~Lyu, J.~He, Z.~Yang, C.~Zhong, Y.~Harel, D.~Lo. Fail-Fast, Restart-Smart: Early Failure Prediction and Restart for SWE Agentic Tasks. arXiv:2608.03222, 2026.
 \bibitem{earlyeval} Y.~Shi, Z.~Sun, J.~Dong, C.~Wan, D.~Lo, X.~Gu. EarlyEval: Cheaper Agent Evaluation via Early Outcome Prediction. arXiv:2609.02783, 2026.
 \bibitem{asgsi} K.~Huang, J.~Huang. Audited Skill-Graph Self-Improvement for Agentic LLMs via Verifiable Rewards, Experience Synthesis, and Continual Memory. arXiv:2512.23760, 2025.
 \bibitem{seal} D.~Guo, C.~Cao, F.~Yuan, Y.~Wang, Y.~Wang, D.~Wang. Self-Authored Verification Is Unreliable in Heuristic Self-Improving Agents. arXiv:2607.24300, 2026.
-\bibitem{horizon} B.~Wang et al. The Verification Horizon: No Silver Bullet for Coding Agent Rewards. arXiv:2606.26300. \todo{cite in the adaptation section}
+\bibitem{horizon} B.~Wang et al. The Verification Horizon: No Silver Bullet for Coding Agent Rewards. arXiv:2606.26300, 2026.
 \bibitem{platt} J.~C.~Platt. Probabilistic Outputs for Support Vector Machines and Comparisons to Regularized Likelihood Methods. In \emph{Advances in Large Margin Classifiers}, MIT Press, 1999.
 \bibitem{kev} J.~Palmer. Kev. \url{https://github.com/jaredpalmer/kev} (Apache-2.0).
 \bibitem{d1a} J.~Soliva. D1A. \url{https://github.com/jonpol01/d1a} (Apache-2.0).
