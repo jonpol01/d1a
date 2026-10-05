@@ -101,7 +101,7 @@ python -m d1a.feedback calibrate runs/feedback/verifier.jsonl --out cal.json    
 python -m d1a.feedback records runs/feedback/verifier.jsonl --out feedback.jsonl # data for a small LoRA update
 ```
 
-**As a service.** `d1a.serve` runs the loop for any client: with `D1A_FEEDBACK_LOG` set, every answer carries a `decision_id` and is logged, and `POST /v1/feedback` records what actually happened, with an optional `src` (a person's correction, `human`, outranks another model's, e.g. `reviewer`); with `D1A_OUTCOME_CALIBRATOR` set, yes/no and choice answers go through the latest calibrator, re-read whenever the file changes, so recalibrating needs no restart.
+**As a service.** `d1a.serve` runs the loop for any client: with `D1A_FEEDBACK_LOG` set, every answer carries a `decision_id` and is logged, and `POST /v1/feedback` records what actually happened, with an optional `src` (a person's correction, `human`, outranks another model's, e.g. `reviewer`) and `group` (what the decision belongs to, e.g. a pull request); `python -m d1a.feedback promote <log> --calibrator <file>` fits on part of the groups, gates each question on the rest, and rewrites the calibrator file only for the questions that pass; with `D1A_OUTCOME_CALIBRATOR` set, yes/no and choice answers go through the latest calibrator, re-read whenever the file changes, so recalibrating needs no restart.
 
 ```bash
 D1A_FEEDBACK_LOG=runs/feedback/verifier.jsonl D1A_OUTCOME_CALIBRATOR=runs/feedback/cal.json \

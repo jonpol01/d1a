@@ -341,6 +341,7 @@ class Feedback(BaseModel):
     decision_id: str
     labels: dict[str, bool | str | int]   # {question id: what actually happened}: bool for yes/no, the option key for choice
     src: str | None = None                # where the outcome came from (d1a.feedback.PREFER: "human" beats e.g. "reviewer")
+    group: str | None = None              # what the decision belongs to (e.g. a pull request): `d1a.feedback promote` holds out whole groups
 
 
 @app.post("/v1/feedback")
@@ -348,7 +349,7 @@ def feedback(f: Feedback):
     """Report the real outcome of an earlier decision (its decision_id from /v1/systemone), for d1a.feedback to learn from."""
     if LEARNING.log is None:
         raise HTTPException(404, "feedback is off: start d1a.serve with D1A_FEEDBACK_LOG=<path>")
-    LEARNING.outcome(f.decision_id, f.labels, {"src": f.src} if f.src else None)
+    LEARNING.outcome(f.decision_id, f.labels, {k: v for k, v in (("src", f.src), ("group", f.group)) if v} or None)
     return {"ok": True}
 
 
