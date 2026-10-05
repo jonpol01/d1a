@@ -16,6 +16,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **`recipes/swe-verifier`: D1A as a verifier of coding-agent runs** (issue, patch and the end of the run → P(the patch resolves the
+  issue)), on public SWE-agent runs (nebius/SWE-agent-trajectories, CC-BY-4.0) held out by repository: zero-shot and LoRA scoring,
+  held-out evaluation with repository-bootstrap intervals and within-issue AUROC, best-of-k, a training-data filter, anytime
+  restarts under a budget, a split-leakage study (random runs vs by issue vs by repository), the self-improvement rounds through
+  `d1a.feedback`, competition-harness input (`from_swegemma.py`), verified references, and the paper draft.
 - **Self-learning as a service** (`d1a.serve`): `D1A_FEEDBACK_LOG` logs every decision and returns a `decision_id`; `POST /v1/feedback` records its real outcome; `D1A_OUTCOME_CALIBRATOR` applies `d1a.feedback`'s calibrator to yes/no answers and re-reads it when the file changes. `/v1/models` reports the learning state.
 - **README: Self-Learning.** A section on how D1A learns from outcomes (usage, CLI, the verifier's measured numbers), step 5 in How It Works, and an animated diagram of the loop (`docs/arch/learning-{light,dark}.svg` from `make_svgs.py`).
 - **`d1a.feedback`: learning from outcomes.** A `FeedbackLog` records each decision and, later, what actually happened
