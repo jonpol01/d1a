@@ -29,6 +29,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `recipe.json` (the recipe, its sha256, the stage and the exact command). `--dry-run` prints the commands.
   `recipes/d1a-e2b.yaml` is the README's E2B run. `d1a.train`'s `parse_args` takes an argument list; PyYAML is now a
   declared dependency.
+- `docs/SPEC.md` (#7): what an implementation must do to give D1A's answers: how a System One request becomes model
+  input, the attention rule, the pointer head, the answer formats, calibration, the checkpoint formats (`d1a-torch`,
+  `head.pt`, `d1a-mlx`) and the conformance test (#9).
 - A versioned format for training runs (#64): `d1a_config.json` (format `d1a-torch`, version 1: the base, the head's size,
   the temperature, `weights`, and the run's recorded arguments as JSON) with the pointer head in `head.safetensors`, the
   file names MLX exports already use. `d1a.train` and `d1a.calibrate` write it, and loading it unpickles nothing. A run
