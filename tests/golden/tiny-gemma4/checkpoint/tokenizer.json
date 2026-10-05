@@ -1,0 +1,134 @@
+{
+  "version": "1.0",
+  "truncation": null,
+  "padding": null,
+  "added_tokens": [
+    {
+      "id": 0,
+      "content": "<pad>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 1,
+      "content": "<unk>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 2,
+      "content": "<bos>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    },
+    {
+      "id": 3,
+      "content": "<eos>",
+      "single_word": false,
+      "lstrip": false,
+      "rstrip": false,
+      "normalized": false,
+      "special": true
+    }
+  ],
+  "normalizer": null,
+  "pre_tokenizer": {
+    "type": "Whitespace"
+  },
+  "post_processor": {
+    "type": "TemplateProcessing",
+    "single": [
+      {
+        "SpecialToken": {
+          "id": "<bos>",
+          "type_id": 0
+        }
+      },
+      {
+        "Sequence": {
+          "id": "A",
+          "type_id": 0
+        }
+      }
+    ],
+    "pair": [
+      {
+        "Sequence": {
+          "id": "A",
+          "type_id": 0
+        }
+      },
+      {
+        "Sequence": {
+          "id": "B",
+          "type_id": 1
+        }
+      }
+    ],
+    "special_tokens": {
+      "<bos>": {
+        "id": "<bos>",
+        "ids": [
+          2
+        ],
+        "tokens": [
+          "<bos>"
+        ]
+      }
+    }
+  },
+  "decoder": null,
+  "model": {
+    "type": "WordLevel",
+    "vocab": {
+      "<pad>": 0,
+      "<unk>": 1,
+      "<bos>": 2,
+      "<eos>": 3,
+      "<unused0>": 4,
+      "<unused1>": 5,
+      "<unused2>": 6,
+      "<unused3>": 7,
+      "<unused4>": 8,
+      "the": 9,
+      "customer": 10,
+      "is": 11,
+      "charged": 12,
+      "twice": 13,
+      "which": 14,
+      "team": 15,
+      "billing": 16,
+      "shipping": 17,
+      "refund": 18,
+      "angry": 19,
+      "how": 20,
+      "bad": 21,
+      "no": 22,
+      "yes": 23,
+      "order": 24,
+      "late": 25,
+      "lost": 26,
+      "box": 27,
+      "arrived": 28,
+      "wrong": 29,
+      "size": 30,
+      "damaged": 31,
+      "it": 32,
+      "was": 33,
+      "again": 34,
+      "please": 35,
+      "help": 36,
+      "today": 37
+    },
+    "unk_token": "<unk>"
+  }
+}

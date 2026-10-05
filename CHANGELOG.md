@@ -16,6 +16,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Conformance against committed golden vectors (#64): `tests/golden/tiny-gemma4/` holds a tiny Gemma 4 checkpoint
+  (weights in git, 556 KB, built by `tests/golden/build_tiny_gemma4.py`) and `golden.json`, with 40 requests and 154
+  questions. `tests/test_conformance.py` requires its token ids exactly and every probability to 1e-5, through the model,
+  `d1a.serve` and `scripts/golden_vectors.py compare`.
 - `scripts/equivalence/` (`api.py`, `metrics.py`, `benchmark.py`, `suite.py`): each runs a rewritten module and the same
   module at a git commit (`--ref`; the default is the last commit before its rewrite) on generated inputs, and stops at
   the first difference: types, float bits, key order, files byte for byte, error messages.
@@ -52,6 +56,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `d1a.benchmark`, and the rule shapes that `d1a.suite.validate_training` checks stay. See docs/removed-tools.md (#65).
 - The `d1a.data` converters only that freezer read (13 sources; `build()` keeps its six defaults) and
   `scripts/longdoc_serving.py`, which ran only through Kev's removed Modal app (#65).
+
+### Fixed
+
+- `scripts/golden_vectors.py compare` no longer crashes on a one-option question (a choice with one criterion or a
+  one-level score), which has no second-best probability to measure a flip margin against.
 
 ## [0.3.0] - 2026-10-05
 
