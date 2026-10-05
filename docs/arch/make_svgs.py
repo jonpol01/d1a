@@ -200,8 +200,8 @@ def learning(t):
          f'<text x="{xs[0] + W / 2 + 12}" y="{(top + 64 + bot) / 2 - 2}" font-size="9" class="mono muted">promote: the next version (d1a.versions)</text>',
          f'<text x="{xs[0] + W / 2 + 12}" y="{(top + 64 + bot) / 2 + 12}" font-size="9" class="muted">or keep the current model</text>',
          f'<line x1="14" y1="262" x2="788" y2="262" stroke="{t["border"]}"/>',
-         '<text x="401" y="282" text-anchor="middle" font-size="10" class="muted">Measured on D1A-E4B as a coding-agent verifier, on repositories it never saw:</text>',
-         '<text x="401" y="298" text-anchor="middle" font-size="10" class="mono">recalibrating on outcomes: calibration error 0.63 → 0.04 · training on outcomes: AUROC 0.74 → 0.81</text>']
+         '<text x="401" y="282" text-anchor="middle" font-size="10" class="muted">Measured on D1A-E4B as a coding-agent verifier, 3 rounds of 300 new outcomes, on repositories it never saw:</text>',
+         '<text x="401" y="298" text-anchor="middle" font-size="10" class="mono">recalibrated: calibration error 0.068 → 0.017 · retrained: none clearly better, gate kept the model 3/3</text>']
     return 802, 314, "".join(b), "Self-learning: decide, log, outcome, recalibrate, retrain, gate, then promote the next version or keep the current one"
 
 
