@@ -5,6 +5,7 @@ tree) on the same generated inputs and requiring the same results: equal values 
 bit, dicts in the same key order, numpy arrays with the same dtype, the same exception type and message.
 """
 import argparse
+import importlib
 import importlib.util
 import math
 import subprocess
@@ -22,7 +23,9 @@ def module_at(ref, path):
     source = subprocess.run(["git", "show", f"{ref}:{path}"], cwd=ROOT, check=True, capture_output=True, text=True).stdout
     copy = Path(tempfile.mkdtemp()) / f"old_{Path(path).stem}.py"
     copy.write_text(source, encoding="utf-8")
-    spec = importlib.util.spec_from_file_location(copy.stem, copy)
+    package = ".".join(Path(path).with_suffix("").parts[:-1])   # "d1a": the old module's relative imports (from .api) resolve there
+    importlib.import_module(package)
+    spec = importlib.util.spec_from_file_location(f"{package}._old_{Path(path).stem}", copy)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module

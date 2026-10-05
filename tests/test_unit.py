@@ -1,5 +1,5 @@
 # Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: Gemma 4 tests (from jonpol01/kev); package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); the tests of the removed Modal app and autoresearch left; the d1a.api tests rewritten as tests/test_system_one.py.
+# Changes for D1A Copyright 2026 John Soliva: Gemma 4 tests (from jonpol01/kev); package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); the tests of the removed Modal app and autoresearch left; the d1a.api tests rewritten as tests/test_system_one.py; the d1a.data tests rewritten as tests/test_data.py.
 """Fast tests with no model weights and no server: mask rule, token sanitizing, loading, training and serving.
 Run: uv run --extra serve python -m pytest tests/test_unit.py -q
 """
@@ -88,24 +88,6 @@ def test_encode_positions_restart_per_branch(tok):
     assert all(enc["pos"][i] == S for i in starts)
     assert enc["labels"] == [0, 1] and [len(o) for o in enc["opt_idx"]] == [2, 3]
     assert all(enc["ids"][d] == tok.convert_tokens_to_ids(SPECIAL[4]) for d in enc["decide_idx"])
-
-
-def test_load_records_jsonl(tmp_path):
-    """The fine-tuning input format from the README: API-shaped requests with a label per question, one per line."""
-    from d1a.data import load_records, materialize
-    from d1a.suite import write_jsonl
-    rows = [{"state": {"subject": "Charged twice", "body": "Two charges for order 4411."},
-             "questions": {"team": {"type": "choice", "instructions": "Which team?", "criteria": {"billing": "Payments", "shipping": None}, "label": "billing"},
-                           "angry": {"type": "noul", "instructions": "Is the customer angry?", "label": False},
-                           "priority": {"type": "score", "instructions": "How urgent?", "criteria": ["low", "normal", "high"], "label": 1}}}]
-    p = tmp_path / "train.jsonl"; write_jsonl(p, rows)
-    recs = load_records(p)
-    assert recs[0]["_meta"]["source"] == "custom" and recs[0]["_meta"]["variant"] == "clean"
-    rec = materialize(recs[0])
-    assert [q["label"] for q in rec["questions"]] == [0, 0, 1] and rec["questions"][0]["src"] == "custom_choice"
-    bad = tmp_path / "bad.jsonl"; write_jsonl(bad, [{"state": "x", "questions": {"q": {"type": "noul", "instructions": "?"}}}])
-    try: load_records(bad); assert False
-    except ValueError as e: assert "no label" in str(e)
 
 
 def test_soft_targets_and_date_facts():
@@ -390,8 +372,6 @@ def train_tiny(tiny_base, out, *args, monkeypatch=None):
     argv = ["d1a.train", "--base", str(tiny_base / "base"), "--data", str(tiny_base / "data.jsonl"), "--device", "cpu", "--batch", "2", "--lr", "1e-3", "--out", str(out), *args]
     monkeypatch.setattr(sys, "argv", argv)
     train.main()
-
-
 
 
 def test_nonfinite_gradient_never_moves_a_weight(tiny_base, tmp_path, monkeypatch):

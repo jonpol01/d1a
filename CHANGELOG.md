@@ -27,6 +27,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- `d1a/data.py` is rewritten in D1A's own code, no longer derived from Kev. Every converter, `build`, `augment`,
+  `none_pair`, `load_records` and `materialize` gives the same records from the same seeds, every random draw in the same
+  order (`scripts/equivalence/data.py`, new). Its tests are rewritten too, as `tests/test_data.py`.
 - CI runs every test file (`pytest tests --unit`) except the few `tests/conftest.py`'s `OUTSIDE_UNIT_TESTS` lists with
   why, instead of a list naming each file: a new test file runs without being listed, and two pull requests adding test
   files no longer conflict on that list. The release runs the same command. CI keeps the Hugging Face cache (the pinned
