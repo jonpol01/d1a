@@ -36,3 +36,9 @@ moves at every step, without being asked:
   Merging or closing moves both to Done, and closes or updates the issue the PR completes.
 - Every PR gets a card. Before ending a session, check that no open PR sits outside In review and no merged PR or closed
   issue outside Done.
+
+## Pull requests (mandatory)
+Every PR is watched from the moment it opens until it is merged; the watch ends only with the merge:
+- CI green and the reviewer (hermes-prbot) clean on the **exact head** → merge, then move the cards (above).
+- Findings → verify them against the code, fix with a test that fails without the fix, push, reply on the PR, and keep
+  watching for the re-review of the new head. Never leave a reviewed PR waiting.
