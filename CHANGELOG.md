@@ -92,6 +92,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Removed
 
+- **Kev's suite builders** (about 6,900 lines, 93-100% Kev's): the hard-v1, breadth-v1, devtools-v1, longdoc-v1,
+  documents-v1/v2 and transfer-v9 builders and generators, `build_binding_diagnostic.py`, `devtools_v1_licences.json`,
+  and the tests that only exercised them. The suites stay as frozen data; `tests/test_frozen_suites.py` (new, in CI)
+  checks every partition in git against its manifest's sha256 and record count, plus the eval-only suites' contracts.
+  `docs/removed-tools.md` says which commit rebuilds each suite.
+
 - **Kev's training-history suites** (20 of them: `decision-v1`, `public-pool-v5`/`v6`, `round3`-`round15`, `sft-v1`,
   `sft-v2` and its rounds, `transfer-v1`, `v3`, `v5`, `v6`, `v8`) and six builders that only served retired or moved
   suites. Nothing D1A trains or evaluates on depends on them; docs/removed-tools.md says how to restore them.

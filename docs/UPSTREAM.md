@@ -52,7 +52,7 @@ the Apache License 2.0. This file records where D1A's code came from and what D1
   `temperature_groups`), with the tests that only exercised them. Then Kev's study harness, `d1a/rounds.py`,
   `experiment.py`, `evaluate.py`, `budget.py` and `mirror.py`, with their tests: calibration became D1A's own
   `d1a/calibrate.py` (same fitted temperature and the same in-distribution refusals as the script it replaces; the
-  full-weight snapshot cap moved to `d1a/full_ft.py`). `transfer_v9.py` stays because two suite builders import it. Then Kev's Next.js `playground/` and the `tools/review`
+  full-weight snapshot cap moved to `d1a/full_ft.py`). Then Kev's Next.js `playground/` and the `tools/review`
   label-review page, with `JevPredictor` in `d1a/predictors.py` (it ran the playground's `jev-evaluate.mjs`) and its tests;
   the demo app is now [jonpol01/d1a-playground](https://github.com/jonpol01/d1a-playground), and
   [removed-tools.md](removed-tools.md) records what both tools did and how to restore them. Then `d1a.train`'s research
@@ -66,7 +66,12 @@ the Apache License 2.0. This file records where D1A's code came from and what D1
   its `r21`-`r26`, `transfer-v1`, `v3`, `v5`, `v6`, `v8`) and the builders that only wrote them or the two below
   (`build_long_states`, `build_soft_targets`, `build_night2_data`, `freeze_calibration_audit`, `freeze_semif`,
   `freeze_semif_external`). `external` (semif-v1, typesafe-v1, wanli-v1, wanli-v2) and `night2` moved, byte for byte,
-  into D1A suites (`evals/d1a/external`, `evals/d1a/night2`, data in the private dataset `JohnP1/d1a-evals`).
+  into D1A suites (`evals/d1a/external`, `evals/d1a/night2`, data in the private dataset `JohnP1/d1a-evals`). Then the
+  builders of the suites D1A keeps frozen (`build_hard_v1` with `hard_v1_common`/`_families`/`_numeric`/`_policy`,
+  `build_breadth_v1`, `build_devtools_v1` with `devtools_v1_licences.json`, `build_longdoc_v1` with
+  `longdoc_v1_synthetic`, `build_documents_v1`/`_v2`, `freeze_documents_v1`, `label_documents_v1`,
+  `build_binding_diagnostic`, and `d1a/transfer_v9.py`) with the tests that only exercised them; the suites stay as data
+  pinned by sha256 (`tests/test_frozen_suites.py`), and [removed-tools.md](removed-tools.md) says where to rebuild them.
 - **Rewritten from scratch** (no longer derived): `d1a/calibrate.py`, `scripts/calibrate_checkpoint.py` (now a wrapper
   around it).
 - **Rewritten**: `README.md`, `AGENTS.md`, `NOTICE`, `.gitignore`.
@@ -94,27 +99,12 @@ d1a/serve.py
 d1a/shared_prefix.py
 d1a/suite.py
 d1a/train.py
-d1a/transfer_v9.py
 pyproject.toml
-scripts/build_binding_diagnostic.py
-scripts/build_breadth_v1.py
-scripts/build_devtools_v1.py
-scripts/build_documents_v1.py
-scripts/build_documents_v2.py
-scripts/build_hard_v1.py
-scripts/build_longdoc_v1.py
-scripts/freeze_documents_v1.py
-scripts/label_documents_v1.py
 scripts/longdoc_serving.py
 scripts/mlx_parity.py
 tests/test_api.py
-tests/test_breadth_v1.py
 tests/test_conventions.py
-tests/test_devtools_v1.py
-tests/test_documents_tools.py
 tests/test_generators.py
-tests/test_hard_v1.py
-tests/test_longdoc_v1.py
 tests/test_mlx.py
 tests/test_model.py
 tests/test_research.py
@@ -146,10 +136,4 @@ d1a/data.py
 d1a/device.py
 experiments/sft-v1-lengths.json
 experiments/smoke.json
-scripts/devtools_v1_licences.json
-scripts/hard_v1_common.py
-scripts/hard_v1_families.py
-scripts/hard_v1_numeric.py
-scripts/hard_v1_policy.py
-scripts/longdoc_v1_synthetic.py
 ```
