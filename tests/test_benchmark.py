@@ -84,7 +84,7 @@ def test_summary_objective_heldout_and_policy_counts():
     assert report["heldout_tasks"]["fixture"]["n"] == 1 and B.summarize(rows)["heldout_tasks"] == {}
     assert report["unknowable"]["n"] == 1 and report["temperature"] == 2.0
     assert report["metric_policy"]["selective_ties"] == "whole_confidence_groups" and report["metric_policy"]["returned_zeros"] == 0
-    assert list(report) == ["objective", "paired_flip", "unknowable", "clean", "tasks", "variants", "heldout_tasks", "permutation",
+    assert list(report) == ["objective", "paired_flip", "unknowable", "clean", "position_bias", "tasks", "variants", "heldout_tasks", "permutation",
                             "temperature", "calibrated_clean", "metric_policy"]
 
 
@@ -227,7 +227,7 @@ def test_data_is_scored_under_the_chosen_context_and_skips_are_announced(tmp_pat
             if r["_meta"]["id"].endswith("1") and seen["context"] is CONTEXT: raise ContextOverflow("state exceeds 384 tokens")
             return answer((1 / 3, 1 / 3, 1 / 3))
     monkeypatch.setattr(B, "LocalPredictor", Local)
-    monkeypatch.setattr(sys, "argv", ["benchmark", "--run", "x", "--data", str(data), "--out", str(tmp_path / "out"), "--device", "cpu", "--context", context])
+    monkeypatch.setattr(sys, "argv", ["benchmark", "--run", "x", "--data", str(data), "--out", str(tmp_path / "out"), "--device", "cpu", "--context", context, "--identical-options", "0"])
     B.main()
     report = read_json(tmp_path / "out" / "report.json")
     assert report["data"] == str(data) and report["split"] == "custom" and report["calibration_applied"] is False and report["remote"] is None
@@ -245,3 +245,52 @@ def test_command_line_refuses_contradictory_arguments(args, monkeypatch, tmp_pat
     with pytest.raises(SystemExit) as stop:
         B.main()
     assert stop.value.code == 2 and not (tmp_path / "out").exists()
+
+
+# --- position bias (#38) ------------------------------------------------------------------------------------------------
+
+def test_first_slot_rate_against_where_the_label_is():
+    rows = B.prediction_rows(record(0), answer(p=(0.6, 0.3, 0.1))) + B.prediction_rows(record(1), answer(p=(0.2, 0.7, 0.1)))
+    label_first = int(rows[0]["label"] == 0)
+    assert B.position_bias(rows) == {"n": 2, "first_slot_rate": 0.5, "label_first_rate": float(label_first), "excess": 0.5 - label_first}
+    assert B.summarize(rows)["position_bias"]["n"] == 2 and B.position_bias([]) is None
+
+
+def test_identical_option_controls(tmp_path, monkeypatch):
+    """Each control asks a clean choice question again with every option the first option's text (a score question, whose
+    levels may repeat); the answer should be uniform, and the report says how far it is."""
+    records = [record(0), record(1, variant="permuted", parent_id="item-0"), record(2)]
+    controls = B.identical_controls(records, limit=5)
+    assert [c["_meta"]["id"] for c in controls] == ["item-0#identical:reason", "item-2#identical:reason"]   # clean records only
+    q = controls[0]["questions"]["reason"]
+    first = B.option_text(*next(iter(CRITERIA.items())))
+    assert (q["type"], q["criteria"], q["instructions"]) == ("score", [first] * len(CRITERIA), "Why return the shoes?")
+    assert len(B.identical_controls(records, limit=1)) == 1
+    k = len(CRITERIA)
+    uniform, skewed = {str(i): 1 / k for i in range(k)}, {str(i): (0.5 if i == 0 else 0.5 / (k - 1)) for i in range(k)}
+    rep = B.identical_report([uniform, skewed])
+    assert rep["n"] == 2 and rep["first_slot_rate"] == 0.5 and rep["max_max_deviation"] == pytest.approx(0.5 - 1 / k)
+    assert rep["mean_first_minus_uniform"] == pytest.approx((0.5 - 1 / k) / 2)
+
+    def predictor(r):
+        q = next(iter(r["questions"].values()))
+        keys = question_keys(q["type"], q["criteria"])
+        return {"probabilities": {"reason": {key: 1 / len(keys) for key in keys}}, "latency_ms": 1.0}
+    report, _ = B.evaluate_records(records, predictor, tmp_path / "out", identical=10)
+    assert report["identical_options"]["n"] == 2 and report["identical_options"]["max_max_deviation"] == pytest.approx(0.0)
+    assert [c["id"] for c in read_json(tmp_path / "out" / "identical_options.json")] == ["item-0#identical:reason", "item-2#identical:reason"]
+    report, _ = B.evaluate_records(records, predictor, tmp_path / "none", identical=0)
+    assert "identical_options" not in report and not (tmp_path / "none" / "identical_options.json").exists()
+
+
+def test_identical_options_reach_the_model_as_the_same_tokens(monkeypatch):
+    """Through the serving path (materialize, encode) a control's options are the same token span, only at different places."""
+    from pathlib import Path
+    from d1a.data import materialize
+    from d1a.model import encode, load_tokenizer
+    monkeypatch.chdir(Path(__file__).resolve().parents[1])
+    tok = load_tokenizer("tests/golden/tiny-gemma4/base")
+    enc = encode(tok, materialize(B.identical_controls([record(0)], 1)[0]))
+    ends = enc["opt_idx"][0]
+    spans = [enc["ids"][a + 1:b + 1] for a, b in zip([ends[0] - (ends[1] - ends[0])] + ends[:-1], ends)]
+    assert len(set(map(tuple, spans))) == 1 and len(spans) == len(CRITERIA)

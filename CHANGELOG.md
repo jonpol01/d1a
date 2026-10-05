@@ -16,6 +16,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Position bias in every benchmark report (#38). `position_bias`: how often a clean choice question's answer is its first
+  option, against how often its label is. `identical_options` (`d1a.benchmark --identical-options N`, default 100; 0
+  for none): the first N clean choice questions asked again with every option the first option's text, as a score
+  question whose levels may repeat; it reports how far the answers are from uniform and how often the first slot is
+  strictly the top one, with each control's answer in identical_options.json. The suite's own predictions and rows are
+  unchanged.
 - `python -m d1a.feedback promote <log> --calibrator <file>` (#148): the promotion gate on a live decision log. Whole
   groups (an outcome's optional `group`, e.g. a pull request; `POST /v1/feedback` takes it) go to the fit or the
   held-out side. A calibrator fitted on the fit side replaces the served one for a question only if it passes the gate

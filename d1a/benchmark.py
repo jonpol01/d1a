@@ -17,7 +17,7 @@ from pathlib import Path
 
 import numpy as np
 
-from d1a.api import question_keys, with_date_facts
+from d1a.api import option_text, question_keys, with_date_facts
 from d1a.checkpoint import LoadOptions
 from d1a.data import api_request, load_records
 from d1a.device import default_device
@@ -132,6 +132,52 @@ def permutation_shift(rows, clean):
     return shifts, flips
 
 
+def position_bias(rows):
+    """How often the top answer of a clean choice question is its first option, against how often the label is: a model
+    that favours the first slot picks it more often than it is right there (#38)."""
+    rows = [row for row in rows if row["type"] == "choice" and len(row["keys"]) > 1]
+    if not rows:
+        return None
+    first = float(np.mean([int(np.argmax(row["p"]) == 0) for row in rows]))
+    label = float(np.mean([int(row["label"] == 0) for row in rows]))
+    return {"n": len(rows), "first_slot_rate": first, "label_first_rate": label, "excess": first - label}
+
+
+def identical_controls(records, limit):
+    """Up to `limit` controls, one per clean choice question in record order: its state and instructions with every option
+    the first option's text. Asked as a score question, whose levels may repeat, so the options are the same text; the
+    only difference between them is their position, and the answer should be uniform."""
+    out = []
+    for record in records:
+        if record["_meta"]["variant"] != "clean":
+            continue
+        for qid, q in record["questions"].items():
+            if len(out) >= limit:
+                return out
+            if q["type"] != "choice" or len(q["criteria"]) < 2:
+                continue
+            text = option_text(*next(iter(q["criteria"].items())))
+            out.append({"state": record["state"], "_meta": {**record["_meta"], "id": f"{record['_meta']['id']}#identical:{qid}"},
+                        "questions": {qid: {"type": "score", "instructions": q.get("instructions"), "criteria": [text] * len(q["criteria"]),
+                                            "label": 0, "src": q.get("src")}}})
+    return out
+
+
+def identical_report(probabilities):
+    """Over the controls' answers ({level: p} each): how far from uniform, and how often the first slot is strictly the top one."""
+    deviations, first, firsts = [], [], []
+    for probs in probabilities:
+        p = np.array([probs[str(i)] for i in range(len(probs))], dtype=float)
+        p /= p.sum()
+        deviations.append(float(np.max(np.abs(p - 1 / len(p)))))
+        first.append(float(p[0] - 1 / len(p)))
+        firsts.append(int(p[0] > p[1:].max()))   # strictly: a uniform answer is not a first-slot pick
+    if not deviations:
+        return None
+    return {"n": len(deviations), "mean_max_deviation": float(np.mean(deviations)), "max_max_deviation": float(np.max(deviations)),
+            "mean_first_minus_uniform": float(np.mean(first)), "first_slot_rate": float(np.mean(firsts))}
+
+
 def objective_tasks(tasks):
     """The tasks the objective averages: every task except the unknowable ones (their controls count)."""
     return [m["nll"] for name, m in tasks.items() if not name.startswith("unknowable_") or name.startswith("unknowable_control")]
@@ -157,7 +203,7 @@ def summarize(rows, temperature=1.0, heldout_sources=()):
     heldout = [row for row in clean if row["source"] in heldout_sources]
     return {"objective": -float(np.mean(objective_tasks(tasks))),
             "paired_flip": paired_flip(clean), "unknowable": unknowable_report(clean),
-            "clean": metrics(knowable), "tasks": tasks, "variants": variants,
+            "clean": metrics(knowable), "position_bias": position_bias(knowable), "tasks": tasks, "variants": variants,
             "heldout_tasks": grouped_metrics(heldout, "task") if heldout else {},
             "permutation": {"n": len(shifts), "mean_max_delta": float(np.mean(shifts)) if shifts else None,
                             "flip_rate": float(np.mean(flips)) if flips else None},
@@ -187,12 +233,13 @@ def predictions(records, predictor):
         pool.shutdown(wait=False, cancel_futures=True)
 
 
-def evaluate_records(records, predictor, directory, temperature=1.0, heldout_sources=(), skip_overlong=False):
+def evaluate_records(records, predictor, directory, temperature=1.0, heldout_sources=(), skip_overlong=False, identical=0):
     """Score `records` into `directory` (which must not exist) and return (report, rows). The first record that fails
     stops the run, with failure.json saying which and how far it got. skip_overlong: for data never admitted to a context
     (--data, or an eval-only suite frozen as published), a record the predictor cannot encode is counted in
     coverage["rejected_records"] and listed in rejected.json instead; admitted suites never hit it. A report must say how
-    rejected records enter any headline number."""
+    rejected records enter any headline number. identical: how many identical-option controls to score after the records
+    (identical_controls; 0 for none), reported apart and written to identical_options.json."""
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=False)
     coverage = {"requested_records": len(records), "requested_questions": sum(len(r["questions"]) for r in records),
@@ -228,6 +275,12 @@ def evaluate_records(records, predictor, directory, temperature=1.0, heldout_sou
     report["latency_ms"] = {"median": float(np.median(latencies)), "p95": float(np.quantile(latencies, .95))}
     report["calibration"] = {"inference_temperature": getattr(predictor, "temperature", None), "additional_temperature": temperature,
                              "logits_recorded": all("logits" in row for row in rows)}
+    if identical:
+        skipped = {r["id"] for r in rejected}
+        controls = [c for c in identical_controls(records, identical + len(skipped)) if c["_meta"]["id"].split("#identical:")[0] not in skipped][:identical]
+        answers = [next(iter(call()["probabilities"].values())) for call in predictions(controls, predictor)]
+        report["identical_options"] = identical_report(answers)
+        write_json(directory / "identical_options.json", [{"id": c["_meta"]["id"], "p": a} for c, a in zip(controls, answers)])
     long = [row for row in rows if "kernels" in row]
     if long:   # absent when every row ran the exact kernels, so those reports are unchanged
         report["long_rows"] = {"count": len(long), "records": len({row["id"] for row in long}), "kernels": sorted({row["kernels"] for row in long}),
@@ -256,6 +309,8 @@ def parse_args(argv=None):
                     help="suite partition to score (train: teacher predictions for distillation; --allow-test reads the locked test instead)")
     ap.add_argument("--date_facts", action="store_true", help="apply d1a.api.with_date_facts to every state before scoring (the opt-in serving preprocessor); reported in report.json")
     ap.add_argument("--rotations", type=int, default=1, help="average every Choice question over this many cyclic option rotations (d1a.predictors.RotationAveraged); 1 = one order")
+    ap.add_argument("--identical-options", type=int, default=100, help="identical-option controls scored after the suite (position bias, #38): "
+                    "the first N clean choice questions asked with every option the same text; 0 for none")
     a = ap.parse_args(argv)
     if bool(a.run) == bool(a.remote): ap.error("give exactly one of --run or --remote")
     if a.rotations < 1: ap.error("--rotations must be >= 1")
@@ -287,7 +342,7 @@ def main():
     else:
         predictor = LocalPredictor(a.run, a.device, LoadOptions.from_env(), context=context)
     scorer = RotationAveraged(predictor, a.rotations) if a.rotations > 1 else predictor
-    report, _ = evaluate_records(records, scorer, a.out, heldout_sources=tuple(heldout), skip_overlong=skip_overlong)
+    report, _ = evaluate_records(records, scorer, a.out, heldout_sources=tuple(heldout), skip_overlong=skip_overlong, identical=a.identical_options)
     report.update(suite_sha256=source_hash, data=a.data, date_facts=a.date_facts, rotations=a.rotations, run=a.run or a.remote, split=split,
                   calibration_applied=None if a.remote else predictor.temperature != 1.0,
                   remote={"base_url": a.remote, "requested_model": a.remote_model, "served_model": predictor.served_model,
