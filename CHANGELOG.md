@@ -22,6 +22,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `meta["src"]`): labels merge per question, and a person's (`human`) beats another model's (e.g. `reviewer`) whatever
   arrived last. `python -m d1a.feedback status|records|calibrate --src` keeps one source. First stream: the PR labeler's
   type and blast-radius questions, with the review bot's labels as outcomes.
+- Conformance against committed golden vectors (#64): `tests/golden/tiny-gemma4/` holds a tiny Gemma 4 checkpoint
+  (weights in git, 556 KB, built by `tests/golden/build_tiny_gemma4.py`) and `golden.json`, with 40 requests and 154
+  questions. `tests/test_conformance.py` requires its token ids exactly and every probability to 1e-5, through the model,
+  `d1a.serve` and `scripts/golden_vectors.py compare`.
 - `scripts/equivalence/` (`api.py`, `metrics.py`, `benchmark.py`, `suite.py`): each runs a rewritten module and the same
   module at a git commit (`--ref`; the default is the last commit before its rewrite) on generated inputs, and stops at
   the first difference: types, float bits, key order, files byte for byte, error messages.
@@ -36,6 +40,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `d1a/suite.py` is rewritten in D1A's own code, no longer derived from Kev. The pins, the partition checks, the Hub
   mirror rules, the file formats (byte for byte) and the training-source guard are unchanged (`scripts/equivalence/suite.py`).
   Its tests are rewritten too, as `tests/test_suite.py`.
+- `d1a/data.py` is rewritten in D1A's own code, no longer derived from Kev. Every converter, `build`, `augment`,
+  `none_pair`, `load_records` and `materialize` gives the same records from the same seeds, every random draw in the same
+  order (`scripts/equivalence/data.py`, new). Its tests are rewritten too, as `tests/test_data.py`.
 - CI runs every test file (`pytest tests --unit`) except the few `tests/conftest.py`'s `OUTSIDE_UNIT_TESTS` lists with
   why, instead of a list naming each file: a new test file runs without being listed, and two pull requests adding test
   files no longer conflict on that list. The release runs the same command. CI keeps the Hugging Face cache (the pinned
@@ -58,6 +65,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `d1a.benchmark`, and the rule shapes that `d1a.suite.validate_training` checks stay. See docs/removed-tools.md (#65).
 - The `d1a.data` converters only that freezer read (13 sources; `build()` keeps its six defaults) and
   `scripts/longdoc_serving.py`, which ran only through Kev's removed Modal app (#65).
+
+### Fixed
+
+- `scripts/golden_vectors.py compare` no longer crashes on a one-option question (a choice with one criterion or a
+  one-level score), which has no second-best probability to measure a flip margin against.
 
 ## [0.3.0] - 2026-10-05
 
