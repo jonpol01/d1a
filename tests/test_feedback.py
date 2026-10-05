@@ -1,7 +1,7 @@
 import numpy as np
 
 from d1a.data import materialize
-from d1a.feedback import FeedbackLog, OutcomeCalibrator, gate, log_loss, records
+from d1a.feedback import FeedbackLog, OutcomeCalibrator, gate, log_loss, pairs, records
 
 Q = {"resolved": {"type": "noul", "instr": "Does the patch fix the issue?", "criteria": {"true": "fixes it", "false": "does not"}}}
 
@@ -37,3 +37,46 @@ def test_gate_promotes_only_a_clearly_better_candidate_without_suite_regressions
     assert not gate(y, poor, poor, groups)["promote"]          # no improvement is not a promotion
     blocked = gate(y, good, poor, groups, suite_deltas={"decision-v7": -0.03, "hard-v1": 0.0})
     assert not blocked["promote"] and "decision-v7" in blocked["regressions"]
+
+
+def test_serve_logs_decisions_accepts_outcomes_and_applies_a_reloaded_calibrator(tmp_path, monkeypatch):
+    """d1a.serve's self-learning hooks: with a log, every answer carries a decision_id and POST /v1/feedback records its
+    outcome; with a calibrator file, yes/no answers are recalibrated and a rewritten file takes effect on the next answer;
+    with neither, /v1/feedback is a 404."""
+    import os
+    from types import SimpleNamespace
+    from fastapi.testclient import TestClient
+    from d1a import serve
+    from d1a.api import SystemOneRequest, to_record
+    req = SystemOneRequest(state="issue + patch", questions=Q)
+    _, meta = to_record(req)
+    fake = SimpleNamespace(checkpoint=SimpleNamespace(requested="JohnP1/d1a-e4b-mlx-q8@v0.4"), tok=None)
+    monkeypatch.setattr(serve, "output_tokens", lambda tok, answers: 0)
+    cal_path = tmp_path / "cal.json"
+    OutcomeCalibrator({"resolved": [1.0, -2.0, 50]}).save(cal_path)
+    monkeypatch.setattr(serve, "LEARNING", serve.Learning(tmp_path / "log.jsonl", cal_path))
+    body = serve.Server._body(fake, req, meta, [[0.2, 0.8]], {"tokens": 10, "latency_ms": 1.0})
+    expected = round(OutcomeCalibrator({"resolved": [1.0, -2.0, 50]}).p("resolved", 0.8), 4)
+    assert body["answers"]["resolved"]["noul"] == expected < 0.8 and body["decision_id"]
+    with TestClient(serve.app) as client:
+        assert client.post("/v1/feedback", json={"decision_id": body["decision_id"], "labels": {"resolved": False}}).json() == {"ok": True}
+    (d,) = serve.LEARNING.log.resolved()
+    assert d["id"] == body["decision_id"] and d["labels"] == {"resolved": False} and d["run"] == "JohnP1/d1a-e4b-mlx-q8@v0.4"
+    assert d["answers"]["resolved"]["noul"] == 0.8 and d["meta"]["served"]["resolved"]["noul"] == expected   # the model's P is logged, the served one beside it
+    assert d["questions"]["resolved"]["type"] == "noul"
+    for i in range(30):                                                        # recalibrating on the live log fits the model's P, not the served one
+        did = serve.Server._body(fake, req, meta, [[0.2, 0.8]], {"tokens": 10, "latency_ms": 1.0})["decision_id"]
+        serve.LEARNING.outcome(did, {"resolved": i < 6})
+    p_logged, y_logged = pairs(serve.LEARNING.log.resolved(), "resolved")
+    assert set(p_logged) == {0.8}
+    refit = OutcomeCalibrator().fit(serve.LEARNING.log.resolved(), min_outcomes=10)
+    assert abs(refit.p("resolved", 0.8) - y_logged.mean()) < 0.02            # applied to the raw P the next request gives, it lands on the outcome rate
+    OutcomeCalibrator({"resolved": [1.0, 0.0, 50]}).save(cal_path)                 # a new calibrator, picked up without a restart
+    os.utime(cal_path, (os.path.getmtime(cal_path) + 5,) * 2)
+    again = serve.Server._body(fake, req, meta, [[0.2, 0.8]], {"tokens": 10, "latency_ms": 1.0})
+    assert again["answers"]["resolved"]["noul"] == 0.8
+    monkeypatch.setattr(serve, "LEARNING", serve.Learning())
+    plain = serve.Server._body(fake, req, meta, [[0.2, 0.8]], {"tokens": 10, "latency_ms": 1.0})
+    assert "decision_id" not in plain and plain["answers"]["resolved"]["noul"] == 0.8
+    with TestClient(serve.app) as client:
+        assert client.post("/v1/feedback", json={"decision_id": "x", "labels": {"resolved": True}}).status_code == 404
