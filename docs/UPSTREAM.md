@@ -77,9 +77,10 @@ the Apache License 2.0. This file records where D1A's code came from and what D1
   and `tests/test_generators.py`. Then the `d1a/data.py` converters only that freezer read (13 sources; `build()` keeps
   its six defaults) and `scripts/longdoc_serving.py` (CUDA long-document serving cost, run through the removed Modal app).
 - **Rewritten from scratch** (no longer derived): `d1a/calibrate.py`, `scripts/calibrate_checkpoint.py` (now a wrapper
-  around it), `d1a/metrics.py` (bit-identical results, checked against the Kev-derived version on generated and saved
-  rows) with its tests, now `tests/test_metrics.py`, and `d1a/benchmark.py` (the same rows, reports and files, checked
-  against the Kev-derived version) with its tests, now `tests/test_benchmark.py`.
+  around it), `d1a/api.py` (the same schema, texts and answers, checked against the Kev-derived version on generated
+  requests) with its tests, now `tests/test_system_one.py`, `d1a/metrics.py` (bit-identical results, checked against
+  the Kev-derived version on generated and saved rows) with its tests, now `tests/test_metrics.py`, and `d1a/benchmark.py`
+  (the same rows, reports and files, checked against the Kev-derived version) with its tests, now `tests/test_benchmark.py`.
 - **Rewritten**: `README.md`, `AGENTS.md`, `NOTICE`, `.gitignore`.
 - **Kept as is**: the frozen suites in `evals/` (large partitions still download from Kev's Hub dataset
   `jaredpalmer/kev-suites`), the suite builders in `scripts/`.
@@ -92,7 +93,6 @@ changes at the top; `scripts/check_license.py` checks that this list and the hea
 ```text
 .github/workflows/ci.yml
 .gitignore
-d1a/api.py
 d1a/checkpoint.py
 d1a/composition.py
 d1a/cuda_graphs.py

@@ -1,5 +1,5 @@
 # Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); dropped the published-claims check and the removed space/ app; modal_app.py left the scanned sources; the rules of the removed Kev research modules (experiment, rounds) left with them, and calibration's moved to d1a.calibrate.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); dropped the published-claims check and the removed space/ app; modal_app.py left the scanned sources; the rules of the removed Kev research modules (experiment, rounds) left with them, and calibration's moved to d1a.calibrate; every test file runs in CI's UNIT_TESTS or is listed with the reason it does not.
 """Source conventions: facts that have one canonical home must not be re-derived elsewhere.
 
 Each rule is (what it guards, regex, files allowed to match). A failure means a second copy of a rule that already has
@@ -24,7 +24,7 @@ RULES = [
     ("a checkpoint becomes a model only through d1a.checkpoint (Checkpoint.load picks the torch or MLX implementation)",
      r"MLXDecisionModel\(|merge_lora\(", {"d1a/checkpoint.py", "d1a/mlx_model.py", "tests/test_mlx.py"}),
     ("option keys come from d1a.api.question_keys",
-     r"\[\s*\"false\"\s*,\s*\"true\"\s*\]|\[str\(i\) for i in range\(len\(", {"d1a/api.py", "tests/test_unit.py", "tests/test_tiny_checkpoint.py"}),   # these tests pin the contract (the second re-derives it on purpose)
+     r"\[\s*\"false\"\s*,\s*\"true\"\s*\]|\[str\(i\) for i in range\(len\(", {"d1a/api.py", "tests/test_system_one.py", "tests/test_tiny_checkpoint.py"}),   # these tests pin the contract (the second re-derives it on purpose)
     ("the training context is d1a.model.MAX_STATE/MAX_BRANCH/MAX_PACKED, lifted only through d1a.model.training_context (d1a.suite.CONTEXT in manifests), and d1a.model.fits",
      r"(?<![\w.])(>|<=|>=|<)\s*2048\b|\b2048\s*(<|>)|max_(branch|state|packed)\"?\s*[=:]\s*\d{3,}", {"d1a/model.py"}),
     ("the serving / long-state limits (SERVE_MAX_*, ROW_PASS_TOKENS, MAX_TRAIN_STATE) and the pre-64k aliases the frozen suites' builders "
@@ -96,3 +96,21 @@ def test_release_runs_the_same_unit_tests_as_ci():
     import yaml
     runs = [s.get("run", "") for s in yaml.safe_load(release)["jobs"]["release"]["steps"]]
     assert any("pytest" in r and "UNIT_TESTS" in r for r in runs), runs
+
+
+# Test files CI's unit job does not run, and why. Every other tests/test_*.py must be in UNIT_TESTS.
+OUTSIDE_UNIT_TESTS = {
+    "tests/test_api.py": "needs a running d1a.serve (pytest -m server)",
+    "tests/test_model.py": "needs real weights and the smoke checkpoint",
+    "tests/test_mlx.py": "needs MLX and real weights; its weight-free tests run in the Apple Silicon job",
+}
+
+
+def test_every_test_file_runs_in_ci():
+    """A merge that resolves a UNIT_TESTS conflict by keeping one side drops the other side's new suite silently (#136: two
+    PRs each added a file to the same line); a file left out of UNIT_TESTS must be listed above with its reason."""
+    import re
+    ci = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    listed = set(re.search(r"^ *UNIT_TESTS: *(.+)$", ci, re.M).group(1).split())
+    files = {str(f.relative_to(ROOT)) for f in (ROOT / "tests").glob("test_*.py")}
+    assert files - listed == set(OUTSIDE_UNIT_TESTS), sorted(files - listed - set(OUTSIDE_UNIT_TESTS))

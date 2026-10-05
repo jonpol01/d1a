@@ -325,7 +325,7 @@ D1A-E4B is the most accurate so far, ahead of Jev (0.845) on sources it trained 
 
 ```bash
 uv sync --extra serve
-uv run python -m pytest tests/test_unit.py tests/test_metrics.py tests/test_benchmark.py tests/test_tiny_checkpoint.py tests/test_versions.py tests/test_feedback.py tests/test_research.py \
+uv run python -m pytest tests/test_unit.py tests/test_system_one.py tests/test_metrics.py tests/test_benchmark.py tests/test_tiny_checkpoint.py tests/test_versions.py tests/test_feedback.py tests/test_research.py \
     tests/test_conventions.py tests/test_frozen_suites.py tests/test_mlx_export.py -q   # CI's list: UNIT_TESTS in .github/workflows/ci.yml
 python scripts/check_license.py          # license and provenance rules (see CONTRIBUTING.md)
 ```
