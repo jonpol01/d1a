@@ -166,10 +166,18 @@ The last suite builder, inside the package, and the code only it (and the builde
   for invariance. The study harness used it for decision-v4 and decision-v7. The rule shapes and structure keys stay,
   because `d1a.suite.validate_training` uses them to refuse held-out compositional structures in training.
 
+- **`d1a/data.py`'s other converters**: trec, dbpedia14, emotion, imdb, amazon, qnli, tweet_offensive, mmlu, paws,
+  sciq, arc, openbookqa and csqa (`ALL_SOURCES`, `ALL_REPOS`, `TRAINABLE`, the `TRANSFER_*` subsets, and the
+  parquet-branch pin `trec` needed). Only the freezer's `--sources`/`--transfer` read them; `d1a.train`'s `build()`
+  default is the six `SOURCES`, unchanged. `EVAL_ONLY` stays: training still refuses those sources' records.
+- **`scripts/longdoc_serving.py`**: long-document serving cost on CUDA (latency, peak and resident memory per state-length
+  bucket on longdoc-v1 development records, one cached repeat per bucket), run on an H200 through the removed Modal app.
+
 The suites stay as data, pinned by their manifests. Their `code_hashes` name Kev's files, so rebuild a suite with Kev's
 code at the commit the table above names. To bring back D1A's last copy of these files:
 
 ```bash
 git show aeaa97c0:d1a/suite.py                      # freeze, main and their helpers
 git checkout aeaa97c0 -- d1a/contrastive.py d1a/composition.py tests/test_generators.py
+git checkout aeaa97c0 -- d1a/data.py scripts/longdoc_serving.py
 ```
