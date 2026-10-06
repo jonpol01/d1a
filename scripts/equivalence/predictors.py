@@ -20,6 +20,7 @@ from common import ROOT, Checker, arguments, exact, module_at  # noqa: E402
 
 import d1a.eval.predictors as new  # noqa: E402
 from d1a.backends.checkpoint import LoadOptions  # noqa: E402
+from d1a.core.encoding import training_context  # noqa: E402
 
 WORDS = "the customer is charged twice which team billing shipping refund angry how bad no yes order late lost box arrived wrong size".split()
 CHECKPOINT = "tests/golden/tiny-gemma4/checkpoint"   # relative: the checkpoint names its base by a path from the repository
@@ -84,7 +85,7 @@ def local(check, old, rng, iterations):
         old.ROW_PASS_TOKENS, new.ROW_PASS_TOKENS, old.sync, new.sync = saved
     for limit in (5, 20, 60):                                                # context overflows
         for name, p in (("old", a), ("new", b)):
-            p.context = {"max_state": 4096, "max_branch": 4096, "max_packed": limit}
+            p.context = {**training_context(), "max_packed": limit}
         for i, r in enumerate(records[:15]):
             check.same(f"packed limit {limit} record {i}", lambda: without_latency(a(r)), lambda: without_latency(b(r)))
 
