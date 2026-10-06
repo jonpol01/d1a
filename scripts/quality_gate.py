@@ -31,6 +31,8 @@ from pathlib import Path
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
+CARD_SUITES = ("v7/decision-v7", "v4/transfer-v4", "hard-v1", "devtools-v1", "documents-v1")   # Kev-4B's card suites we can score (#58, #167)
+SERVER_EXTRAS = ("serve", "mlx", "media")   # what the gate's two servers import
 MEDIA_GROUPS = ("demo:photo", "demo:voice", "demo:video")   # left out of the overall latency: a few slow requests each
 LEARNING_ENV = ("D1A_FEEDBACK_LOG", "D1A_OUTCOME_CALIBRATOR", "D1A_OUTCOME_MEMORY")
 
@@ -161,9 +163,34 @@ def checkout(ref):
         shutil.rmtree(path.parent, ignore_errors=True)
 
 
-def dependencies(path):
+def requirements(path, extras=SERVER_EXTRAS):
+    """A version's declared requirements: its dependencies and those of the extras the gate's servers use."""
     project = tomllib.loads((Path(path) / "pyproject.toml").read_text(encoding="utf-8"))["project"]
-    return project.get("dependencies"), project.get("optional-dependencies")
+    optional = project.get("optional-dependencies", {})
+    return list(project.get("dependencies", [])) + [r for e in extras for r in optional.get(e, [])]
+
+
+def unmet(reqs):
+    """The requirements this environment does not satisfy (both versions run in it, so each must be met here)."""
+    from importlib.metadata import PackageNotFoundError, version
+    from packaging.requirements import Requirement
+    out = []
+    for text in reqs:
+        r = Requirement(text)
+        if r.marker is not None and not r.marker.evaluate({"extra": ""}):
+            continue
+        try:
+            installed = version(r.name)
+        except PackageNotFoundError:
+            out.append(f"{text} (not installed)"); continue
+        if r.specifier and not r.specifier.contains(installed, prereleases=True):
+            out.append(f"{text} (installed {installed})")
+    return out
+
+
+def suite_list(suites, card):
+    """--suites, plus the five card suites with --card-suites (each once, in that order)."""
+    return list(dict.fromkeys([*filter(None, suites.split(",")), *(CARD_SUITES if card else ())]))
 
 
 @contextmanager
@@ -272,6 +299,7 @@ def main():
     ap.add_argument("--demo-requests", default=str(ROOT / "runs/labeler-replay/demo-requests.json"), help="the demo requests as a file, without --playground")
     ap.add_argument("--replay", default=str(ROOT / "runs/labeler-replay"), help="the labeler replay kit (labeler-calls.jsonl, questions.json); private, never committed")
     ap.add_argument("--suites", default="", help="comma-separated suites to score too: evals/ directories, or <d1a suite>:<partition>")
+    ap.add_argument("--card-suites", action="store_true", help=f"also score the five card suites ({', '.join(CARD_SUITES)}); required for a fine-tune (AGENTS.md)")
     ap.add_argument("--suite-run", help="weights for --suites (default: --run)")
     ap.add_argument("--tol", type=float, default=1e-6, help="largest probability move allowed (default 1e-6)")
     ap.add_argument("--ports", default="8101,8102")
@@ -288,15 +316,18 @@ def main():
     report, failures = {"base": a.base, "head": a.head, "run": a.run, "requests": len(reqs)}, []
     with ExitStack() as stack:
         base_dir, head_dir = stack.enter_context(checkout(a.base)), stack.enter_context(checkout(a.head))
-        if dependencies(base_dir) != dependencies(head_dir):
-            raise SystemExit("base and head declare different dependencies: run each in its own environment instead")
+        missing = {side: unmet(requirements(d)) for side, d in (("base", base_dir), ("head", head_dir))}
+        if any(missing.values()):
+            raise SystemExit("this environment does not meet: " + "; ".join(f"{side}: {', '.join(m)}" for side, m in missing.items() if m))
+        rb, rh = set(requirements(base_dir)), set(requirements(head_dir))
+        report["dependencies"] = {"base_only": sorted(rb - rh), "head_only": sorted(rh - rb)}   # met here either way
         floor = latency(run_pair(base_dir, base_dir, reqs, a.run, ports, out / "floor"))
         records = run_pair(base_dir, head_dir, reqs, a.run, ports, out / "gate")
         groups, failures = compare(records, a.tol)
         lat = latency(records)
         failures += [f for f in [latency_failure(lat["all text"], floor["all text"])] if f]
         report |= {"groups": groups, "latency": lat, "floor": floor}
-        for suite in filter(None, a.suites.split(",")):
+        for suite in suite_list(a.suites, a.card_suites):
             d = out / "suites" / suite.replace("/", "_").replace(":", "_")
             for side, path in (("base", base_dir), ("head", head_dir)):
                 benchmark(path, a.suite_run or a.run, suite, d / side)
