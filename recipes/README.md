@@ -32,5 +32,8 @@ is the full size:
   Resume points go to the HF bucket. Outputs go to the private run repo.
 - **Scoring is separate**, on the same path as the checkpoints it is compared with (the five card suites plus pr-labels
   test and test-ja), then the gates above before it replaces anything.
+- **The verdict table:** `scripts/compare_checkpoints.py --ref v0.4=<scores> --run <name>=<scores> --fit <name>=<calibration
+  rows> --bar hard-v1=3 --bar devtools-v1=3 --floor -1`. It gives per-suite accuracy with paired, record-resampled 95% intervals
+  against the reference, ECE at each checkpoint's fitted temperature, and the bar.
 
     git push && ./skills/launch_hf_job.sh skills-v1 8h      # from the B0 skills checkpoint; INIT=JohnP1/d1a-e4b@v0.4 for v0.4
