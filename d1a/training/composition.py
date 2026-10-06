@@ -1,8 +1,15 @@
-# Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: only the rule shapes and structure keys d1a.eval.suite.validate_training checks are kept; the record generator left with Kev's suite builder.
-"""The compositional rule shapes of the frozen suites (decision-v4, decision-v7), and the structure keys that tell a
-training record built on a held-out shape from one built on a training shape (d1a.eval.suite.validate_training)."""
+"""The rule shapes of the frozen compositional suites (decision-v4, decision-v7), as boolean expression trees, and the
+structure keys that tell a training record built on a held-out shape from one built on a training shape
+(d1a.eval.suite.validate_training).
 
+A tree is an atom index (an int) or a tuple (operator, child, ...): ("not", a), ("and", a, b), ("or", a, b),
+("unless", a, b) (a, unless b) and ("if", a, b, c) (if a then b else c). Two trees share a structure key when they differ
+only in the order of an "and" / "or"'s children and in which atom numbers were drawn; a tree also carries the key of its
+form with every negation pushed down to the atoms (De Morgan), so a random tree equivalent to a held-out shape in that
+form is held out too.
+"""
+
+# The shapes in the order the suites split them: the first 8 train, the next 3 development, the last 3 test.
 SHAPES = {
     "atom": 0,
     "negation": ("not", 0),
@@ -19,66 +26,84 @@ SHAPES = {
     "final_negation": ("not", ("or", ("and", 0, 1), 2)),
     "final_exception": ("or", ("unless", 0, 1), 2),
 }
-TRAIN_SHAPES = tuple(list(SHAPES)[:8])
-DEV_SHAPES = tuple(list(SHAPES)[8:11])
-TEST_SHAPES = tuple(list(SHAPES)[11:])
+_NAMES = tuple(SHAPES)
+TRAIN_SHAPES, DEV_SHAPES, TEST_SHAPES = _NAMES[:8], _NAMES[8:11], _NAMES[11:]
+
+COMMUTATIVE = ("and", "or")
+DUAL = {"and": "or", "or": "and"}
+
+
+def is_atom(tree):
+    return isinstance(tree, int)
 
 
 def skeleton(tree):
-    """Structure with leaf identities erased: used to order commutative children independently of atom numbering."""
-    if isinstance(tree, int): return "_"
-    op, *children = tree
-    parts = [skeleton(c) for c in children]
-    if op in ("and", "or"): parts = sorted(parts)
-    return f"{op}({','.join(parts)})"
+    """The tree with every atom written "_" and commutative children sorted: what orders those children independently of
+    the atom numbers drawn."""
+    if is_atom(tree):
+        return "_"
+    op, children = tree[0], [skeleton(c) for c in tree[1:]]
+    return f"{op}({','.join(sorted(children) if op in COMMUTATIVE else children)})"
 
 
 def sort_commutative(tree):
-    if isinstance(tree, int): return tree
-    op, *children = tree
-    children = [sort_commutative(c) for c in children]
-    if op in ("and", "or"): children = sorted(children, key=skeleton)
-    return (op, *children)
-
-
-def canonical(tree):
-    """Structure key: commutative children ordered by skeleton, then leaves renumbered in traversal order, so
-    (A and B) or not C and not C or (B and A) share one key."""
-    t = relabel(sort_commutative(tree))
-    def render(t):
-        if isinstance(t, int): return str(t)
-        return f"{t[0]}({','.join(render(c) for c in t[1:])})"
-    return render(t)
-
-
-def push_negation(tree):
-    """De Morgan normal form, so a random tree equivalent to a held-out shape under negation pushing is also excluded."""
-    if isinstance(tree, int): return tree
-    op, *children = tree
-    if op == "not":
-        inner = children[0]
-        if isinstance(inner, int): return tree
-        iop, *ic = inner
-        if iop == "not": return push_negation(ic[0])
-        if iop in ("and", "or"): return ("or" if iop == "and" else "and", *[push_negation(("not", c)) for c in ic])
-        if iop == "unless": return push_negation(("or", ("not", ic[0]), ic[1]))
-        return ("not", push_negation(inner))
-    if op == "unless": return ("and", push_negation(children[0]), push_negation(("not", children[1])))
-    return (op, *[push_negation(c) for c in children])
+    """The tree with each "and" / "or"'s children in skeleton order."""
+    if is_atom(tree):
+        return tree
+    op, children = tree[0], [sort_commutative(c) for c in tree[1:]]
+    return (op, *(sorted(children, key=skeleton) if op in COMMUTATIVE else children))
 
 
 def relabel(tree):
-    """Renumber leaves in first-appearance order so structure keys do not depend on which atom index was drawn."""
-    mapping = {}
+    """The tree with its atoms renumbered in order of first appearance (depth first, left to right)."""
+    numbers = {}
+
     def walk(t):
-        if isinstance(t, int):
-            mapping.setdefault(t, len(mapping)); return mapping[t]
-        return (t[0], *[walk(c) for c in t[1:]])
+        if is_atom(t):
+            return numbers.setdefault(t, len(numbers))
+        return (t[0], *(walk(c) for c in t[1:]))
     return walk(tree)
 
 
+def render(tree):
+    return str(tree) if is_atom(tree) else f"{tree[0]}({','.join(render(c) for c in tree[1:])})"
+
+
+def canonical(tree):
+    """The structure key: commutative children sorted, then atoms renumbered, so (A and B) or not C and not C or (B and A)
+    share one key."""
+    return render(relabel(sort_commutative(tree)))
+
+
+def push_negation(tree):
+    """The tree with each negation pushed down to the atoms (De Morgan; "a unless b" is "a and not b"). A negated "if" stays
+    negated, its branches pushed."""
+    if is_atom(tree):
+        return tree
+    op, children = tree[0], tree[1:]
+    if op == "unless":
+        a, b = children
+        return ("and", push_negation(a), push_negation(("not", b)))
+    if op != "not":
+        return (op, *(push_negation(c) for c in children))
+    inner = children[0]
+    if is_atom(inner):
+        return tree
+    iop, ichildren = inner[0], inner[1:]
+    if iop == "not":
+        return push_negation(ichildren[0])
+    if iop in DUAL:
+        return (DUAL[iop], *(push_negation(("not", c)) for c in ichildren))
+    if iop == "unless":   # not (a unless b) = not (a and not b) = not a or b
+        a, b = ichildren
+        return push_negation(("or", ("not", a), b))
+    return ("not", push_negation(inner))
+
+
 def structure_keys(tree):
+    """The tree's keys: its own and that of its negation-pushed form."""
     return {canonical(tree), canonical(push_negation(tree))}
 
 
-HELD_OUT_KEYS = set().union(*(structure_keys(SHAPES[s]) for s in DEV_SHAPES + TEST_SHAPES))
+# Every key a development or test shape has: a training record on any of them is refused.
+HELD_OUT_KEYS = set().union(*(structure_keys(SHAPES[name]) for name in DEV_SHAPES + TEST_SHAPES))

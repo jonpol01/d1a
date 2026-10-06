@@ -87,6 +87,8 @@ the Apache License 2.0. This file records where D1A's code came from and what D1
   - `d1a/backends/torch.py` (its encoding and pointer head now in `d1a/core/encoding.py` and `d1a/core/head.py`, #60): the same
     encodings, masks, probabilities and training gradients, bit for bit, on Gemma 4 and Qwen3.5.
   - `d1a/eval/suite.py`: the same pins, partition checks, mirror rules and file formats; its tests are `tests/test_suite.py`.
+  - `d1a/training/composition.py`: the same shapes, splits, held-out keys and structure keys; checked by
+    `scripts/equivalence/composition.py`.
   - `d1a/training/train.py`: the same training, bit for bit on the CPU, resumes included; its tests are `tests/test_train.py`.
 - **Rewritten**: `README.md`, `AGENTS.md`, `NOTICE`, `.gitignore`.
 - **Kept as is**: the frozen suites in `evals/` (large partitions still download from Kev's Hub dataset
@@ -100,7 +102,6 @@ changes at the top; `scripts/check_license.py` checks that this list and the hea
 ```text
 .github/workflows/ci.yml
 .gitignore
-d1a/training/composition.py
 d1a/backends/cuda_graphs.py
 d1a/backends/fused_qwen35.py
 d1a/backends/mlx.py
