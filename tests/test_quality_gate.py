@@ -101,3 +101,25 @@ def test_card_suites():
     assert all((ROOT / "evals" / s / "manifest.json").exists() for s in gate.CARD_SUITES)
     assert gate.suite_list("", False) == [] and gate.suite_list("hard-v1,pr-labels:development", True) == \
         ["hard-v1", "pr-labels:development", "v7/decision-v7", "v4/transfer-v4", "devtools-v1", "documents-v1"]
+
+
+def test_the_status_goes_on_the_exact_commit_tested():
+    """--post-status: the head's own commit only when its checkout is clean; another repository's commit when named."""
+    import pytest
+    head = "a" * 40
+    assert gate.status_target("", head, False, "jonpol01/d1a") == ("jonpol01/d1a", head)
+    with pytest.raises(SystemExit, match="uncommitted changes"):
+        gate.status_target("", head, True, "jonpol01/d1a")
+    assert gate.status_target("jonpol01/d1a-playground@" + "b" * 40, head, True, "jonpol01/d1a") == ("jonpol01/d1a-playground", "b" * 40)
+    for bad in ("jonpol01/d1a-playground", "repo@" + "b" * 40, "o/r@abc"):
+        with pytest.raises(SystemExit, match="owner/repo@commit"):
+            gate.status_target(bad, head, False, "jonpol01/d1a")
+    assert gate.pinned('X=1\nD1A_SHA="' + "c" * 40 + '"   # the pin\n') == "c" * 40 and gate.pinned("D1A_SHA=") is None
+
+
+def test_the_status_text_fits_and_says_why():
+    groups = {"demo:routing": {"requests": 145, "questions": 300, "flips": 0, "max_dp": 0.0}, "labeler-replay": {"requests": 92, "questions": 276, "flips": 0, "max_dp": 3e-7}}
+    report = {"verdict": "PASS", "requests": 237, "groups": groups, "latency": {"all text": {"ratio": 0.9991}}, "floor": {"all text": {"ratio": 1.0029}}}
+    assert gate.status_description(report, "d" * 40) == "PASS vs dddddddd: 237 requests, 0 flips, max dp 3e-07, latency 0.999 (floor 1.003)"
+    failed = gate.status_description({"verdict": "FAIL", "failures": ["demo:routing | en: Quick fact / route: small -> large" * 5]}, "d" * 40)
+    assert failed.startswith("FAIL: 1 failures, e.g. demo:routing") and len(failed) == 140
