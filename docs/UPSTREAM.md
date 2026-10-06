@@ -86,9 +86,13 @@ the Apache License 2.0. This file records where D1A's code came from and what D1
     SDPA, padded and unpadded states, checkpointing on and off); checked by `scripts/equivalence/shared_prefix.py`.
   - `d1a/training/data.py`: the same records from the same seeds (every draw in the same order); its tests are `tests/test_data.py`.
   - `d1a/eval/metrics.py`: bit-identical results; its tests are `tests/test_metrics.py`.
+  - `d1a/eval/predictors.py`: the same predictions, requests, retries and rotation averages; checked by
+    `scripts/equivalence/predictors.py` (local, remote and rotation-averaged predictors).
   - `d1a/backends/torch.py` (its encoding and pointer head now in `d1a/core/encoding.py` and `d1a/core/head.py`, #60): the same
     encodings, masks, probabilities and training gradients, bit for bit, on Gemma 4 and Qwen3.5.
   - `d1a/eval/suite.py`: the same pins, partition checks, mirror rules and file formats; its tests are `tests/test_suite.py`.
+  - `d1a/training/composition.py`: the same shapes, splits, held-out keys and structure keys; checked by
+    `scripts/equivalence/composition.py`.
   - `d1a/training/train.py`: the same training, bit for bit on the CPU, resumes included; its tests are `tests/test_train.py`.
 - **Rewritten**: `README.md`, `AGENTS.md`, `NOTICE`, `.gitignore`.
 - **Kept as is**: the frozen suites in `evals/` (large partitions still download from Kev's Hub dataset
@@ -102,11 +106,9 @@ changes at the top; `scripts/check_license.py` checks that this list and the hea
 ```text
 .github/workflows/ci.yml
 .gitignore
-d1a/training/composition.py
 d1a/backends/cuda_graphs.py
 d1a/backends/fused_qwen35.py
 d1a/backends/mlx.py
-d1a/eval/predictors.py
 d1a/serving/serve.py
 pyproject.toml
 scripts/mlx_parity.py
