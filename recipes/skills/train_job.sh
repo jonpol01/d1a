@@ -10,12 +10,14 @@
 #   INIT               starting checkpoint, repo[@revision][:subfolder] [JohnP1/d1a-e4b-runs:skills-b0-300/init]
 #   REPLAY_DV7, LR, MAX_STATE, CKPT   decision-v7 replay, learning rate, state tokens, resume-point dir [1000, 2e-5, 6400, /ckpt]
 #   (the mix's longest state is 6,209 tokens with the Gemma 4 tokenizer: 6,400 keeps every record)
+#   BATCH, ACCUM       records per forward/backward pass and passes per optimizer step [1, 8]: 8 records a step either
+#                      way; on an L4 (22 GB) 2 records of the 40 longest states ran out of memory (job 6ac4f484, #175)
 # The first thing it runs is 5 steps on the 40 longest states (the memory worst case): a card that cannot hold them stops
 # the job within minutes.
 set -uo pipefail
 : "${D1A_SHA:?}" "${REPO:?}" "${PREFIX:?}"
 INIT=${INIT:-JohnP1/d1a-e4b-runs:skills-b0-300/init}; REPLAY_DV7=${REPLAY_DV7:-1000}
-LR=${LR:-0.00002}; MAX_STATE=${MAX_STATE:-6400}; CKPT=${CKPT:-/ckpt}
+LR=${LR:-0.00002}; MAX_STATE=${MAX_STATE:-6400}; CKPT=${CKPT:-/ckpt}; BATCH=${BATCH:-1}; ACCUM=${ACCUM:-8}
 export INIT
 nvidia-smi --query-gpu=name,memory.total --format=csv
 [ -d /d1a ] || git clone -q https://github.com/jonpol01/d1a /d1a
@@ -43,7 +45,7 @@ print("uploaded", sys.argv[2], flush=True)
 PY
 }
 COMMON="--base google/gemma-4-E4B --base_revision 411aa17b749aa952df1359d2dcea73917a544d9a --init_from /init/start \
- --device cuda --lora 16 --lora_targets all --batch 2 --accum 4 --lr $LR --dtype bf16 --weights_dtype bf16 --checkpointing 1 \
+ --device cuda --lora 16 --lora_targets all --batch $BATCH --accum $ACCUM --lr $LR --dtype bf16 --weights_dtype bf16 --checkpointing 1 \
  --max_state $MAX_STATE --epochs 1 --seed 0"
 echo "== smoke: 5 steps + checkpoint on the 40 longest states"
 uv run --frozen python -m d1a.training.train $COMMON --data /data/smoke.jsonl --max_steps 5 --out /runs/smoke 2>&1 | grep -E "training requests|dropped|saved|Error|out of memory" | tail -6
