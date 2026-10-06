@@ -26,7 +26,8 @@ is the full size:
 - **Mix** (`mix.py`): every hard-v1 (6,000) and devtools-v1 (5,320) training record, plus replay of documents-v1 1,000,
   JGLUE 650 and PR labels 1,350. With decision-v7 replay 1,000 added by the trainer, that is 15,320 records, 1,915 steps
   of 8.
-- **Job** (`train_job.sh`, `launch_hf_job.sh`): one HF L4, lr 2e-5, LoRA 16, bf16, max_state 6,400 (the mix's longest
+- **Job** (`train_job.sh`, `launch_hf_job.sh`): one HF L4, lr 2e-5, LoRA 16, bf16, 1 record per pass and 8 passes per step
+  (2 per pass ran out of memory on the longest states), max_state 6,400 (the mix's longest
   state is 6,209 tokens). It runs 5 steps on the 40 longest states first, then trains, and calibrates the way v0.4 was.
   Resume points go to the HF bucket. Outputs go to the private run repo.
 - **Scoring is separate**, on the same path as the checkpoints it is compared with (the five card suites plus pr-labels
