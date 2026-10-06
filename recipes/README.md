@@ -14,8 +14,9 @@ mixes replayed none of them.
    `evals/devtools-v1` and `evals/documents-v1` beside its own data and decision-v7. `recipes/pr-labeler/mix.py` does
    it by default (`--replay-skills 500` per suite); `--replay-skills 0` only rebuilds the v0.3 and v0.4 mixes.
 2. **Gate on the card suites.** Before the new checkpoint replaces the one it started from, `scripts/quality_gate.py
-   --card-suites` scores decision-v7, transfer-v4, hard-v1, devtools-v1 and documents-v1 on both, and the PR shows the
-   table. A drop beyond run-to-run noise on any of them blocks it, like any other downgrade (AGENTS.md, Quality bar).
+   --run <the served checkpoint> --head-run <the new one> --card-suites` scores decision-v7, transfer-v4, hard-v1,
+   devtools-v1 and documents-v1 on both, runs every demo example and the labeler replay on both (changed answers are listed
+   for review: a new checkpoint is meant to change some), and the PR shows the table. A drop beyond run-to-run noise on any of them blocks it, like any other downgrade (AGENTS.md, Quality bar).
 
 ## The skills stage (`skills/`, #175)
 

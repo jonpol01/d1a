@@ -123,3 +123,33 @@ def test_the_status_text_fits_and_says_why():
     assert gate.status_description(report, "d" * 40) == "PASS vs dddddddd: 237 requests, 0 flips, max dp 3e-07, latency 0.999 (floor 1.003)"
     failed = gate.status_description({"verdict": "FAIL", "failures": ["demo:routing | en: Quick fact / route: small -> large" * 5]}, "d" * 40)
     assert failed.startswith("FAIL: 1 failures, e.g. demo:routing") and len(failed) == 140
+
+
+def test_a_new_checkpoint_reports_its_changes_and_still_fails_on_structure():
+    """--head-run: the head loads other weights, so changed answers are listed for review, not failed; a request one side
+    does not answer, or answers with other options, still fails, and without --head-run nothing changes."""
+    same = {"route": choice({"small": 0.7, "large": 0.3})}
+    moved = {"route": choice({"small": 0.4, "large": 0.6})}
+    records = [record(same, moved), record(same, {"route": choice({"small": 0.69, "large": 0.31})}, name="b"), record(same, None, name="c")]
+    changes = []
+    groups, failures = gate.compare(records, 1e-6, changes)
+    assert changes == ["demo:routing | en: Quick fact / route: small -> large", "demo:routing | b / route: a probability moved 1.00e-02 (> 1e-06)"]
+    assert failures == ["demo:routing | c: answered by one side only"] and groups["demo:routing"]["flips"] == 1
+    assert gate.compare(records, 1e-6)[1][:2] == changes                        # without --head-run they are failures, as before
+    assert gate.suite_runs("old", None, "new") == ("old", "new")                 # a new checkpoint scores its own suites
+    assert gate.suite_runs("old", "s", None) == ("s", "s") and gate.suite_runs("old") == ("old", "old")
+
+
+def test_the_head_server_loads_the_new_checkpoint(monkeypatch):
+    from contextlib import contextmanager
+    started = []
+
+    @contextmanager
+    def fake_server(path, port, run, log):
+        started.append((path, run)); yield
+
+    monkeypatch.setattr(gate, "server", fake_server)
+    monkeypatch.setattr(gate, "interleave", lambda reqs, p0, p1: [])
+    gate.run_pair("base", "head", [], "old", [1, 2], "x", head_run="new")
+    gate.run_pair("base", "head", [], "old", [1, 2], "y")
+    assert started == [("base", "old"), ("head", "new"), ("base", "old"), ("head", "old")]
