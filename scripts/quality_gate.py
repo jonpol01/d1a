@@ -13,6 +13,8 @@ accuracy drops or whose calibration (ECE, NLL) gets worse. Exit 0 PASS, 1 FAIL, 
     python scripts/quality_gate.py --base 0c601b2a --head origin/main --playground ../d1a-playground \\
         --suites v7/decision-v7,pr-labels:development --suite-run JohnP1/d1a-e2b@v0.2
     python scripts/quality_gate.py --base origin/main --head <pr branch> --post-status     # sets the PR's required check
+    python scripts/quality_gate.py --base origin/main --head origin/main --run JohnP1/d1a-e4b-mlx-q8@v0.4 \
+        --head-run <new checkpoint> --card-suites --playground ../d1a-playground    # a new checkpoint against the served one
     python scripts/quality_gate.py --base <old pin> --head <new pin> --playground . --post-status jonpol01/d1a-playground@<pr head>
 
 --post-status sets the required `quality-gate` commit status (CI leaves it pending on a pull request that needs the gate,
@@ -56,8 +58,10 @@ def pick(answer):
     return (answer["choice"] if answer["type"] == "choice" else max(probs, key=probs.get)), probs
 
 
-def compare(records, tol):
-    """records: [{"group", "name", "base": answers | None, "head": answers | None}] -> per-group counts and the failures."""
+def compare(records, tol, changes=None):
+    """records: [{"group", "name", "base": answers | None, "head": answers | None}] -> per-group counts and the failures.
+    With a `changes` list (a new checkpoint, whose answers are meant to move), choice flips and probability moves go there
+    instead of the failures; a request one side does not answer, or answers with other questions or options, still fails."""
     groups, failures = defaultdict(lambda: {"requests": 0, "questions": 0, "flips": 0, "max_dp": 0.0}), []
     for r in records:
         g, name = groups[r["group"]], f"{r['group']} | {r['name']}"
@@ -73,10 +77,11 @@ def compare(records, tol):
             g["questions"] += 1
             dp = max(abs(pb[k] - ph[k]) for k in pb)
             g["max_dp"] = max(g["max_dp"], dp)
+            out = failures if changes is None else changes
             if side_b != side_h:
-                g["flips"] += 1; failures.append(f"{name} / {q}: {side_b} -> {side_h}")
+                g["flips"] += 1; out.append(f"{name} / {q}: {side_b} -> {side_h}")
             elif dp > tol:
-                failures.append(f"{name} / {q}: a probability moved {dp:.2e} (> {tol:g})")
+                out.append(f"{name} / {q}: a probability moved {dp:.2e} (> {tol:g})")
     return dict(groups), failures
 
 
@@ -108,6 +113,12 @@ def suite_failures(name, base, head):
         if b is not None and h is not None and worse(b, h) and abs(h - b) > 1e-12:
             out.append(f"suite {name}: {key} {b:.4f} -> {h:.4f}")
     return out
+
+
+def suite_runs(run, suite_run=None, head_run=None):
+    """(base weights, head weights) for --suites: a new checkpoint (head_run) is scored against the one it replaces (run);
+    otherwise both code versions score the same weights (suite_run, default run)."""
+    return (run, head_run) if head_run else (suite_run or run,) * 2
 
 
 # --- requests -----------------------------------------------------------------------------------------------------------
@@ -248,8 +259,9 @@ def interleave(reqs, base_port, head_port):
     return records
 
 
-def run_pair(base_dir, head_dir, reqs, run, ports, logs):
-    with server(base_dir, ports[0], run, f"{logs}.base.log"), server(head_dir, ports[1], run, f"{logs}.head.log"):
+def run_pair(base_dir, head_dir, reqs, run, ports, logs, head_run=None):
+    """Both servers answer every request, interleaved; the head server loads `head_run` when given (a new checkpoint)."""
+    with server(base_dir, ports[0], run, f"{logs}.base.log"), server(head_dir, ports[1], head_run or run, f"{logs}.head.log"):
         return interleave(reqs, ports[0], ports[1])
 
 
@@ -366,6 +378,8 @@ def main():
     ap.add_argument("--suites", default="", help="comma-separated suites to score too: evals/ directories, or <d1a suite>:<partition>")
     ap.add_argument("--card-suites", action="store_true", help=f"also score the five card suites ({', '.join(CARD_SUITES)}); required for a fine-tune (AGENTS.md)")
     ap.add_argument("--suite-run", help="weights for --suites (default: --run)")
+    ap.add_argument("--head-run", help="a new checkpoint: the head server and head suites load these weights, base keeps --run. Changed "
+                    "answers are then reported, not failed; suites (no lower accuracy, no worse calibration) and latency still gate it")
     ap.add_argument("--tol", type=float, default=1e-6, help="largest probability move allowed (default 1e-6)")
     ap.add_argument("--ports", default="8101,8102")
     ap.add_argument("--out", default=str(ROOT / "runs/quality-gate"))
@@ -381,6 +395,7 @@ def main():
     if not reqs:
         raise SystemExit("no requests: give --playground or --demo-requests, and/or --replay")
     report, failures = {"base": a.base, "head": a.head, "run": a.run, "requests": len(reqs)}, []
+    changes = None
     with ExitStack() as stack:
         base_dir, head_dir = stack.enter_context(checkout(a.base)), stack.enter_context(checkout(a.head))
         missing = {side: unmet(requirements(d)) for side, d in (("base", base_dir), ("head", head_dir))}
@@ -400,20 +415,23 @@ def main():
                 if pinned(mini) != head_commit:
                     raise SystemExit(f"--post-status: {target[0]}@{target[1][:8]} pins {pinned(mini)}, not the head {head_commit}")
         floor = latency(run_pair(base_dir, base_dir, reqs, a.run, ports, out / "floor"))
-        records = run_pair(base_dir, head_dir, reqs, a.run, ports, out / "gate")
-        groups, failures = compare(records, a.tol)
+        records = run_pair(base_dir, head_dir, reqs, a.run, ports, out / "gate", head_run=a.head_run)
+        changes = [] if a.head_run else None
+        groups, failures = compare(records, a.tol, changes)
         lat = latency(records)
         failures += [f for f in [latency_failure(lat["all text"], floor["all text"])] if f]
         report |= {"groups": groups, "latency": lat, "floor": floor}
         for suite in suite_list(a.suites, a.card_suites):
             d = out / "suites" / suite.replace("/", "_").replace(":", "_")
-            for side, path in (("base", base_dir), ("head", head_dir)):
-                benchmark(path, a.suite_run or a.run, suite, d / side)
+            for side, path, run in zip(("base", "head"), (base_dir, head_dir), suite_runs(a.run, a.suite_run, a.head_run)):
+                benchmark(path, run, suite, d / side)
             recs, mb, mh = suite_records(d / "base", d / "head")
-            g, f = compare(recs, a.tol)
+            g, f = compare(recs, a.tol, changes)
             failures += [f"suite {suite}: {x}" for x in f] + suite_failures(suite, mb, mh)
             report.setdefault("suites", {})[suite] = {**g.get("suite", {}), "base": mb, "head": mh}
     report["failures"] = failures
+    if a.head_run:
+        report |= {"head_run": a.head_run, "changes": changes}
     report["verdict"] = "FAIL" if failures else "PASS"
     (out / "report.json").write_text(json.dumps(report, indent=1) + "\n", encoding="utf-8")
 
@@ -425,6 +443,10 @@ def main():
     print(f"| all text | | | | | {fmt(lat['all text'])} | {fmt(floor['all text'])} |")
     for suite, s in report.get("suites", {}).items():
         print(f"| suite {suite} | {s.get('requests', 0)} | {s.get('questions', 0)} | {s.get('flips', 0)} | {s.get('max_dp', 0.0):.1e} | acc {s['base']['acc']} → {s['head']['acc']} | ece {s['base']['ece']} → {s['head']['ece']} |")
+    if a.head_run:   # a new checkpoint: its answers are meant to move; these are for review, not failures
+        print(f"changes against {a.run} (expected for a new checkpoint, not failures): {len(changes)}")
+        for c in changes[:30]:
+            print(f"CHANGE {c}")
     for f in failures[:50]:
         print(f"FAIL {f}")
     print(f"quality gate: {report['verdict']} ({len(failures)} failures; {out / 'report.json'})")
