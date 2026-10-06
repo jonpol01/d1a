@@ -4,5 +4,5 @@
   pull request that changes a module the model server loads, or the dependencies (`scripts/gate_required.py`, read
   from the server's own imports). `scripts/quality_gate.py --post-status` then sets it to the verdict, on the exact
   commit it tested; it refuses a head checkout with uncommitted changes. Any other pull request gets the status as
-  success, with the reason. A new head starts pending again. It ships switched off: the workflow is disabled and the
-  check is not required. AGENTS.md (Quality bar) has the two steps to turn it on.
+  success, with the reason. A new head starts pending again. It is off by default (the workflow disabled, the check
+  not required) and turned on for a pull request whose severity calls for it; AGENTS.md (Quality bar) has the steps.

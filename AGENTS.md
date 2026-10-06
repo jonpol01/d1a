@@ -52,8 +52,9 @@ stripped off, and new features come with their tests.
     example (`--playground <d1a-playground checkout>`) and the labeler replay (`runs/labeler-replay`, private, never
     committed), with flips, max |dp| and latency against a base/base floor, plus frozen suites with `--suites`. For a
     torch-only path, also `scripts/equivalence/real_weights.py --interleave`;
-  - **the `quality-gate` check (switched off since 2026-10-06, kept for later):** to turn it back on, run
-    `gh workflow enable quality-gate` and add `quality-gate` to the `main` ruleset's required status checks. When on, a
+  - **the `quality-gate` check: off by default (John, 2026-10-06), turned on for a pull request whose severity calls for
+    it.** To turn it on, run `gh workflow enable quality-gate` and add `quality-gate` to the `main` ruleset's required
+    status checks; undo both afterwards. When on, a
     pull request that changes a module the model server loads, or the dependencies
     (`scripts/gate_required.py`, from the server's own imports), cannot merge until `scripts/quality_gate.py --post-status`
     passes on its exact head (`.github/workflows/quality-gate.yml` leaves it pending; any other pull request gets it as
