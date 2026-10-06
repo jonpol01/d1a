@@ -82,6 +82,8 @@ the Apache License 2.0. This file records where D1A's code came from and what D1
   - `d1a/eval/benchmark.py`: the same rows, reports and files; its tests are `tests/test_benchmark.py`.
   - `d1a/training/calibrate.py`: replaces Kev's calibration script; `scripts/calibrate_checkpoint.py` is now a wrapper around it.
   - `d1a/backends/checkpoint.py`: the same decisions, refusals and on-disk formats; its tests are `tests/test_checkpoint.py`.
+  - `d1a/backends/shared_prefix.py`: the same branch hidden states and gradients, bit for bit, on a tiny Qwen3.5 (eager and
+    SDPA, padded and unpadded states, checkpointing on and off); checked by `scripts/equivalence/shared_prefix.py`.
   - `d1a/training/data.py`: the same records from the same seeds (every draw in the same order); its tests are `tests/test_data.py`.
   - `d1a/eval/metrics.py`: bit-identical results; its tests are `tests/test_metrics.py`.
   - `d1a/backends/torch.py` (its encoding and pointer head now in `d1a/core/encoding.py` and `d1a/core/head.py`, #60): the same
@@ -106,7 +108,6 @@ d1a/backends/fused_qwen35.py
 d1a/backends/mlx.py
 d1a/eval/predictors.py
 d1a/serving/serve.py
-d1a/backends/shared_prefix.py
 pyproject.toml
 scripts/mlx_parity.py
 tests/test_api.py
