@@ -81,3 +81,23 @@ def test_requests_from_files(tmp_path):
     reqs = gate.replay_requests(tmp_path)
     assert [(g, n, b["state"]) for g, n, _, b in reqs] == [("labeler-replay", "state 1", "pr 1"), ("labeler-replay", "state 2", "pr 2")]
     assert gate.replay_requests(tmp_path / "nowhere") == []
+
+
+def test_both_versions_must_be_runnable_here(tmp_path):
+    """The two servers share this environment: every requirement of either version must be met here, declared alike or not."""
+    from importlib.metadata import version
+    numpy = version("numpy")
+    assert gate.unmet([f"numpy=={numpy}", "numpy>=1", "pytest", "nothing-like-this; python_version < '3'"]) == []
+    assert gate.unmet(["numpy>=999"]) == [f"numpy>=999 (installed {numpy})"]
+    assert gate.unmet(["no-such-package-here>=1"]) == ["no-such-package-here>=1 (not installed)"]
+    toml = ('[project]\nname = "x"\ndependencies = ["numpy>=1"]\n'
+            '[project.optional-dependencies]\nserve = ["pytest"]\ntrain = ["unused-extra"]\n')
+    (tmp_path / "pyproject.toml").write_text(toml, encoding="utf-8")
+    assert gate.requirements(tmp_path) == ["numpy>=1", "pytest"]                    # the server extras only
+
+
+def test_card_suites():
+    assert gate.CARD_SUITES == ("v7/decision-v7", "v4/transfer-v4", "hard-v1", "devtools-v1", "documents-v1")
+    assert all((ROOT / "evals" / s / "manifest.json").exists() for s in gate.CARD_SUITES)
+    assert gate.suite_list("", False) == [] and gate.suite_list("hard-v1,pr-labels:development", True) == \
+        ["hard-v1", "pr-labels:development", "v7/decision-v7", "v4/transfer-v4", "devtools-v1", "documents-v1"]

@@ -58,6 +58,9 @@ stripped off, and new features come with their tests.
 - **No stripping.** No endpoint, demo, example, CLI flag or feature disappears silently. A removal updates a failing
   test on purpose, and the PR says why.
 - **New features ship with their tests** in the same PR.
+- **Fine-tunes keep the skills** (#167; `recipes/README.md`): a run that starts from a trained checkpoint replays the
+  hard-v1, devtools-v1 and documents-v1 train partitions, and its gate adds `--card-suites` (the five card suites, the new
+  checkpoint against the one it started from).
 
 ## Project board (mandatory)
 Every piece of D1A work is tracked on GitHub Project #14 "D1A" (https://github.com/users/jonpol01/projects/14), and its card
