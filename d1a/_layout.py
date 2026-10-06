@@ -1,0 +1,31 @@
+"""Where each top-level module of D1A 0.3 lives since #60 (old module -> new dotted path under d1a).
+
+The shims (d1a/<old>.py) use it for one release; scripts/kev_share.py and scripts/check_license.py use it for good, to
+compare each file with Kev's file of the old name."""
+MOVED = {'api': 'core.api',
+         'versions': 'core.versions',
+         'backbone': 'backends.backbone',
+         'device': 'backends.device',
+         'mlx_model': 'backends.mlx',
+         'fused_qwen35': 'backends.fused_qwen35',
+         'cuda_graphs': 'backends.cuda_graphs',
+         'shared_prefix': 'backends.shared_prefix',
+         'checkpoint': 'backends.checkpoint',
+         'model': 'backends.torch',
+         'serve': 'serving.serve',
+         'media': 'serving.media',
+         'lib': 'serving.lib',
+         'feedback': 'learning.feedback',
+         'train': 'training.train',
+         'data': 'training.data',
+         'resume': 'training.resume',
+         'recipe': 'training.recipe',
+         'calibrate': 'training.calibrate',
+         'composition': 'training.composition',
+         'benchmark': 'eval.benchmark',
+         'metrics': 'eval.metrics',
+         'predictors': 'eval.predictors',
+         'suite': 'eval.suite',
+         'suites': 'eval.suites',
+         'presets': 'agents.presets',
+         'mcp_server': 'agents.mcp_server'}

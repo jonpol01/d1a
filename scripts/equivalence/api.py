@@ -1,4 +1,4 @@
-"""d1a.api against the module at --ref: rendering, option texts, date facts, confidences, request validation (with the
+"""d1a.core.api against the module at --ref: rendering, option texts, date facts, confidences, request validation (with the
 full error details a 422 returns), records, answers and the JSON schema, on generated inputs.
 
     uv run python scripts/equivalence/api.py                     # against 34113f45, the last commit before the rewrite
@@ -11,7 +11,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from common import Checker, arguments, module_at  # noqa: E402
 
-import d1a.api as new  # noqa: E402
+import d1a.core.api as new  # noqa: E402
 
 WORDS = ["a", "", " x ", "Ünïcode", "line\nbreak", "July 4, 2026", "2026-07-01", "2026-02-30", "February 30, 2026", "May 1, 2026",
          "2026-13-01", "December 31, 2025"]
@@ -19,7 +19,7 @@ WORDS = ["a", "", " x ", "Ünïcode", "line\nbreak", "July 4, 2026", "2026-07-01
 
 def main():
     a = arguments(__doc__.split("\n")[0], "34113f45", 20000)
-    old, rng, check = module_at(a.ref, "d1a/api.py"), random.Random(a.seed), Checker()
+    old, rng, check = module_at(a.ref, "d1a/core/api.py"), random.Random(a.seed), Checker()
 
     def content(depth=0):
         r = rng.random()
@@ -69,7 +69,7 @@ def main():
             probs.append([x / sum(p) for x in p])
         check.same("to_answers", lambda: old.to_answers(probs, old_rec[1]), lambda: new.to_answers(probs, old_rec[1]))
     check.equal("json schema", old.SystemOneRequest.model_json_schema(), new.SystemOneRequest.model_json_schema())
-    print(f"d1a.api: identical to {a.ref} on {check.count} comparisons")
+    print(f"d1a.core.api: identical to {a.ref} on {check.count} comparisons")
 
 
 if __name__ == "__main__":

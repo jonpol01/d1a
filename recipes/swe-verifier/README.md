@@ -20,7 +20,7 @@ A calibrated P(resolved) is also a candidate reward for fine-tuning and RL; that
 |---|---|---|
 | Zero-shot D1A against trajectory heuristics | `zero_shot.py` | $0 (MLX on a Mac) |
 | Training records, split by repository | `to_records.py` | $0 |
-| LoRA on D1A-E4B (local first) | `python -m d1a.train --data runs/swe-verifier/data/train.jsonl ...` | $0 local; a paid job only ≤ $5 after asking |
+| LoRA on D1A-E4B (local first) | `python -m d1a.training.train --data runs/swe-verifier/data/train.jsonl ...` | $0 local; a paid job only ≤ $5 after asking |
 
 ## Data
 
@@ -40,9 +40,9 @@ runs/swe-verifier/
   data/        train.jsonl dev.jsonl test.jsonl     (to_records.py)
   baselines/   heuristics-*.jsonl                   (zero_shot.py --no-d1a)
   zero-shot/   <model>@<tag>-*.jsonl, .log          (zero_shot.py)
-  train/       <run name>/                          (d1a.train; adapter and logs; intermediate checkpoints deleted)
+  train/       <run name>/                          (d1a.training.train; adapter and logs; intermediate checkpoints deleted)
 ```
 
-Every result records the `repo@tag` it ran with (`d1a.versions.latest`). Nothing from this study is written to the
+Every result records the `repo@tag` it ran with (`d1a.core.versions.latest`). Nothing from this study is written to the
 released model repositories (`JohnP1/d1a-e4b`, `-e2b` and their MLX builds) or their tags; a checkpoint that has to be
 on the Hub goes to its own private repository first.

@@ -1,6 +1,6 @@
 """Conformance against committed golden vectors (#64): a tiny Gemma 4 checkpoint (tests/golden/tiny-gemma4, weights in
 git, built by tests/golden/build_tiny_gemma4.py) must give the token ids in golden.json exactly and every question's
-fp32 CPU probabilities to 1e-5, through the model, through d1a.serve, and through scripts/golden_vectors.py compare (the
+fp32 CPU probabilities to 1e-5, through the model, through d1a.serving.serve, and through scripts/golden_vectors.py compare (the
 check any other port runs). A change to the model, checkpoint or serving code that moves an answer fails here; one that
 is meant to must rebuild the fixture in the same pull request and say why."""
 import json
@@ -22,7 +22,7 @@ def golden():
 
 @pytest.fixture(scope="module")
 def loaded():
-    from d1a.checkpoint import LoadOptions, load
+    from d1a.backends.checkpoint import LoadOptions, load
     with pytest.MonkeyPatch.context() as mp:
         mp.chdir(ROOT)
         tok, model = load(str(FIXTURE / "checkpoint"), "cpu", LoadOptions(dtype=torch.float32, backend="torch"))
@@ -30,8 +30,8 @@ def loaded():
 
 
 def encoded(model, tok, request):
-    from d1a.api import SystemOneRequest, to_record
-    from d1a.model import SERVE_MAX_BRANCH, SERVE_MAX_STATE
+    from d1a.core.api import SystemOneRequest, to_record
+    from d1a.backends.torch import SERVE_MAX_BRANCH, SERVE_MAX_STATE
     rec, _ = to_record(SystemOneRequest.model_validate(request))
     return rec, model.encode(tok, rec, max_state=SERVE_MAX_STATE, max_branch=SERVE_MAX_BRANCH)
 
@@ -57,9 +57,9 @@ def test_token_ids_and_probabilities_match_the_golden_vectors(golden, loaded):
 
 
 def test_served_answers_match_the_golden_vectors(golden, loaded):
-    from d1a.api import SystemOneRequest
-    from d1a.checkpoint import Checkpoint
-    from d1a.serve import Server
+    from d1a.core.api import SystemOneRequest
+    from d1a.backends.checkpoint import Checkpoint
+    from d1a.serving.serve import Server
     tok, model = loaded
     with pytest.MonkeyPatch.context() as mp:
         mp.chdir(ROOT)

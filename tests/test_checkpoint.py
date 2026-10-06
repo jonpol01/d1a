@@ -1,4 +1,4 @@
-"""d1a.checkpoint on the committed tiny checkpoint (tests/golden/tiny-gemma4) and on head.pt files written here: the
+"""d1a.backends.checkpoint on the committed tiny checkpoint (tests/golden/tiny-gemma4) and on head.pt files written here: the
 metadata schema, the D1A_* options, which backend a load uses, what loading applies (merge, LoRA scale, temperature,
 dtype), the refusals, and delta-training warm starts."""
 import dataclasses
@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 import torch
 
-from d1a.checkpoint import Checkpoint, LoadOptions, Meta, fused_available, is_hub_id, read_meta, write_meta
+from d1a.backends.checkpoint import Checkpoint, LoadOptions, Meta, fused_available, is_hub_id, read_meta, write_meta
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = "tests/golden/tiny-gemma4"
@@ -124,7 +124,7 @@ def test_hub_ids():
 
 def test_options_from_the_environment():
     """LoadOptions.from_env is the only reader of the D1A_* load variables; an explicit value equal to a default is kept,
-    so d1a.serve can tell "asked for fp32" or "turned it off" from "said nothing"."""
+    so d1a.serving.serve can tell "asked for fp32" or "turned it off" from "said nothing"."""
     assert LoadOptions.from_env({}) == LoadOptions()
     assert LoadOptions.from_env({"D1A_DTYPE": "bf16", "D1A_MERGE": "0", "D1A_ATTN": "sdpa", "D1A_TEMPERATURE": "1.0", "D1A_LORA_SCALE": "0.5"}) == \
         LoadOptions(dtype=torch.bfloat16, merge=False, attn="sdpa", lora_scale=0.5, temperature=1.0)
@@ -138,20 +138,20 @@ def test_options_from_the_environment():
 
 
 def test_fused_kernels_need_the_pinned_flash_linear_attention(monkeypatch):
-    """d1a.serve's CUDA default: on only with flash-linear-attention importable at fused_qwen35.FLA_VERSION (it is not in the
+    """d1a.serving.serve's CUDA default: on only with flash-linear-attention importable at fused_qwen35.FLA_VERSION (it is not in the
     serve extra), so a plain install serves unfused instead of failing to import it."""
     monkeypatch.setitem(sys.modules, "fla", None)
     assert not fused_available()
     fla = types.ModuleType("fla"); fla.__spec__ = importlib.machinery.ModuleSpec("fla", None); fla.__version__ = "9.9.9"
     monkeypatch.setitem(sys.modules, "fla", fla)
-    monkeypatch.setitem(sys.modules, "d1a.fused_qwen35", types.SimpleNamespace(FLA_VERSION="9.9.9"))
+    monkeypatch.setitem(sys.modules, "d1a.backends.fused_qwen35", types.SimpleNamespace(FLA_VERSION="9.9.9"))
     assert fused_available()
     fla.__version__ = "9.9.8"
     assert not fused_available()
 
 
 def test_which_backend_a_load_uses(at_root, monkeypatch):
-    import d1a.checkpoint as C
+    import d1a.backends.checkpoint as C
     ck = Checkpoint(FIXTURE + "/checkpoint")
     assert ck.mlx_base() and not ck.hybrid_base()                                      # Gemma 4
     for available in (True, False):
@@ -167,7 +167,7 @@ def test_which_backend_a_load_uses(at_root, monkeypatch):
 # --- loading ------------------------------------------------------------------------------------------------------------
 
 def probs(tok, model):
-    from d1a.api import SystemOneRequest, to_record
+    from d1a.core.api import SystemOneRequest, to_record
     request = SystemOneRequest.model_validate({"state": "the customer is charged twice", "questions": {
         "team": {"type": "choice", "criteria": {"billing": None, "shipping": None, "refund": None}}, "angry": {"type": "noul"}}})
     with torch.no_grad():
@@ -189,7 +189,7 @@ def test_what_loading_applies(at_root):
 
 
 def test_mlx_refusals(at_root, tmp_path):
-    import d1a.checkpoint as C
+    import d1a.backends.checkpoint as C
     from safetensors.torch import save_file
     if not C.mlx_available():
         pytest.skip("mlx-lm is not installed")
@@ -208,7 +208,7 @@ def test_mlx_refusals(at_root, tmp_path):
 # --- warm starts --------------------------------------------------------------------------------------------------------
 
 def test_warm_start_compares_the_architecture_first(at_root):
-    from d1a.model import DecisionModel, load_tokenizer
+    from d1a.backends.torch import DecisionModel, load_tokenizer
     run = FIXTURE + "/checkpoint"
     tok, ours = load_tokenizer(FIXTURE + "/base"), read_meta(run)
     model = DecisionModel(FIXTURE + "/base", tok, "cpu", lora=4)

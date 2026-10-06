@@ -56,7 +56,7 @@ def test_a_suite_must_not_get_worse():
 
 
 def test_a_suite_run_starts_from_an_empty_out(tmp_path, monkeypatch):
-    """d1a.benchmark refuses an existing --out: an unfinished run's folder is cleared, and the log lives beside it."""
+    """d1a.eval.benchmark refuses an existing --out: an unfinished run's folder is cleared, and the log lives beside it."""
     out = tmp_path / "suites" / "v7_decision-v7" / "base"
     out.mkdir(parents=True); (out / "rows.json").write_text("[]", encoding="utf-8")   # an unfinished earlier run
 

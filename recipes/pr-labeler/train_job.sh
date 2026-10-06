@@ -51,22 +51,22 @@ COMMON="--base google/gemma-4-E4B --base_revision 411aa17b749aa952df1359d2dcea73
  --data /data/train.jsonl --suite evals/v7/decision-v7 --replay $REPLAY_DV7 --max_state $MAX_STATE --device cuda --lora 16 \
  --batch 2 --accum 4 --lr $LR --dtype bf16 --weights_dtype bf16 --checkpointing 1 --seed 0"
 echo "== smoke: 5 steps + checkpoint"
-uv run --frozen python -m d1a.train $COMMON --epochs 1 --max_steps 5 --out /runs/smoke 2>&1 | grep -E "replay:|training requests|dropped|saved|Error" | tail -6
+uv run --frozen python -m d1a.training.train $COMMON --epochs 1 --max_steps 5 --out /runs/smoke 2>&1 | grep -E "replay:|training requests|dropped|saved|Error" | tail -6
 [ -f /runs/smoke/head.pt ] || { echo "FAILED smoke wrote no checkpoint"; exit 1; }
 echo "== train"
 status=0
-uv run --frozen python -m d1a.train $COMMON --epochs 1 --save_every_minutes 15 --resume 1 --out "$CKPT/$PREFIX" 2>&1 | tee /runs/train.log || status=$?
+uv run --frozen python -m d1a.training.train $COMMON --epochs 1 --save_every_minutes 15 --resume 1 --out "$CKPT/$PREFIX" 2>&1 | tee /runs/train.log || status=$?
 rm -rf /runs/new && cp -r "$CKPT/$PREFIX" /runs/new
 [ -f /runs/new/head.pt ] || { echo "FAILED train exit $status"; mkdir -p /runs/log && cp /runs/train.log /runs/log/; upload /runs/log log; exit 1; }
 cp /runs/train.log /runs/new/; upload /runs/new checkpoint || { echo "FAILED checkpoint upload"; exit 1; }
 echo "== calibrate (pooled: decision-v7 calibration + PR development)"
-uv run --frozen python -m d1a.benchmark --run /runs/new --suite evals/v7/decision-v7 --split calibration --device cuda --out /runs/cal 2>&1 | tail -1
-uv run --frozen python -m d1a.benchmark --run /runs/new --data evals/d1a/pr-labels:development --context serving --device cuda --out /runs/calpr 2>&1 | tail -1
-uv run --frozen python -m d1a.calibrate --run /runs/new --rows /runs/cal/rows.json --rows /runs/calpr/rows.json --allow-in-distribution 2>&1 | tail -2
+uv run --frozen python -m d1a.eval.benchmark --run /runs/new --suite evals/v7/decision-v7 --split calibration --device cuda --out /runs/cal 2>&1 | tail -1
+uv run --frozen python -m d1a.eval.benchmark --run /runs/new --data evals/d1a/pr-labels:development --context serving --device cuda --out /runs/calpr 2>&1 | tail -1
+uv run --frozen python -m d1a.training.calibrate --run /runs/new --rows /runs/cal/rows.json --rows /runs/calpr/rows.json --allow-in-distribution 2>&1 | tail -2
 upload /runs/new checkpoint || { echo "FAILED calibrated checkpoint upload"; exit 1; }
 echo "== scoring at full length (each result uploaded as it lands)"
 mkdir -p /runs/eval
-score() { uv run --frozen python -m d1a.benchmark --run "$1" "${@:3}" --device cuda --out /runs/eval/$2 2>&1 | tail -1; upload /runs/eval eval >/dev/null; echo "scored $2"; }
+score() { uv run --frozen python -m d1a.eval.benchmark --run "$1" "${@:3}" --device cuda --out /runs/eval/$2 2>&1 | tail -1; upload /runs/eval eval >/dev/null; echo "scored $2"; }
 for d in real17 test-ja test; do
   score /runs/new after-pr-$d --data evals/d1a/pr-labels:$d --context serving
   score /init/start before-pr-$d --data evals/d1a/pr-labels:$d --context serving

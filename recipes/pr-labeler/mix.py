@@ -1,11 +1,11 @@
-"""The PR labeler's training mix, from pinned D1A suites (d1a.suites): English PRs (every rare-label PR plus a sample of
+"""The PR labeler's training mix, from pinned D1A suites (d1a.eval.suites): English PRs (every rare-label PR plus a sample of
 the rest), extra PR partitions, and replay of Japanese JGLUE and routing. Writes the mix and, beside it, `<out>.json`:
 every input's suite reference and sha256, the parameters, and the mix's own sha256, so a checkpoint's training data is
 named exactly.
 
     uv run python recipes/pr-labeler/mix.py --out /data/train.jsonl --en 3500 --en-skip 1 --extra train-ja train-blast
 
-decision-v7 replay is not here: d1a.train mixes it in itself (--suite evals/v7/decision-v7 --replay N).
+decision-v7 replay is not here: d1a.training.train mixes it in itself (--suite evals/v7/decision-v7 --replay N).
 """
 import argparse
 import hashlib
@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from d1a.suites import resolve  # noqa: E402
+from d1a.eval.suites import resolve  # noqa: E402
 
 PR, JA, ROUTING = "evals/d1a/pr-labels", "evals/d1a/ja-jglue", "evals/d1a/routing"
 RARE_SEVERITIES = ("P0", "P1", "P4")

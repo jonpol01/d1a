@@ -1,5 +1,5 @@
-"""A tiny random Gemma 4 checkpoint in the served layout, built here without downloading anything: d1a.train writes it (one
-LoRA step on a 6-layer random base with sliding and KV-shared layers), d1a.checkpoint loads it and d1a.serve answers with
+"""A tiny random Gemma 4 checkpoint in the served layout, built here without downloading anything: d1a.training.train writes it (one
+LoRA step on a 6-layer random base with sliding and KV-shared layers), d1a.backends.checkpoint loads it and d1a.serving.serve answers with
 it. Every scoring path is checked against an independent reference: each question as its own plain causal row through the
 transformers model, with transformers' own causal and sliding-window masks, and the readout positions found by token id.
 The checks hold for any weights, so every PR runs them without the real checkpoints; each mutation test breaks one piece
@@ -17,12 +17,12 @@ WINDOW = 4   # far below the states and branches below, so the sliding mask matt
 
 @pytest.fixture(scope="module")
 def tiny(tmp_path_factory):
-    """(checkpoint dir, tokenizer, model) for a random Gemma 4 trained one LoRA step by d1a.train."""
+    """(checkpoint dir, tokenizer, model) for a random Gemma 4 trained one LoRA step by d1a.training.train."""
     from tokenizers import Tokenizer, models, pre_tokenizers, processors
     from transformers import Gemma4ForCausalLM, Gemma4TextConfig, PreTrainedTokenizerFast
-    from d1a import train
-    from d1a.checkpoint import LoadOptions, load
-    from d1a.model import GEMMA_SPECIAL
+    from d1a.training import train
+    from d1a.backends.checkpoint import LoadOptions, load
+    from d1a.backends.torch import GEMMA_SPECIAL
     root = tmp_path_factory.mktemp("tiny-gemma4")
     words = "it is charged twice which team billing shipping refund angry the customer how bad no yes".split()
     vocab = {t: i for i, t in enumerate(["<pad>", "<unk>", "<bos>", "<eos>", *GEMMA_SPECIAL, *words])}
@@ -39,7 +39,7 @@ def tiny(tmp_path_factory):
         "team": {"type": "choice", "instructions": "which team", "criteria": {"billing": None, "shipping": None, "refund": None}, "label": ["billing", "shipping", "refund"][i % 3]},
         "angry": {"type": "noul", "instructions": "is the customer angry", "label": i % 2 == 0}}} for i in range(8)]
     (root / "data.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
-    argv = ["d1a.train", "--base", str(root / "base"), "--data", str(root / "data.jsonl"), "--device", "cpu", "--batch", "2",
+    argv = ["d1a.training.train", "--base", str(root / "base"), "--data", str(root / "data.jsonl"), "--device", "cpu", "--batch", "2",
             "--lr", "1e-2", "--lora", "4", "--max_steps", "1", "--out", str(root / "checkpoint")]
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(sys, "argv", argv); train.main()
@@ -49,7 +49,7 @@ def tiny(tmp_path_factory):
 
 def request(state_words=12):
     """A System One request with all three question types; the state is several sliding windows long."""
-    from d1a.api import SystemOneRequest
+    from d1a.core.api import SystemOneRequest
     return SystemOneRequest(model="d1a-latest", state=" ".join(["the customer is charged twice it"] * (state_words // 6 + 1)), questions={
         "team": {"type": "choice", "instructions": "which team", "criteria": {"billing": None, "shipping": "refund it", "refund": None}},
         "angry": {"type": "noul", "instructions": "is the customer angry"},
@@ -57,10 +57,10 @@ def request(state_words=12):
 
 
 def reference_logits(model, tok, rec):
-    """Raw pointer logits per question (temperature 1), computed without d1a.model's encoder, masks or forms: each question
+    """Raw pointer logits per question (temperature 1), computed without d1a.backends.torch's encoder, masks or forms: each question
     is the plain causal row <bos><state>state <q>instr (<opt>option</opt>)... <decide> run through the transformers model
     with its own masks, read at the </opt> and <decide> tokens found by id, and scored by the head's formula."""
-    from d1a.model import layout, user_tokens
+    from d1a.backends.torch import layout, user_tokens
     leading, (s_id, q_id, o_id, c_id, d_id), _ = layout(tok)
     state = leading + [s_id] + user_tokens(tok, rec["state"])
     out = []
@@ -77,7 +77,7 @@ def reference_logits(model, tok, rec):
 
 
 def record_of(req):
-    from d1a.api import to_record
+    from d1a.core.api import to_record
     return to_record(req)[0]
 
 
@@ -107,8 +107,8 @@ def scoring_paths(model, tok, rec):
 
 
 def served(ck_dir, tok, model, req):
-    from d1a.checkpoint import Checkpoint
-    from d1a.serve import Server
+    from d1a.backends.checkpoint import Checkpoint
+    from d1a.serving.serve import Server
     s = Server(Checkpoint(str(ck_dir)), tok, model, "cpu")
     try: return s.answer(req)["answers"]
     finally: s.close()
@@ -116,7 +116,7 @@ def served(ck_dir, tok, model, req):
 
 def served_gap(ck_dir, tok, model, req):
     """The largest difference between the served answers (rounded to 4 decimals) and the reference at the model's
-    temperature, each answer read from its documented field independently of d1a.api: a choice's probabilities by
+    temperature, each answer read from its documented field independently of d1a.core.api: a choice's probabilities by
     criteria key, a noul's P(true) as its "yes" option, a score's probabilities by level index ("0" = the first level)."""
     reference = dict(zip(req.questions, reference_logits(model, tok, record_of(req))))
     answers, worst = served(ck_dir, tok, model, req), 0.0
@@ -153,8 +153,8 @@ def test_question_order_does_not_change_any_answer(tiny):
 
 
 def test_served_answers_are_keyed_and_tempered(tiny):
-    """d1a.serve end to end: each key's probability is its own option's, at the checkpoint's temperature."""
-    from d1a.checkpoint import LoadOptions, load
+    """d1a.serving.serve end to end: each key's probability is its own option's, at the checkpoint's temperature."""
+    from d1a.backends.checkpoint import LoadOptions, load
     ck_dir, tok, model = tiny
     assert served_gap(ck_dir, tok, model, request()) < 1e-4   # 4-decimal answers
     _, hot = load(str(ck_dir), "cpu", LoadOptions(dtype=torch.float32, temperature=2.5))
@@ -166,7 +166,7 @@ def test_served_answers_are_keyed_and_tempered(tiny):
 
 def shift(field, by):
     def mutate(mp):
-        import d1a.model as M
+        import d1a.backends.torch as M
         real = M.encode
         def encode(*a, **k):
             enc = real(*a, **k)
@@ -179,28 +179,28 @@ def shift(field, by):
 
 def leaky_mask(mp):
     """Questions attend to each other's tokens."""
-    import d1a.model as M
+    import d1a.backends.torch as M
     real = M.branch_mask_batch
     mp.setattr(M, "branch_mask_batch", lambda segs, *a, **k: real([[0] * len(seg) for seg in segs], *a, **k))
 
 
 def no_sliding_window(mp):
     """The sliding layers get the full mask."""
-    import d1a.model as M
+    import d1a.backends.torch as M
     real = M.branch_masks
     mp.setattr(M, "branch_masks", lambda encs, device, dtype, window, length=None: real(encs, device, dtype, None, length=length))
 
 
 def positions_continue(mp):
     """Branch positions run on across questions instead of restarting after the state."""
-    import d1a.model as M
+    import d1a.backends.torch as M
     real = M.encode
     mp.setattr(M, "encode", lambda *a, **k: {**(e := real(*a, **k)), "pos": list(range(len(e["ids"])))})
 
 
 def no_bos(mp):
     """The leading <bos> Gemma's attention relies on is dropped."""
-    import d1a.model as M
+    import d1a.backends.torch as M
     real = M.layout
     mp.setattr(M, "layout", lambda tok: ([], *real(tok)[1:]))
 
@@ -212,7 +212,7 @@ def test_scoring_mutations_are_caught(tiny, mutate, monkeypatch):
     rec = record_of(request(30))
     mutate(monkeypatch)
     try: paths = scoring_paths(model, tok, rec)
-    except ValueError as e:   # caught by d1a.model.rows_of's layout check instead
+    except ValueError as e:   # caught by d1a.backends.torch.rows_of's layout check instead
         assert "branch layout mismatch" in str(e); return
     assert gap(paths, reference_logits(model, tok, rec)) > 1e-3
 
@@ -227,15 +227,15 @@ def test_dropping_the_leading_bos_is_caught(tiny, monkeypatch):
 
 
 def ignored_temperature(mp):
-    import d1a.model as M
+    import d1a.backends.torch as M
     mp.setattr(M.PointerHead, "forward", lambda self, hd, ho: (self.k(ho) @ self.q(hd)) * self.scale)
     mp.setattr(M.PointerHead, "many", lambda self, hd, ho, owner: (self.k(ho) * self.q(hd)[owner]).sum(-1) * self.scale)
 
 
 def answers_misread(qtype, how):
-    """d1a.serve maps one question type's probabilities to the wrong options."""
+    """d1a.serving.serve maps one question type's probabilities to the wrong options."""
     def mutate(mp):
-        import d1a.serve as Srv
+        import d1a.serving.serve as Srv
         real = Srv.to_answers
         mp.setattr(Srv, "to_answers", lambda probs, meta: real([how(p) if m["type"] == qtype else p for p, m in zip(probs, meta)], meta))
     return mutate
@@ -245,7 +245,7 @@ def answers_misread(qtype, how):
                                     answers_misread("choice", lambda p: p[1:] + p[:1])],
                          ids=["temperature-ignored", "noul-reads-no", "score-levels-reversed", "choice-keys-shifted"])
 def test_serving_mutations_are_caught(tiny, mutate, monkeypatch):
-    from d1a.checkpoint import LoadOptions, load
+    from d1a.backends.checkpoint import LoadOptions, load
     ck_dir, tok, _ = tiny
     _, hot = load(str(ck_dir), "cpu", LoadOptions(dtype=torch.float32, temperature=2.5))
     mutate(monkeypatch)

@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def module_at(ref, path):
-    """The module at `path` (e.g. "d1a/api.py") as it was at git commit `ref`, imported under a private name. It imports
+    """The module at `path` (e.g. "d1a/core/api.py") as it was at git commit `ref`, imported under a private name. It imports
     the rest of d1a from the working tree."""
     source = subprocess.run(["git", "show", f"{ref}:{path}"], cwd=ROOT, check=True, capture_output=True, text=True).stdout
     copy = Path(tempfile.mkdtemp()) / f"old_{Path(path).stem}.py"

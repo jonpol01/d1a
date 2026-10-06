@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from d1a.suite import PRIVATE_DATASET, SERVING_CONTEXT, digest, read_jsonl
+from d1a.eval.suite import PRIVATE_DATASET, SERVING_CONTEXT, digest, read_jsonl
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFESTS = sorted((ROOT / "evals").glob("*/manifest.json"))
@@ -18,7 +18,7 @@ def test_every_partition_in_git_matches_its_manifest(manifest):
     files = json.loads(manifest.read_text(encoding="utf-8")).get("files", {})
     for name, entry in files.items():
         path = manifest.parent / name
-        if not path.exists(): continue   # a large or private partition: fetched and hash-checked by d1a.suite on use
+        if not path.exists(): continue   # a large or private partition: fetched and hash-checked by d1a.eval.suite on use
         assert digest(path) == entry["sha256"], f"{path} changed after the freeze"
         if "records" in entry: assert sum(1 for _ in read_jsonl(path)) == entry["records"], path
 

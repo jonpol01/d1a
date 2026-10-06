@@ -27,7 +27,7 @@ dependencies = [
     "numpy>=2.5.3",
     "peft>=0.21",
     "pydantic>=2.9",
-    "pyyaml>=6",   # d1a.recipe
+    "pyyaml>=6",   # d1a.training.recipe
     "scikit-learn>=1.9.1",
     "torch>=2.6,<2.14",
     "transformers>=5.17,<6",
@@ -43,7 +43,7 @@ serve = [
     "fastapi>=0.115",
     "typesafe-sdk>=0.6.0",
     "uvicorn>=0.30",
-    "mlx-lm>=0.31.3,<0.32; sys_platform == 'darwin' and platform_machine == 'arm64'",   # the Apple Silicon backend (d1a.mlx_model); a no-op elsewhere
+    "mlx-lm>=0.31.3,<0.32; sys_platform == 'darwin' and platform_machine == 'arm64'",   # the Apple Silicon backend (d1a.backends.mlx); a no-op elsewhere
 ]
 mlx = [
     "mlx-lm>=0.31.3,<0.32; sys_platform == 'darwin' and platform_machine == 'arm64'",
@@ -55,7 +55,7 @@ media = [
     "av>=14",        # video clips: frames sampled by Gemma 4's video processor (PyAV wheels bundle ffmpeg)
 ]
 mcp = [
-    "mcp>=2.2,<3",   # d1a.mcp_server: the agent-factory presets as MCP tools
+    "mcp>=2.2,<3",   # d1a.agents.mcp_server: the agent-factory presets as MCP tools
 ]
 
 [dependency-groups]
@@ -68,7 +68,7 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = ["server: needs a running d1a.serve instance (D1A_BASE_URL)"]
+markers = ["server: needs a running d1a.serving.serve instance (D1A_BASE_URL)"]
 
 [tool.setuptools]
-packages = ["d1a"]
+packages = ["d1a", "d1a.agents", "d1a.backends", "d1a.core", "d1a.eval", "d1a.learning", "d1a.serving", "d1a.training"]

@@ -1,4 +1,4 @@
-"""d1a.api: the System One request schema, the text the model reads for a request, and the answers built from the
+"""d1a.core.api: the System One request schema, the text the model reads for a request, and the answers built from the
 model's distributions. The text formats are pinned exactly: the trained checkpoints read them, so any change is a change
 to every answer."""
 import math
@@ -6,7 +6,7 @@ import math
 import pytest
 from pydantic import ValidationError
 
-from d1a.api import (MAX_OPTIONS, SystemOneRequest, choice_confidence, date_facts, option_text, question_keys, render, round_prob,
+from d1a.core.api import (MAX_OPTIONS, SystemOneRequest, choice_confidence, date_facts, option_text, question_keys, render, round_prob,
                      score_confidence, to_answers, to_record, with_date_facts)
 
 

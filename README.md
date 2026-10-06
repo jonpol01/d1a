@@ -17,7 +17,7 @@
 
 ## See It Running
 
-Twelve use cases, each answered by D1A in one forward pass (recorded live from the [playground](https://github.com/jonpol01/d1a-playground): 1–9 on an M4 Mac mini with MLX 8-bit, 10–11 through [`d1a.media`](#photos-voice-and-video) on an M1 Max, 12 on the Mac mini's D1A-E4B v0.2):
+Twelve use cases, each answered by D1A in one forward pass (recorded live from the [playground](https://github.com/jonpol01/d1a-playground): 1–9 on an M4 Mac mini with MLX 8-bit, 10–11 through [`d1a.serving.media`](#photos-voice-and-video) on an M1 Max, 12 on the Mac mini's D1A-E4B v0.2):
 
 <table>
 <tr><td align="center" width="33%"><img src="https://raw.githubusercontent.com/jonpol01/d1a-playground/129a15d464f6731dcbeaf390d0cf54f3126cd643/docs/gifs/en/routing.gif" alt="Model routing demo running on D1A" width="100%"><br><b>1. Model routing</b></td><td align="center" width="33%"><img src="https://raw.githubusercontent.com/jonpol01/d1a-playground/129a15d464f6731dcbeaf390d0cf54f3126cd643/docs/gifs/en/guardrails.gif" alt="Guardrails demo running on D1A" width="100%"><br><b>2. Guardrails</b></td><td align="center" width="33%"><img src="https://raw.githubusercontent.com/jonpol01/d1a-playground/129a15d464f6731dcbeaf390d0cf54f3126cd643/docs/gifs/en/tools.gif" alt="Tool-call gating demo running on D1A" width="100%"><br><b>3. Tool-call gating</b></td></tr>
@@ -55,14 +55,14 @@ A causal LM backbone with a LoRA adapter runs one prefill pass over the document
   <img src="docs/arch/forms-light.svg" alt="Packed form with a block-causal mask, and rows over a cached document" width="100%">
 </picture>
 
-**4. Where it runs.** `d1a.serve` speaks the System One API, on MLX on Apple Silicon and on PyTorch elsewhere. The same server and the same model answer about a photo, a voice note or a video: Gemma 4's own vision and audio encoders turn the media into tokens the model reads, so there is no captioning or speech-to-text step, and `--idle-unload` frees the memory when nobody is asking ([Photos, Voice and Video](#photos-voice-and-video)).
+**4. Where it runs.** `d1a.serving.serve` speaks the System One API, on MLX on Apple Silicon and on PyTorch elsewhere. The same server and the same model answer about a photo, a voice note or a video: Gemma 4's own vision and audio encoders turn the media into tokens the model reads, so there is no captioning or speech-to-text step, and `--idle-unload` frees the memory when nobody is asking ([Photos, Voice and Video](#photos-voice-and-video)).
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/arch/serving-dark.svg">
-  <img src="docs/arch/serving-light.svg" alt="Clients call d1a.serve; photos and voice notes go through the vision and audio encoders into the same model" width="100%">
+  <img src="docs/arch/serving-light.svg" alt="Clients call d1a.serving.serve; photos and voice notes go through the vision and audio encoders into the same model" width="100%">
 </picture>
 
-**5. Learning from outcomes.** Every decision is logged with the model that made it (`d1a.feedback.FeedbackLog`). When the outcome is known, three steps run, cheapest first: an `OutcomeCalibrator` refits each yes/no probability on the outcomes (Platt scaling, which also corrects a shifted base rate) and each choice question's temperature (how sure it is, never which option it picks), a small LoRA update trains on the resolved decisions, and `gate()` promotes the candidate only if its held-out log loss is lower with a 95% bootstrap interval clear of zero and no frozen suite regressed. A promoted candidate becomes the next version through `d1a.versions`.
+**5. Learning from outcomes.** Every decision is logged with the model that made it (`d1a.learning.feedback.FeedbackLog`). When the outcome is known, three steps run, cheapest first: an `OutcomeCalibrator` refits each yes/no probability on the outcomes (Platt scaling, which also corrects a shifted base rate) and each choice question's temperature (how sure it is, never which option it picks), a small LoRA update trains on the resolved decisions, and `gate()` promotes the candidate only if its held-out log loss is lower with a 95% bootstrap interval clear of zero and no frozen suite regressed. A promoted candidate becomes the next version through `d1a.core.versions`.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/arch/learning-dark.svg">
@@ -83,11 +83,11 @@ On the same 17 PRs and the same input, D1A-E4B got 63% of the labels right again
 
 ## Self-Learning: D1A Learns From Outcomes
 
-Most of D1A's decisions get a ground truth later: a patch passes or fails its tests, a maintainer keeps or corrects a label, a routed task succeeds or fails. `d1a.feedback` turns those outcomes into a better model without letting a worse one through.
+Most of D1A's decisions get a ground truth later: a patch passes or fails its tests, a maintainer keeps or corrects a label, a routed task succeeds or fails. `d1a.learning.feedback` turns those outcomes into a better model without letting a worse one through.
 
 ```python
 from d1a import D1A
-from d1a.feedback import FeedbackLog
+from d1a.learning.feedback import FeedbackLog
 
 m, log = D1A.load("JohnP1/d1a-e4b-mlx-q8"), FeedbackLog("runs/feedback/verifier.jsonl")
 q = {"resolved": {"type": "noul", "instr": "Does this patch fix the issue?"}}
@@ -98,19 +98,19 @@ log.outcome(did, {"resolved": True})
 ```
 
 ```bash
-python -m d1a.feedback status runs/feedback/verifier.jsonl                       # outcomes, base rate, log loss
-python -m d1a.feedback calibrate runs/feedback/verifier.jsonl --out cal.json     # minutes: refit P on outcomes
-python -m d1a.feedback records runs/feedback/verifier.jsonl --out feedback.jsonl # data for a small LoRA update
+python -m d1a.learning.feedback status runs/feedback/verifier.jsonl                       # outcomes, base rate, log loss
+python -m d1a.learning.feedback calibrate runs/feedback/verifier.jsonl --out cal.json     # minutes: refit P on outcomes
+python -m d1a.learning.feedback records runs/feedback/verifier.jsonl --out feedback.jsonl # data for a small LoRA update
 ```
 
-**As a service.** `d1a.serve` runs the loop for any client: with `D1A_FEEDBACK_LOG` set, every answer carries a `decision_id` and is logged, and `POST /v1/feedback` records what actually happened, with an optional `src` (a person's correction, `human`, outranks another model's, e.g. `reviewer`) and `group` (what the decision belongs to, e.g. a pull request); `python -m d1a.feedback promote <log> --calibrator <file>` fits on part of the groups, gates each question on the rest, and rewrites the calibrator file only for the questions that pass; with `D1A_OUTCOME_CALIBRATOR` set, yes/no and choice answers go through the latest calibrator, re-read whenever the file changes, so recalibrating needs no restart.
+**As a service.** `d1a.serving.serve` runs the loop for any client: with `D1A_FEEDBACK_LOG` set, every answer carries a `decision_id` and is logged, and `POST /v1/feedback` records what actually happened, with an optional `src` (a person's correction, `human`, outranks another model's, e.g. `reviewer`) and `group` (what the decision belongs to, e.g. a pull request); `python -m d1a.learning.feedback promote <log> --calibrator <file>` fits on part of the groups, gates each question on the rest, and rewrites the calibrator file only for the questions that pass; with `D1A_OUTCOME_CALIBRATOR` set, yes/no and choice answers go through the latest calibrator, re-read whenever the file changes, so recalibrating needs no restart.
 
 ```bash
 D1A_FEEDBACK_LOG=runs/feedback/verifier.jsonl D1A_OUTCOME_CALIBRATOR=runs/feedback/cal.json \
-  uv run --extra serve python -m d1a.serve --run JohnP1/d1a-e4b-mlx-q8@v0.4 --port 8009
+  uv run --extra serve python -m d1a.serving.serve --run JohnP1/d1a-e4b-mlx-q8@v0.4 --port 8009
 curl -s localhost:8009/v1/feedback -H 'content-type: application/json' \
   -d '{"decision_id": "<from the answer>", "labels": {"resolved": true}}'
-python -m d1a.feedback calibrate runs/feedback/verifier.jsonl --out runs/feedback/cal.json   # picked up on the next request
+python -m d1a.learning.feedback calibrate runs/feedback/verifier.jsonl --out runs/feedback/cal.json   # picked up on the next request
 ```
 
 `gate()` decides whether the retrained candidate replaces the current model: lower held-out log loss with a 95% bootstrap interval (over repositories, for example) entirely below zero, and no frozen suite more than a point worse. Otherwise the current model stays.
@@ -158,7 +158,7 @@ You need Python 3.12 or 3.13 and [uv](https://docs.astral.sh/uv/).
 ```bash
 git clone https://github.com/jonpol01/d1a.git && cd d1a
 uv sync --extra serve
-uv run --extra serve python -m d1a.serve --run JohnP1/d1a-e2b --port 8009
+uv run --extra serve python -m d1a.serving.serve --run JohnP1/d1a-e2b --port 8009
 ```
 
 This serves the prototype checkpoint: CUDA if you have a GPU, MLX on Apple Silicon (`D1A_BACKEND=torch` for PyTorch MPS; see [Apple Silicon (MLX)](#apple-silicon-mlx)). The first run downloads the adapter and the base model. `--run` also takes a local checkpoint directory or a Hub revision (`repo@rev`). Once the D1A weights are published, `--run JohnP1/d1a-e2b` serves them the same way.
@@ -214,14 +214,14 @@ print(answers["team"]["probabilities"], answers["urgent"]["noul"])
 
 ### From Agents (MCP)
 
-`d1a.mcp_server` gives agents (Hermes, Claude Code, any MCP client) the decisions of an agent factory as tools: `d1a_intake` (a new request: which worker, how large a model, ask the user first?), `d1a_judge` (a card and its latest report: done, blocked, needs a person, next step), `d1a_tier` (small, medium or large model for the implementation), `d1a_gate` (may this tool call run: allow, ask, deny), `d1a_route` (which model size answers a prompt) and `d1a_decide` (your own questions). Each returns the answers with probabilities plus `advice`, an action whose defaults fail safe: unsure answers route up, ask a person, or keep a card open (`d1a.presets.advise`).
+`d1a.agents.mcp_server` gives agents (Hermes, Claude Code, any MCP client) the decisions of an agent factory as tools: `d1a_intake` (a new request: which worker, how large a model, ask the user first?), `d1a_judge` (a card and its latest report: done, blocked, needs a person, next step), `d1a_tier` (small, medium or large model for the implementation), `d1a_gate` (may this tool call run: allow, ask, deny), `d1a_route` (which model size answers a prompt) and `d1a_decide` (your own questions). Each returns the answers with probabilities plus `advice`, an action whose defaults fail safe: unsure answers route up, ask a person, or keep a card open (`d1a.agents.presets.advise`).
 
 ```bash
 pip install "d1a[mcp] @ git+https://github.com/jonpol01/d1a"
-D1A_URL=http://127.0.0.1:8009 python -m d1a.mcp_server        # stdio; asks a running d1a.serve
+D1A_URL=http://127.0.0.1:8009 python -m d1a.agents.mcp_server        # stdio; asks a running d1a.serving.serve
 ```
 
-Register it as a stdio MCP server (command `python`, args `-m d1a.mcp_server`, env `D1A_URL`) in the agent's MCP settings, and allow the tool names above. `D1A_RUN=<checkpoint>` loads a model in the MCP process instead of calling a server. The question sets are in `d1a/presets.py`, worded exactly as the routing training data asks them.
+Register it as a stdio MCP server (command `python`, args `-m d1a.agents.mcp_server`, env `D1A_URL`) in the agent's MCP settings, and allow the tool names above. `D1A_RUN=<checkpoint>` loads a model in the MCP process instead of calling a server. The question sets are in `d1a/agents/presets.py`, worded exactly as the routing training data asks them.
 
 ### Clients
 
@@ -242,7 +242,7 @@ print(answer["answers"]["team"]["probabilities"])
 The model server answers questions about an image, a short voice clip or a video with the same model, the same request shape plus a `media` field. On Apple Silicon, serve an MLX build that carries Gemma 4's vision and audio encoders (`media/`, about 1 GB, fetched on the first such request; `JohnP1/d1a-e4b-mlx-q8@v0.3` has them, and `scripts/export_mlx.py --media` adds them to your own export):
 
 ```bash
-uv run --extra serve --extra media python -m d1a.serve --run JohnP1/d1a-e4b-mlx-q8@v0.4 --port 8009 --idle-unload 600
+uv run --extra serve --extra media python -m d1a.serving.serve --run JohnP1/d1a-e4b-mlx-q8@v0.4 --port 8009 --idle-unload 600
 ```
 
 ```bash
@@ -252,22 +252,22 @@ curl -s localhost:8009/v1/systemone/media -H 'content-type: application/json' -d
 }'
 ```
 
-`--idle-unload 600` drops the model, encoders included, after 10 minutes without a request and loads it again on the next one (2 s for D1A-E4B on an M1 Max); `GET /v1/models` answers either way and says whether it is `loaded`. With a PyTorch checkpoint (NVIDIA, CPU) run `python -m d1a.media --run JohnP1/d1a-e2b --port 8010` instead: it loads the full Gemma 4 model (bf16, about 10 GB for E2B) as its own process, on the first request, and drops it after 10 idle minutes.
+`--idle-unload 600` drops the model, encoders included, after 10 minutes without a request and loads it again on the next one (2 s for D1A-E4B on an M1 Max); `GET /v1/models` answers either way and says whether it is `loaded`. With a PyTorch checkpoint (NVIDIA, CPU) run `python -m d1a.serving.media --run JohnP1/d1a-e2b --port 8010` instead: it loads the full Gemma 4 model (bf16, about 10 GB for E2B) as its own process, on the first request, and drops it after 10 idle minutes.
 
 `type` is `image` (JPEG, PNG, WebP), `audio` (WAV, FLAC or OGG, up to 30 s; any sample rate) or `video` (MP4, MOV or WebM, up to 32 MB: 16 frames sampled evenly, each read as a timestamped image; the sound track is not used). An optional `state` adds text next to the media. The checkpoints are trained on text only, so this is zero-shot: on a first test ([#78](https://github.com/jonpol01/d1a/issues/78)) D1A-E2B read damage on 6 of 6 delivery photos, the drop-off place on 5 of 6, and the request in 4 of 4 English and Japanese voice notes; on the playground's 10 samples D1A-E4B v0.3 gets damage 5 of 6, place 6 of 6 and the request 4 of 4. Treat it as a demo, not a measured result. Video is read the same way: on single-scene clips made from the sample photos, D1A-E4B v0.3 gives the same answers as for the photo; questions about the order of events ("where is it at the end?") are not reliable yet.
 
 ### Playground
 
-The demos above live in [jonpol01/d1a-playground](https://github.com/jonpol01/d1a-playground), a Next.js app that talks to `d1a.serve`. Kev's in-repo developer playground (packed vs separate answers, option permutation, chess) and its label-review page were removed; [docs/removed-tools.md](docs/removed-tools.md) describes them and how to restore them. The server endpoints they used, `/v1/systemone/separate` and `/v1/systemone/permute`, are still there.
+The demos above live in [jonpol01/d1a-playground](https://github.com/jonpol01/d1a-playground), a Next.js app that talks to `d1a.serving.serve`. Kev's in-repo developer playground (packed vs separate answers, option permutation, chess) and its label-review page were removed; [docs/removed-tools.md](docs/removed-tools.md) describes them and how to restore them. The server endpoints they used, `/v1/systemone/separate` and `/v1/systemone/permute`, are still there.
 
 ### Apple Silicon (MLX)
 
-On Apple Silicon `d1a.serve` runs Gemma 4 checkpoints through MLX (`d1a/mlx_model.py`, mlx-lm 0.31.3): the adapter is merged into the bf16 base at load and every request runs as the state once plus one row per question. `scripts/export_mlx.py` writes that merged model as a folder which loads without the base or the adapter, optionally quantized:
+On Apple Silicon `d1a.serving.serve` runs Gemma 4 checkpoints through MLX (`d1a/backends/mlx.py`, mlx-lm 0.31.3): the adapter is merged into the bf16 base at load and every request runs as the state once plus one row per question. `scripts/export_mlx.py` writes that merged model as a folder which loads without the base or the adapter, optionally quantized:
 
 ```bash
 uv run --extra mlx python scripts/export_mlx.py --run JohnP1/d1a-e2b --out runs/exports/d1a-e2b-mlx-bf16
 uv run --extra mlx python scripts/export_mlx.py --run JohnP1/d1a-e2b --q-bits 4 --q-group-size 64 --out runs/exports/d1a-e2b-mlx-4bit
-uv run --extra serve python -m d1a.serve --run runs/exports/d1a-e2b-mlx-4bit --port 8009
+uv run --extra serve python -m d1a.serving.serve --run runs/exports/d1a-e2b-mlx-4bit --port 8009
 ```
 
 Parity is measured against golden vectors from the fp32 PyTorch path (`scripts/golden_vectors.py`: 209 records, 274 questions: decision-v7 development records, the playground presets and three long-state records). For JohnP1/d1a-e2b on an M1 Max, |Δp| being the largest change of any option's probability in a question:
@@ -287,23 +287,23 @@ Gemma 4's per-layer embeddings are read from the weight files per request instea
 The D1A recipe on Gemma 4 E2B (one L4 is enough, about 15 GB peak with a bf16 backbone). `google/gemma-4-E2B` at commit `d29ff6b45f081a49ee2733a859c9c9c2d95d1a6f` is the trainer's default base, so `--base` can be left out:
 
 ```bash
-uv run python -m d1a.train --suite evals/v7/decision-v7 \
+uv run python -m d1a.training.train --suite evals/v7/decision-v7 \
     --epochs 2 --lr 1e-4 --batch 4 --accum 2 --dtype bf16 --weights_dtype bf16 --checkpointing 1 \
     --p_none_pair 0.25 --device cuda --out runs/d1a-e2b
 ```
 
-The same run as a recipe, [`recipes/d1a-e2b.yaml`](recipes/d1a-e2b.yaml): a versioned YAML file of stages (each one `d1a.train` run, a later stage starting from the one before), checked against `d1a.train`'s options before anything runs and recorded beside every checkpoint it writes (`recipe.json`: the recipe, its sha256 and the exact command). `--dry-run` prints the commands.
+The same run as a recipe, [`recipes/d1a-e2b.yaml`](recipes/d1a-e2b.yaml): a versioned YAML file of stages (each one `d1a.training.train` run, a later stage starting from the one before), checked against `d1a.training.train`'s options before anything runs and recorded beside every checkpoint it writes (`recipe.json`: the recipe, its sha256 and the exact command). `--dry-run` prints the commands.
 
 ```bash
-uv run python -m d1a.recipe run recipes/d1a-e2b.yaml --out runs/d1a-e2b --device cuda    # writes runs/d1a-e2b/base
+uv run python -m d1a.training.recipe run recipes/d1a-e2b.yaml --out runs/d1a-e2b --device cuda    # writes runs/d1a-e2b/base
 ```
 
-For E4B pass `--base google/gemma-4-E4B --base_revision <sha>`. To fine-tune on your own data, start from a checkpoint: `--data mine.jsonl --init_from JohnP1/d1a-e2b`. `--data` (in `d1a.benchmark` too) also takes a D1A suite partition, `evals/d1a/<suite>:<partition>`: a dataset pinned to one Hub commit, fetched and checked against its sha256 before use, and refused for training when it is an eval partition (`python -m d1a.suites --help`). To train on several frozen suites in one run, add `--extra_suites evals/hard-v1,evals/devtools-v1` (each suite's own manifest rules apply to its records). For long runs add `--save_every_minutes 30`: a crash then loses at most 30 minutes, and `--resume 1` with the same arguments continues bit for bit. A single non-finite loss or gradient skips its batch instead of ending the run (three in a row still stop it). `python -m d1a.train --help` lists every option. Before you publish or serve a trained checkpoint, write its calibration temperature into it with `python -m d1a.calibrate` (training leaves it at 1.0 on purpose; `d1a.serve` warns and `/v1/models` reports `calibrated: false` until you do).
+For E4B pass `--base google/gemma-4-E4B --base_revision <sha>`. To fine-tune on your own data, start from a checkpoint: `--data mine.jsonl --init_from JohnP1/d1a-e2b`. `--data` (in `d1a.eval.benchmark` too) also takes a D1A suite partition, `evals/d1a/<suite>:<partition>`: a dataset pinned to one Hub commit, fetched and checked against its sha256 before use, and refused for training when it is an eval partition (`python -m d1a.eval.suites --help`). To train on several frozen suites in one run, add `--extra_suites evals/hard-v1,evals/devtools-v1` (each suite's own manifest rules apply to its records). For long runs add `--save_every_minutes 30`: a crash then loses at most 30 minutes, and `--resume 1` with the same arguments continues bit for bit. A single non-finite loss or gradient skips its batch instead of ending the run (three in a row still stop it). `python -m d1a.training.train --help` lists every option. Before you publish or serve a trained checkpoint, write its calibration temperature into it with `python -m d1a.training.calibrate` (training leaves it at 1.0 on purpose; `d1a.serving.serve` warns and `/v1/models` reports `calibrated: false` until you do).
 
 Score a checkpoint on the frozen suites:
 
 ```bash
-uv run python -m d1a.benchmark --run runs/d1a-e2b --suite evals/v4/transfer-v4 --out runs/d1a-e2b-transfer
+uv run python -m d1a.eval.benchmark --run runs/d1a-e2b --suite evals/v4/transfer-v4 --out runs/d1a-e2b-transfer
 ```
 
 The frozen suites (`evals/`) come from Kev. Their manifests and small partitions are in git; partitions over about 10 MB are fetched from Kev's Hugging Face dataset [`jaredpalmer/kev-suites`](https://huggingface.co/datasets/jaredpalmer/kev-suites) on first use and verified by sha256. A few held-out suites name a private mirror and cannot be loaded without access to it. The suites were admitted under Qwen tokenizers, so the trainer re-admits their records under Gemma's tokenizer with each suite's own rule (70 of decision-v7's 12,576 records are dropped).

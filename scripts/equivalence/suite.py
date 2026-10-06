@@ -1,4 +1,4 @@
-"""d1a.suite against the module at --ref: its constants, the path and hash helpers, the bytes its writers produce,
+"""d1a.eval.suite against the module at --ref: its constants, the path and hash helpers, the bytes its writers produce,
 validate_training, and load_split on every frozen partition in git, on tampered copies, through a stand-in Hub mirror and
 against a private one.
 
@@ -9,10 +9,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from common import arguments, module_at  # noqa: E402
-import d1a.suite as new
+import d1a.eval.suite as new
 import huggingface_hub
 args = arguments(__doc__.split("\n")[0], "34113f45", 3000)
-old = module_at(args.ref, "d1a/suite.py")
+old = module_at(args.ref, "d1a/eval/suite.py")
 rng = random.Random(args.seed); n = 0
 def run(f):
     buf = io.StringIO()
@@ -94,4 +94,4 @@ same("private", lambda: old.load_split(root, "test", True), lambda: new.load_spl
 lock = Path(tempfile.mkdtemp()) / "a" / "b.lock"
 with new.file_lock(lock): pass
 assert lock.exists(); n += 1
-print(f"d1a.suite: identical to {args.ref} on {n} checks, every frozen partition in git included")
+print(f"d1a.eval.suite: identical to {args.ref} on {n} checks, every frozen partition in git included")

@@ -1,4 +1,4 @@
-"""d1a.benchmark against the module at --ref: prediction_rows, labels, summarize, paired_flip and evaluate_records on generated
+"""d1a.eval.benchmark against the module at --ref: prediction_rows, labels, summarize, paired_flip and evaluate_records on generated
 records with stand-in predictors (failures, skipped long records, concurrency, logits, kernels), every written file
 compared byte for byte; then main() end to end on evals/smoke-v1 (each mode, argument errors, --help).
 
@@ -10,11 +10,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from common import arguments, module_at  # noqa: E402
 warnings.simplefilter("ignore")
-import d1a.benchmark as new
-from d1a.model import ContextOverflow
-from d1a.api import question_keys
+import d1a.eval.benchmark as new
+from d1a.backends.torch import ContextOverflow
+from d1a.core.api import question_keys
 args = arguments(__doc__.split("\n")[0], "34113f45", 400)
-old = module_at(args.ref, "d1a/benchmark.py")
+old = module_at(args.ref, "d1a/eval/benchmark.py")
 rng = random.Random(args.seed)
 def run(f):
     try: return ("ok", f())
@@ -91,7 +91,7 @@ for it in range(args.iterations):
     n += 1
 
 
-from d1a.suite import load_split
+from d1a.eval.suite import load_split
 class Local:
     temperature = 1.3
     def __init__(self, run, device, opts, context): self.context = context
@@ -130,4 +130,4 @@ for m in (old, new):
         except SystemExit: pass
     m.help = buf.getvalue()
 assert old.help == new.help; n += 1
-print(f"d1a.benchmark: identical to {args.ref} on {n} checks, the command line included")
+print(f"d1a.eval.benchmark: identical to {args.ref} on {n} checks, the command line included")

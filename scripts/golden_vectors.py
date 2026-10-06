@@ -10,7 +10,7 @@ backend (the MLX exports) against them.
 The record set: every 6th record of each variant of the decision-v7 development split (~200), the five playground
 presets (scripts/golden_presets.json: those of Kev's playground, removed since) and three long records
 whose states (~1k tokens, development states joined) pass Gemma 4's 512-token sliding window. Records are encoded as
-d1a.serve encodes them (serving context), and each record stores its input, its token ids and the probabilities, so the
+d1a.serving.serve encodes them (serving context), and each record stores its input, its token ids and the probabilities, so the
 file is a self-contained test vector: an implementation must reproduce the ids exactly and the probabilities to its
 tolerance.
 """
@@ -27,9 +27,9 @@ LONG_RECORDS, LONG_GROUP, LONG_STATE_CHARS = 3, 40, 4000
 
 def record_set():
     """[(id, kind, internal record, per-question meta)] in a fixed order."""
-    from d1a.api import SystemOneRequest, to_record
-    from d1a.data import materialize
-    from d1a.suite import load_split
+    from d1a.core.api import SystemOneRequest, to_record
+    from d1a.training.data import materialize
+    from d1a.eval.suite import load_split
     dev = load_split(SUITE, "development")
     out = []
     variants = sorted({r["_meta"]["variant"] for r in dev})
@@ -54,7 +54,7 @@ def record_set():
 
 
 def encode(model, tok, rec):
-    from d1a.model import SERVE_MAX_BRANCH, SERVE_MAX_STATE
+    from d1a.backends.torch import SERVE_MAX_BRANCH, SERVE_MAX_STATE
     return model.encode(tok, rec, max_state=SERVE_MAX_STATE, max_branch=SERVE_MAX_BRANCH)
 
 
@@ -85,7 +85,7 @@ def upload(a, path, backend, dtype, partial=False):
 
 def score(a):
     import torch
-    from d1a.checkpoint import Checkpoint, LoadOptions
+    from d1a.backends.checkpoint import Checkpoint, LoadOptions
     torch.set_num_threads(a.threads or cpu_quota())
     print(f"torch threads: {torch.get_num_threads()}", flush=True)
     ck = Checkpoint(a.run)
@@ -119,7 +119,7 @@ def summary(pairs, dev):
     flips = [(int(np.argmax(p)), int(np.argmax(r)), margin(r)) for p, r, _ in pairs]
     out = {"questions": len(pairs), "max_dp": float(d.max()), "mean_dp": float(d.mean()), "p95_dp": float(np.percentile(d, 95)),
            "argmax_flips": sum(a != b for a, b, _ in flips), "flip_margins": sorted(round(m, 4) for a, b, m in flips if a != b)}
-    from d1a.metrics import ece
+    from d1a.eval.metrics import ece
     lab = [(p, r, y) for (p, r, y), keep in zip(pairs, dev) if keep and y is not None]
     for name, k in (("candidate", 0), ("reference", 1)):
         conf = [float(np.max(x[k])) for x in lab]; correct = [int(np.argmax(x[k])) == x[2] for x in lab]
@@ -128,7 +128,7 @@ def summary(pairs, dev):
 
 
 def compare(a):
-    from d1a.checkpoint import Checkpoint, LoadOptions
+    from d1a.backends.checkpoint import Checkpoint, LoadOptions
     golden = json.loads(Path(a.golden).read_text(encoding="utf-8"))
     if golden.get("format") != GOLDEN_FORMAT: raise ValueError(f"{a.golden} is not a {GOLDEN_FORMAT} file")
     ck = Checkpoint(a.run)

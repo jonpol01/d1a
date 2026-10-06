@@ -8,12 +8,16 @@ kev -> d1a rename (package, KEV_* variables, the name) is undone before comparin
 A line is "kept" when it survives in the matching Kev file (difflib matching blocks); files with no Kev counterpart are
 "new"; Kev files with no D1A counterpart are "pruned".
 """
-import argparse, difflib, io, json, os, re, tarfile, urllib.request
+import argparse, ast, difflib, io, json, os, re, tarfile, urllib.request
 from collections import defaultdict
 from pathlib import Path
 
 BASE = "0fe8fc9"
 ROOT = Path(__file__).resolve().parents[1]
+# the modules #60 moved into subpackages, by the name Kev gave them (d1a/_layout.py, read without importing d1a)
+_MOVED = ast.literal_eval((ROOT / "d1a/_layout.py").read_text(encoding="utf-8").split("MOVED = ", 1)[1])
+KEV_NAME = {f"d1a/{new.replace('.', '/')}.py": f"kev/{old}.py" for old, new in _MOVED.items()}
+SHIMS = {f"d1a/{old}.py" for old in _MOVED}
 CACHE = Path.home() / ".cache" / "d1a" / f"kev-{BASE}"
 TEXT = (".py", ".ts", ".tsx", ".js", ".md", ".toml", ".yml", ".yaml", ".json", ".css", ".txt", ".html", ".sh")
 # generated test data (tests/golden: golden vectors, a committed checkpoint): shown, never counted in TOTAL
@@ -44,6 +48,24 @@ def norm(text):
     return re.sub(r"\bKEV_", "D1A_", re.sub(r"\bkev\b", "d1a", text)).replace("Kev", "D1A")
 
 
+# #60 moved modules into subpackages and made their imports absolute: on both sides, every module reference is written
+# as the flat d1a.<old name> before comparing, so a moved file is not counted as rewritten for its import lines
+_OLD = {new: old for old, new in _MOVED.items()}
+_NEW_DOTTED = re.compile(r"\bd1a\.(" + "|".join(re.escape(n) for n in sorted(_OLD, key=len, reverse=True)) + r")\b")
+_FROM_PKG = re.compile(r"\bfrom d1a\.(\w+) import (\w+)(?: as (\w+))?")
+
+
+def canonical(text):
+    text = re.sub(r"^(\s*)from \.(\w+) import", r"\1from d1a.\2 import", text, flags=re.M)   # relative -> absolute
+    def flat(m):
+        old = _OLD.get(f"{m[1]}.{m[2]}")
+        if old is None:
+            return m[0]
+        return f"from d1a import {old}" + (f" as {m[3]}" if m[3] and m[3] != old else "")
+    text = _FROM_PKG.sub(flat, text)
+    return _NEW_DOTTED.sub(lambda m: f"d1a.{_OLD[m[1]]}", text)
+
+
 def area(p):
     return next((name for prefix, name in AREAS if p.startswith(prefix)), "docs / config / other")
 
@@ -54,15 +76,17 @@ def main():
     stats = defaultdict(lambda: defaultdict(int))
     for p, path in d1a.items():
         if os.path.getsize(path) > 3_000_000: continue
+        if p in SHIMS: continue   # one-release import shims (d1a/<old>.py), not code
         s = stats[area(p)]; lines = open(path, encoding="utf-8", errors="replace").read().splitlines()
-        kp = "kev/" + p[4:] if p.startswith("d1a/") else p
+        kp = KEV_NAME.get(p) or ("kev/" + p[4:] if p.startswith("d1a/") else p)
         s["lines"] += len(lines)
         if kp not in kev:
             s["new"] += len(lines); s["new_files"] += 1; continue
-        old = norm(open(kev[kp], encoding="utf-8", errors="replace").read()).splitlines()
-        kept = sum(b.size for b in difflib.SequenceMatcher(None, old, lines, autojunk=False).get_matching_blocks())
+        old = canonical(norm(open(kev[kp], encoding="utf-8", errors="replace").read())).splitlines()
+        kept = sum(b.size for b in difflib.SequenceMatcher(None, old, canonical("\n".join(lines)).splitlines(), autojunk=False).get_matching_blocks())
         s["kept"] += kept; s["changed"] += len(lines) - kept; s["files_from_kev"] += 1
-    pruned = sum(1 for p in kev if ("d1a/" + p[4:] if p.startswith("kev/") else p) not in d1a)
+    ours = {KEV_NAME.get(p) or ("kev/" + p[4:] if p.startswith("d1a/") else p) for p in d1a}
+    pruned = sum(1 for p in kev if p not in ours)
     total = defaultdict(int)
     for name, s in stats.items():
         if name == FIXTURES: continue

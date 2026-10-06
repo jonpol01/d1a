@@ -1,4 +1,4 @@
-"""d1a.train on real weights, main against the branch, on MPS: a capped probe, then the module at --ref twice (MPS
+"""d1a.training.train on real weights, main against the branch, on MPS: a capped probe, then the module at --ref twice (MPS
 training is not bit-deterministic run to run, so the two give the noise floor), then the working tree's, each a few
 steps from the same seed and data. Reports, per pair, the largest adapter and head differences and the median step time.
 
@@ -18,18 +18,18 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from common import ROOT, module_at  # noqa: E402
 
-import d1a.train as new  # noqa: E402
+import d1a.training.train as new  # noqa: E402
 
 
 def train(module, argv):
-    sys.argv = ["d1a.train", *argv]
+    sys.argv = ["d1a.training.train", *argv]
     with contextlib.redirect_stdout(io.StringIO()):
         module.main()
 
 
 def weights(out):
     from safetensors.torch import load_file
-    from d1a.checkpoint import read_meta
+    from d1a.backends.checkpoint import read_meta
     return load_file(str(Path(out) / "adapter_model.safetensors")), read_meta(out).head
 
 
@@ -46,12 +46,12 @@ def main():
     os.chdir(ROOT)
     if not os.environ.get("PYTORCH_MPS_HIGH_WATERMARK_RATIO"):
         raise SystemExit("set PYTORCH_MPS_HIGH_WATERMARK_RATIO (the 09-26 freeze rule)")
-    from d1a.suite import load_split, read_json
+    from d1a.eval.suite import load_split, read_json
     work = Path(tempfile.mkdtemp())
     rows = [{k: v for k, v in r.items() if k != "_meta"} for r in load_split("evals/v7/decision-v7", "development") if r["_meta"]["variant"] == "clean"][: a.records]
     (work / "data.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
     common = ["--data", str(work / "data.jsonl"), "--device", "mps", "--lora", "16", "--batch", "1", "--accum", "4", "--checkpointing", "1", "--seed", "0"]
-    old = module_at(a.ref, "d1a/train.py")
+    old = module_at(a.ref, "d1a/training/train.py")
     train(new, common + ["--max_steps", "1", "--out", str(work / "probe")])   # capped probe: one step, then the real runs
     print("probe ok", read_json(work / "probe" / "training_metrics.json")["step_seconds"], flush=True)
     runs = {}

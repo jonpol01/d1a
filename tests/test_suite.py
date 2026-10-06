@@ -1,4 +1,4 @@
-"""d1a.suite: frozen partitions read only as pinned (hash, count, the locked test, removed suites, the Hub mirrors), the
+"""d1a.eval.suite: frozen partitions read only as pinned (hash, count, the locked test, removed suites, the Hub mirrors), the
 file conventions (UTF-8 whatever the locale, LF-only JSONL, atomic writes), and the training-source guard."""
 import hashlib
 import json
@@ -9,7 +9,7 @@ import sys
 
 import pytest
 
-from d1a import suite as S
+from d1a.eval import suite as S
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 RECORD = {"state": "Zwölf Boxkämpfer: ‘quotes’ and é", "questions": {}, "_meta": {"id": "r0"}}
@@ -107,7 +107,7 @@ def test_partitions_load_under_any_locale(tmp_path):
     any locale (cp936 on Windows in the report; the ASCII C locale here), and git keeps their LF line endings."""
     suite = frozen(tmp_path / "evals" / "x" / "decision-x", {"development": [RECORD]})
     env = {**os.environ, "PYTHONUTF8": "0", "PYTHONCOERCECLOCALE": "0", "LC_ALL": "C", "LANG": "C", "PYTHONIOENCODING": "utf-8"}   # stdout only
-    code = f"import locale; from d1a.suite import load_split; print(locale.getpreferredencoding(False), load_split({str(suite)!r}, 'development')[0]['state'])"
+    code = f"import locale; from d1a.eval.suite import load_split; print(locale.getpreferredencoding(False), load_split({str(suite)!r}, 'development')[0]['state'])"
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=env, cwd=ROOT, encoding="utf-8")
     assert out.returncode == 0, out.stderr
     assert out.stdout.strip().endswith(RECORD["state"]) and "UTF-8" not in out.stdout.split()[0].upper(), out.stdout
@@ -159,7 +159,7 @@ def test_training_refuses_eval_only_undeclared_and_empty_sources():
 
 
 def test_training_refuses_held_out_compositional_structures():
-    from d1a.composition import DEV_SHAPES, SHAPES, canonical, push_negation, structure_keys
+    from d1a.training.composition import DEV_SHAPES, SHAPES, canonical, push_negation, structure_keys
     allowed = {"trainable_sources": ["compositional"]}
     S.validate_training([{"_meta": {"source": "compositional", "family": "nested_and"}}], allowed)
     S.validate_training([{"_meta": {"source": "compositional", "family": "rand:7", "structure": "and(0,1)"}}], allowed)

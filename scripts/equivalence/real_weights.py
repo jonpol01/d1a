@@ -3,8 +3,8 @@ through each version in turn (one in memory at a time), the golden-vector record
 requests) scored by both, every probability compared, and load time and per-request latency measured. John's rule for
 model.py, checkpoint.py and train.py rewrites: identical answers and equal-or-better latency, main against the branch.
 
-    uv run python scripts/equivalence/real_weights.py --module d1a/checkpoint.py --run JohnP1/d1a-e2b --device mps
-    uv run python scripts/equivalence/real_weights.py --module d1a/model.py --run JohnP1/d1a-e2b --device mps
+    uv run python scripts/equivalence/real_weights.py --module d1a/backends/checkpoint.py --run JohnP1/d1a-e2b --device mps
+    uv run python scripts/equivalence/real_weights.py --module d1a/backends/torch.py --run JohnP1/d1a-e2b --device mps
 """
 import argparse
 import gc
@@ -24,7 +24,7 @@ from common import ROOT, module_at  # noqa: E402
 def score(checkpoint_module, run, device, dtype, records, rounds):
     """-> (probabilities per record, load seconds, per-request milliseconds over `rounds` passes)."""
     from golden_vectors import encode
-    from d1a.device import empty_cache, sync
+    from d1a.backends.device import empty_cache, sync
     t = time.perf_counter()
     tok, model = checkpoint_module.Checkpoint(run).load(device, checkpoint_module.LoadOptions(backend="torch", dtype=dtype))
     sync(device)
@@ -50,7 +50,7 @@ def interleaved(old_module, new_module, run, device, dtype, records, rounds):
     so the machine's background load falls on both alike (a sequential main-then-branch run on a loaded Mac once showed a
     fake +43%). -> {"old": [ms], "new": [ms]}, and the load time of each."""
     from golden_vectors import encode
-    from d1a.device import sync
+    from d1a.backends.device import sync
     loaded, models = {}, {}
     for name, module in (("old", old_module), ("new", new_module)):
         t = time.perf_counter()
@@ -71,7 +71,7 @@ def interleaved(old_module, new_module, run, device, dtype, records, rounds):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--module", default="d1a/checkpoint.py", help="the rewritten module whose old version is loaded from --ref")
+    ap.add_argument("--module", default="d1a/backends/checkpoint.py", help="the rewritten module whose old version is loaded from --ref")
     ap.add_argument("--ref", default="origin/main")
     ap.add_argument("--run", default="JohnP1/d1a-e2b")
     ap.add_argument("--device", default="mps")
@@ -84,14 +84,14 @@ def main():
     import os
     os.chdir(ROOT)
     from golden_vectors import record_set
-    import d1a.checkpoint as new_checkpoint
-    if a.module == "d1a/checkpoint.py":
+    import d1a.backends.checkpoint as new_checkpoint
+    if a.module == "d1a/backends/checkpoint.py":
         old_checkpoint = module_at(a.ref, a.module)
-    elif a.module == "d1a/model.py":   # the same loader, building the model from --ref
-        old_model, old_checkpoint = module_at(a.ref, a.module), module_at(a.ref, "d1a/checkpoint.py")
+    elif a.module == "d1a/backends/torch.py":   # the same loader, building the model from --ref
+        old_model, old_checkpoint = module_at(a.ref, a.module), module_at(a.ref, "d1a/backends/checkpoint.py")
         old_checkpoint.DecisionModel, old_checkpoint.load_tokenizer, old_checkpoint.pad_id = old_model.DecisionModel, old_model.load_tokenizer, old_model.pad_id
     else:
-        raise SystemExit("only d1a/checkpoint.py and d1a/model.py are wired; train.py has scripts/equivalence/train_real_weights.py")
+        raise SystemExit("only d1a/backends/checkpoint.py and d1a/backends/torch.py are wired; train.py has scripts/equivalence/train_real_weights.py")
     dtype = {"fp32": torch.float32, "bf16": torch.bfloat16}[a.dtype]
     records = record_set()[: a.limit or None]
     if a.interleave:

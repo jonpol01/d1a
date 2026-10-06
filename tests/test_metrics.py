@@ -1,11 +1,11 @@
-"""d1a.metrics on hand-built rows: every figure checked against a value worked out by hand, the tie and edge-case
+"""d1a.eval.metrics on hand-built rows: every figure checked against a value worked out by hand, the tie and edge-case
 policies, the temperature round trips, and the cluster structure of the bootstraps."""
 import math
 
 import numpy as np
 import pytest
 
-from d1a import metrics as M
+from d1a.eval import metrics as M
 
 
 def row(p, label, **extra):

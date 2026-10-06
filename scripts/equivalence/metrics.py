@@ -1,4 +1,4 @@
-"""d1a.metrics against the module at --ref, bit for bit: every public function on generated rows (with and without
+"""d1a.eval.metrics against the module at --ref, bit for bit: every public function on generated rows (with and without
 logits, saved temperatures, ties, score questions, unknowable records, invalid inputs), reports with their key order,
 fitted temperatures, folds and bootstrap draws.
 
@@ -14,13 +14,13 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from common import Checker, arguments, module_at  # noqa: E402
 
-import d1a.metrics as new  # noqa: E402
+import d1a.eval.metrics as new  # noqa: E402
 
 
 def main():
     a = arguments(__doc__.split("\n")[0], "e3c0eca8", 500)
     warnings.simplefilter("ignore")
-    old, rng, check = module_at(a.ref, "d1a/metrics.py"), random.Random(a.seed), Checker()
+    old, rng, check = module_at(a.ref, "d1a/eval/metrics.py"), random.Random(a.seed), Checker()
     for name in ("EPSILON", "TEMPERATURE_FIT", "TEMPERATURE_FIT_METHOD", "LENGTH_EDGES", "LENGTH_METRICS"):
         check.equal(name, getattr(old, name), getattr(new, name))
 
@@ -70,7 +70,7 @@ def main():
         other = [{**r, "p": r["p"][::-1]} if rng.random() < 0.5 else r for r in raw]
         for metric in ("nll", "acc", "brier", "ece", "aurc", "coverage_at_5pct_error", "coverage_at_1pct_error", "confidence_bias", "bogus"):
             both("paired_bootstrap", raw, other, samples, seed, metric, rng.choice(["micro", "macro"]))
-    print(f"d1a.metrics: identical to {a.ref} on {check.count} comparisons")
+    print(f"d1a.eval.metrics: identical to {a.ref} on {check.count} comparisons")
 
 
 if __name__ == "__main__":

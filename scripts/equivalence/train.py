@@ -1,4 +1,4 @@
-"""d1a.train against the module at --ref, on the CPU, bit for bit: main() trains tiny models (the committed Gemma 4 in
+"""d1a.training.train against the module at --ref, on the CPU, bit for bit: main() trains tiny models (the committed Gemma 4 in
 tests/golden/tiny-gemma4 and a 2-layer random Qwen3.5 built here) under a matrix of options, once per version, and the
 adapter tensors, the head, training_config.json, training_metrics.json and the log must be identical (timings aside).
 A run stopped and resumed is compared too.
@@ -20,7 +20,7 @@ import torch
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from common import ROOT, Checker, arguments, module_at  # noqa: E402
 
-import d1a.train as new  # noqa: E402
+import d1a.training.train as new  # noqa: E402
 
 GEMMA = ROOT / "tests/golden/tiny-gemma4/base"
 TIMINGS = ("wall_seconds", "step_seconds", "optimizer_seconds", "resume_seconds", "resume_write_seconds", "backbone_save_seconds", "peak_rss_bytes", "peak_device_bytes")
@@ -43,7 +43,7 @@ def data_file(root, rng, n=16):
 def qwen_base(root):
     from tokenizers import Tokenizer, models, pre_tokenizers
     from transformers import PreTrainedTokenizerFast, Qwen3_5ForCausalLM, Qwen3_5TextConfig
-    from d1a.model import SPECIAL
+    from d1a.backends.torch import SPECIAL
     vocab = {t: i for i, t in enumerate(["<unk>", "<pad>", *SPECIAL, *WORDS])}
     tk = Tokenizer(models.WordLevel(vocab, unk_token="<unk>")); tk.pre_tokenizer = pre_tokenizers.Whitespace()
     config = Qwen3_5TextConfig(vocab_size=len(vocab), hidden_size=32, intermediate_size=64, num_hidden_layers=2, num_attention_heads=2, num_key_value_heads=1,
@@ -59,7 +59,7 @@ def run(module, argv):
     """main() with argv -> (outcome, log with timings and paths masked)."""
     out = io.StringIO()
     old_argv = sys.argv
-    sys.argv = ["d1a.train", *argv]
+    sys.argv = ["d1a.training.train", *argv]
     try:
         with contextlib.redirect_stdout(out):
             module.main()
@@ -81,7 +81,7 @@ def results(out_dir):
     if (out_dir / "adapter_model.safetensors").exists():
         from safetensors.torch import load_file
         out["adapter"] = {k: v.tolist() for k, v in sorted(load_file(str(out_dir / "adapter_model.safetensors")).items())}
-        from d1a.checkpoint import read_meta
+        from d1a.backends.checkpoint import read_meta
         meta = read_meta(out_dir).to_dict()
         out["head"] = {k: v.tolist() for k, v in meta.pop("head").items()}
         out["meta"] = json.loads(json.dumps(meta, default=str).replace(str(out_dir), "OUT"))
@@ -99,7 +99,7 @@ def main():
     a = arguments(__doc__.split("\n")[0], "c04827e3", 1)
     import os
     os.chdir(ROOT)   # the fixture checkpoint names its base by a repo-relative path
-    old, check = module_at(a.ref, "d1a/train.py"), Checker()
+    old, check = module_at(a.ref, "d1a/training/train.py"), Checker()
     work = Path(tempfile.mkdtemp())
     data = data_file(work, random.Random(a.seed))
     qwen = qwen_base(work)
@@ -142,7 +142,7 @@ def main():
     check.equal("stop and resume", got[0], got[1])
     print(f"same: stop and resume ({got[0][2]})", flush=True)
     shutil.rmtree(work, ignore_errors=True)
-    print(f"d1a.train: identical to {a.ref} on {check.count} runs")
+    print(f"d1a.training.train: identical to {a.ref} on {check.count} runs")
 
 
 if __name__ == "__main__":

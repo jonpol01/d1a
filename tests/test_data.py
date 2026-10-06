@@ -1,4 +1,4 @@
-"""d1a.data without downloads: build's per-source seeding and provenance (stand-in converters and datasets), the
+"""d1a.training.data without downloads: build's per-source seeding and provenance (stand-in converters and datasets), the
 training-time variations (augment, none_pair), your own JSONL (load_records), and the model's records (materialize)."""
 import hashlib
 import json
@@ -7,9 +7,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from d1a import data as D
-from d1a.api import question_keys
-from d1a.suite import text_digest
+from d1a.training import data as D
+from d1a.core.api import question_keys
+from d1a.eval.suite import text_digest
 
 CRITERIA = {"size": "Wrong size", "damage": "Damaged", "color": "Wrong color"}
 

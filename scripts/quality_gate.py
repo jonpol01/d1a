@@ -1,9 +1,9 @@
 """The quality gate for model, loading and serving changes (AGENTS.md, Quality bar): real weights, base against head.
 
-Two d1a.serve instances, one per version, answer the same requests: every demo example (regenerated from a
+Two d1a.serving.serve instances, one per version, answer the same requests: every demo example (regenerated from a
 d1a-playground checkout, or read from a file) and the labeler replay states (private PR text: kept under runs/, never
 committed). Each request goes to both, alternating which goes first. A third run, base against base, measures the
-noise floor of that setup. --suites also scores frozen suites with d1a.benchmark from each version.
+noise floor of that setup. --suites also scores frozen suites with d1a.eval.benchmark from each version.
 
 FAIL on any changed choice, any probability moving more than --tol, any request one side answers and the other does
 not, head's latency above the floor (its paired ratio's 95% interval entirely above the floor's), or a suite whose
@@ -168,21 +168,21 @@ def dependencies(path):
 
 @contextmanager
 def server(path, port, run, log):
-    """d1a.serve from `path` (its own d1a first on sys.path). Load options from this shell (D1A_BACKEND, D1A_DTYPE, ...)
+    """d1a.serving.serve from `path` (its own d1a first on sys.path). Load options from this shell (D1A_BACKEND, D1A_DTYPE, ...)
     apply to both sides alike; the learning settings are dropped, so no answer is logged or recalibrated."""
     env = {k: v for k, v in os.environ.items() if k not in LEARNING_ENV}
     with open(log, "w", encoding="utf-8") as out:
-        proc = subprocess.Popen([sys.executable, "-m", "d1a.serve", "--run", run, "--port", str(port)], cwd=path, env=env, stdout=out, stderr=subprocess.STDOUT)
+        proc = subprocess.Popen([sys.executable, "-m", "d1a.serving.serve", "--run", run, "--port", str(port)], cwd=path, env=env, stdout=out, stderr=subprocess.STDOUT)
     try:
         for _ in range(240):
             if proc.poll() is not None:
-                raise SystemExit(f"d1a.serve from {path} exited ({proc.returncode}); see {log}")
+                raise SystemExit(f"d1a.serving.serve from {path} exited ({proc.returncode}); see {log}")
             try:
                 urllib.request.urlopen(f"http://127.0.0.1:{port}/v1/models", timeout=3).read(); break
             except (urllib.error.URLError, OSError):
                 time.sleep(5)
         else:
-            raise SystemExit(f"d1a.serve from {path} did not answer on :{port}; see {log}")
+            raise SystemExit(f"d1a.serving.serve from {path} did not answer on :{port}; see {log}")
         yield port
     finally:
         proc.terminate()
@@ -236,13 +236,13 @@ def benchmark(path, run, suite, out):
         return
     arg = ["--data", str(ROOT / "evals/d1a" / suite)] if ":" in suite else ["--suite", str(ROOT / "evals" / suite)]
     out = Path(out)
-    shutil.rmtree(out, ignore_errors=True)   # d1a.benchmark refuses an existing --out (an unfinished run left one)
+    shutil.rmtree(out, ignore_errors=True)   # d1a.eval.benchmark refuses an existing --out (an unfinished run left one)
     out.parent.mkdir(parents=True, exist_ok=True)
     log = out.with_name(out.name + ".log")
     with open(log, "w", encoding="utf-8") as f:
-        code = subprocess.run([sys.executable, "-m", "d1a.benchmark", "--run", run, *arg, "--out", str(out)], cwd=path, stdout=f, stderr=subprocess.STDOUT).returncode
+        code = subprocess.run([sys.executable, "-m", "d1a.eval.benchmark", "--run", run, *arg, "--out", str(out)], cwd=path, stdout=f, stderr=subprocess.STDOUT).returncode
     if code:
-        raise SystemExit(f"d1a.benchmark from {path} failed on {suite}; see {log}")
+        raise SystemExit(f"d1a.eval.benchmark from {path} failed on {suite}; see {log}")
 
 
 def suite_records(base_out, head_out):

@@ -1,4 +1,4 @@
-"""The verifier improving itself from outcomes (d1a.feedback), measured round by round on unseen repositories.
+"""The verifier improving itself from outcomes (d1a.learning.feedback), measured round by round on unseen repositories.
 
     uv run --extra mlx python recipes/swe-verifier/self_improve.py --start runs/swe-verifier/train/r1 --rounds 3 \
         --batch 300 --out runs/swe-verifier/self-improve
@@ -7,7 +7,7 @@ A stream of agent runs the model never saw (shards --stream-shards, train-split 
 agent's patches would come back from the tests. Each round:
 1. the incumbent scores the batch; each answer goes into a FeedbackLog, then its outcome (resolved or not);
 2. the batch is split by repository: 80% become training records, 20% a calibration slice;
-3. a candidate continues the incumbent's LoRA on all training records so far (d1a.train --init_from, --steps-per-round);
+3. a candidate continues the incumbent's LoRA on all training records so far (d1a.training.train --init_from, --steps-per-round);
 4. each model is recalibrated (OutcomeCalibrator) on the calibration slices so far, scored by itself: never on records
    it trained on, which would make it overconfident;
 5. gate() on the dev repositories decides promotion (lower log loss, 95% interval clear of zero);
@@ -31,7 +31,7 @@ from huggingface_hub import hf_hub_download
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from zero_shot import DATASET, QUESTION, auroc, calibration, split_of, state_of  # noqa: E402
 
-from d1a.feedback import FeedbackLog, OutcomeCalibrator, gate, log_loss, records  # noqa: E402
+from d1a.learning.feedback import FeedbackLog, OutcomeCalibrator, gate, log_loss, records  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 COLS = ["instance_id", "target", "trajectory", "exit_status", "generated_patch"]
@@ -127,7 +127,7 @@ def main():
         train_recs += records([d for d in resolved if d["meta"]["repo"] not in held], src="swe-verifier-feedback")
         data = out / f"train-r{rnd}.jsonl"; data.write_text("".join(json.dumps(x) + "\n" for x in train_recs), encoding="utf-8")
         cand = str(out / f"candidate-r{rnd}")
-        cmd = [sys.executable, "-m", "d1a.train", "--base", "google/gemma-4-E4B", "--base_revision", "411aa17b749aa952df1359d2dcea73917a544d9a",
+        cmd = [sys.executable, "-m", "d1a.training.train", "--base", "google/gemma-4-E4B", "--base_revision", "411aa17b749aa952df1359d2dcea73917a544d9a",
                "--init_from", incumbent, "--data", str(data), "--max_state", "5600", "--device", "mps", "--lora", "16", "--batch", "1",
                "--accum", "8", "--lr", str(a.lr), "--weights_dtype", "bf16", "--checkpointing", "1", "--seed", str(a.seed + rnd),
                "--epochs", "1", "--max_steps", str(a.steps_per_round), "--out", cand]

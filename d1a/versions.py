@@ -1,19 +1,11 @@
-"""The newest released version of each D1A model, the one place scripts and demos take their default checkpoint from.
+"""Moved to d1a.core.versions (#60). This path works for one more release and is removed in D1A 0.5."""
+import sys
+import warnings
 
-    from d1a.versions import latest
-    latest("JohnP1/d1a-e4b-mlx-q8")   # -> "JohnP1/d1a-e4b-mlx-q8@v0.4"
-
-A release adds its tag here and a row to CHANGELOG.md's "Model versions" table; tests/test_versions.py fails when the
-two disagree, so a new version cannot leave a default behind. Results should record the pinned id they ran with.
-"""
-
-LATEST = {"JohnP1/d1a-e4b": "v0.4", "JohnP1/d1a-e2b": "v0.2"}
-FORMATS = ("-mlx-q8",)   # build repos that carry the same tags as their source repo
-
-
-def latest(repo):
-    """`repo@tag` for the newest version of a D1A model repo or one of its builds (an explicit @tag is kept)."""
-    if "@" in repo: return repo
-    base = next((repo[: -len(f)] for f in FORMATS if repo.endswith(f)), repo)
-    if base not in LATEST: raise KeyError(f"{repo} is not a released D1A model: {sorted(LATEST)}")
-    return f"{repo}@{LATEST[base]}"
+warnings.warn("d1a.versions moved to d1a.core.versions; the old path is removed in D1A 0.5", DeprecationWarning, stacklevel=2)
+if __name__ == "__main__":
+    import runpy
+    runpy.run_module("d1a.core.versions", run_name="__main__", alter_sys=True)
+else:
+    import importlib
+    sys.modules[__name__] = importlib.import_module("d1a.core.versions")
