@@ -248,7 +248,10 @@ class Learning:
     def calibrator(self):
         if not self.calibrator_path: return None
         try: mtime = os.path.getmtime(self.calibrator_path)
-        except OSError: return self._cal
+        except FileNotFoundError:   # not written yet, or moved aside: no calibrator, so a rollback needs no restart
+            with self._lock: self._cal, self._mtime = None, None
+            return None
+        except OSError: return self._cal   # a transient read error keeps the last one rather than silently dropping it
         with self._lock:
             if mtime != self._mtime: self._cal, self._mtime = OutcomeCalibrator.load(self.calibrator_path), mtime
             return self._cal

@@ -95,6 +95,64 @@ def test_promote_updates_the_served_calibrator_only_where_held_out_groups_confir
     assert not (tmp_path / "untouched.json").exists()
 
 
+def test_promote_fits_only_on_the_decisions_the_served_model_made(tmp_path, capsys):
+    """A calibrator corrects one model's probabilities, so after a model switch `promote --run <served repo@tag>` fits on
+    that model's decisions alone. Here v0.4 was twice as sure as it should have been and v0.5 is half as sure. With fewer
+    v0.5 outcomes than min_outcomes nothing is written, however many v0.4 has. Once v0.5 has enough, its own correction is
+    promoted (s near 2), not v0.4's (near 0.5) or a blend of the two."""
+    log = FeedbackLog(tmp_path / "f.jsonl"); rng = np.random.default_rng(5); opts = list(CQ["blast"]["criteria"])
+
+    def decide(run, n, power, first):   # the served probabilities are the truth sharpened (power > 1) or flattened
+        for i in range(first, first + n):
+            z = rng.normal(0, 1.5, 4); truth = np.exp(z) / np.exp(z).sum(); served = np.exp(power * z) / np.exp(power * z).sum()
+            did = log.decision(f"pr {i // 2}", CQ, {"blast": {"probabilities": dict(zip(opts, map(float, served)))}}, run=run)
+            log.outcome(did, {"blast": str(rng.choice(opts, p=truth))}, {"src": "reviewer", "group": f"pr{i // 2}"})
+    decide("r@v0.4", 1000, 2.0, 0); decide("r@v0.5", 10, 0.5, 1000)
+    assert [d["run"] for d in log.resolved(run="r@v0.5")] == ["r@v0.5"] * 10 and len(log.resolved()) == 1010
+    path, promote_v05 = tmp_path / "served.json", ["promote", str(tmp_path / "f.jsonl"), "--calibrator", str(tmp_path / "served.json"), "--run", "r@v0.5"]
+    main(promote_v05)
+    assert json.loads(capsys.readouterr().out)["promoted"] == [] and not path.exists()
+    decide("r@v0.5", 1000, 0.5, 1010)
+    main(promote_v05)
+    assert json.loads(capsys.readouterr().out)["promoted"] == ["blast"] and abs(OutcomeCalibrator.load(path).params["blast"]["s"] - 2.0) < 0.5
+
+
+def test_serve_with_a_calibrator_path_not_written_yet_serves_the_model_and_takes_the_file_once_written(tmp_path, monkeypatch):
+    """At a model switch D1A_OUTCOME_CALIBRATOR stays set, so promote keeps running with --run, while the old model's file
+    is moved aside. A server whose calibrator path names no file yet serves exactly what one without a calibrator serves,
+    yes/no and choice answers alike. The first answer after promote writes the file (whole, then renamed into place)
+    goes through it, without a restart."""
+    import os
+    from types import SimpleNamespace
+    from d1a.serving import serve
+    from d1a.core.api import SystemOneRequest, to_record
+    req = SystemOneRequest(state="issue + patch", questions={**Q, **CQ})
+    _, meta = to_record(req)
+    fake = SimpleNamespace(checkpoint=SimpleNamespace(requested="JohnP1/d1a-e4b-mlx-q8@v0.5"), tok=None)
+    monkeypatch.setattr(serve, "output_tokens", lambda tok, answers: 0)
+    answer = lambda: serve.Server._body(fake, req, meta, [[0.2, 0.8], [0.1, 0.2, 0.3, 0.4]], {"tokens": 10, "latency_ms": 1.0})
+    monkeypatch.setattr(serve, "LEARNING", serve.Learning(tmp_path / "plain.jsonl"))
+    plain = answer()
+    path = tmp_path / "calibrator.json"
+    monkeypatch.setattr(serve, "LEARNING", serve.Learning(tmp_path / "log.jsonl", path))
+    waiting = answer()
+    assert not path.exists() and waiting["answers"] == plain["answers"] and serve.LEARNING.card()["calibrated_questions"] == []
+    promoted = OutcomeCalibrator({"resolved": [1.0, -2.0, 50]})
+    promoted.save(path.with_name(path.name + ".tmp")); os.replace(path.with_name(path.name + ".tmp"), path)   # as promote writes it
+    taken = answer()
+    assert taken["answers"]["resolved"]["noul"] == round(promoted.p("resolved", 0.8), 4) < 0.8
+    assert taken["answers"]["blast"] == plain["answers"]["blast"] and serve.LEARNING.card()["calibrated_questions"] == ["resolved"]
+    path.rename(tmp_path / "calibrator-v0.4.json")             # rolled back by moving the file aside: the next answer is the model's own
+    assert answer()["answers"] == plain["answers"] and serve.LEARNING.card()["calibrated_questions"] == []
+    (tmp_path / "calibrator-v0.4.json").rename(path)
+    assert answer()["answers"] == taken["answers"]
+
+    def unreadable(p):
+        raise PermissionError(13, "Permission denied", str(p))
+    monkeypatch.setattr(serve.os.path, "getmtime", unreadable)   # any other error reading it keeps the calibrator it has
+    assert answer()["answers"] == taken["answers"]
+
+
 def test_a_human_label_beats_a_later_reviewer_label_per_question(tmp_path):
     """Outcomes merge per question: a person's label wins over another model's whatever arrived last, the reviewer's still
     fills the questions the person left alone, records() carry each label's source, and src= keeps one source only."""

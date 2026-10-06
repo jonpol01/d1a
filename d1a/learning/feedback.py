@@ -80,12 +80,15 @@ class FeedbackLog:
         if not self.path.exists(): return []
         return [json.loads(l) for l in self.path.read_text(encoding="utf-8").splitlines() if l.strip()]
 
-    def resolved(self, src=None):
+    def resolved(self, src=None, run=None):
         """Decisions with an outcome, oldest first. Each question's label comes from the outcomes of the most trusted source
-        (PREFER), the latest of them; `src` keeps only outcomes from that source. label_src says where each label came from."""
+        (PREFER), the latest of them; `src` keeps only outcomes from that source. label_src says where each label came from.
+        `run` keeps only the decisions that model made (repo@tag, as logged): a calibrator corrects one model's
+        probabilities, and fitted across a model switch it would correct the new model by the old one's errors."""
         decisions, outcomes = {}, {}
         for e in self.events():
-            if e["kind"] == "decision": decisions[e["id"]] = e
+            if e["kind"] == "decision":
+                if run is None or e.get("run") == run: decisions[e["id"]] = e
             elif src is None or e.get("meta", {}).get("src") == src: outcomes.setdefault(e["id"], []).append(e)
         out = []
         for i, d in decisions.items():
@@ -298,9 +301,11 @@ def main(argv=None):
     pr = sub.add_parser("promote", help="fit on part of the log, gate on the rest, and update the served calibrator only where it passes")
     pr.add_argument("log"); pr.add_argument("--calibrator", required=True, help="the file d1a.serving.serve's D1A_OUTCOME_CALIBRATOR reads")
     pr.add_argument("--min-outcomes", type=int, default=20); pr.add_argument("--held-out", type=float, default=0.3)
-    for x in (s, r, c, pr): x.add_argument("--src", help="only outcomes from this source (meta src, e.g. human or reviewer)")
+    for x in (s, r, c, pr):
+        x.add_argument("--src", help="only outcomes from this source (meta src, e.g. human or reviewer)")
+        x.add_argument("--run", help="only decisions this model made (repo@tag, as the log records it; the served model's for promote)")
     a = ap.parse_args(argv)
-    log = FeedbackLog(a.log); res = log.resolved(a.src)
+    log = FeedbackLog(a.log); res = log.resolved(a.src, a.run)
     if a.cmd == "status":
         print(f"{len(res)} resolved, {len(log.pending())} pending decisions")
         for qid in sorted({q for d in res for q in d["labels"]}):
