@@ -17,7 +17,7 @@ the Apache License 2.0. This file records where D1A's code came from and what D1
 - **Gemma 4 support** (from the jonpol01/kev fork, by John Soliva): Gemma 4 E2B / E4B bases in `d1a/backends/torch.py` and
   `d1a/training/train.py` (Gemma's reserved `<unused0>`–`<unused4>` tokens as delimiters with a leading `<bos>`, a packed mask for
   the sliding-window layers, text-only loading, re-admission of suite records under Gemma's tokenizer) with tests in
-  `tests/test_unit.py` and `tests/test_model.py`.
+  `tests/test_encoding.py`, `tests/test_unit.py` and `tests/test_model.py`.
 - **Training robustness**: `d1a/training/train.py` writes resume points for LoRA runs (`--save_every_steps`,
   `--save_every_minutes`, `--resume`; Kev had them for full-weight runs only; now D1A's own `d1a/training/resume.py`), and a non-finite loss or gradient skips
   its micro-batch or step (up to `MAX_NONFINITE` in a row) instead of ending the run.
@@ -87,7 +87,8 @@ the Apache License 2.0. This file records where D1A's code came from and what D1
   - `d1a/eval/predictors.py`: the same predictions, requests, retries and rotation averages; checked by
     `scripts/equivalence/predictors.py` (local, remote and rotation-averaged predictors).
   - `d1a/backends/torch.py` (its encoding and pointer head now in `d1a/core/encoding.py` and `d1a/core/head.py`, #60): the same
-    encodings, masks, probabilities and training gradients, bit for bit, on Gemma 4 and Qwen3.5.
+    encodings, masks, probabilities and training gradients, bit for bit, on Gemma 4 and Qwen3.5; its encoding, mask and
+    pointer-head tests are `tests/test_encoding.py`.
   - `d1a/eval/suite.py`: the same pins, partition checks, mirror rules and file formats; its tests are `tests/test_suite.py`.
   - `d1a/training/composition.py`: the same shapes, splits, held-out keys and structure keys; checked by
     `scripts/equivalence/composition.py`.
