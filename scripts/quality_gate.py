@@ -212,13 +212,20 @@ def suite_list(suites, card):
     return list(dict.fromkeys([*filter(None, suites.split(",")), *(CARD_SUITES if card else ())]))
 
 
+def module(path, name):
+    """A module's path in the checkout at `path`: d1a's layout since #60 (d1a.serving.serve, d1a.eval.benchmark), or the
+    flat one before it (d1a.serve, d1a.benchmark), so a version from either side can be gated, e.g. the Mac mini's pin."""
+    new = {"serve": "d1a.serving.serve", "benchmark": "d1a.eval.benchmark"}[name]
+    return new if (Path(path) / (new.replace(".", "/") + ".py")).exists() else f"d1a.{name}"
+
+
 @contextmanager
 def server(path, port, run, log):
     """d1a.serving.serve from `path` (its own d1a first on sys.path). Load options from this shell (D1A_BACKEND, D1A_DTYPE, ...)
     apply to both sides alike; the learning settings are dropped, so no answer is logged or recalibrated."""
     env = {k: v for k, v in os.environ.items() if k not in LEARNING_ENV}
     with open(log, "w", encoding="utf-8") as out:
-        proc = subprocess.Popen([sys.executable, "-m", "d1a.serving.serve", "--run", run, "--port", str(port)], cwd=path, env=env, stdout=out, stderr=subprocess.STDOUT)
+        proc = subprocess.Popen([sys.executable, "-m", module(path, "serve"), "--run", run, "--port", str(port)], cwd=path, env=env, stdout=out, stderr=subprocess.STDOUT)
     try:
         for _ in range(240):
             if proc.poll() is not None:
@@ -287,7 +294,7 @@ def benchmark(path, run, suite, out):
     out.parent.mkdir(parents=True, exist_ok=True)
     log = out.with_name(out.name + ".log")
     with open(log, "w", encoding="utf-8") as f:
-        code = subprocess.run([sys.executable, "-m", "d1a.eval.benchmark", "--run", run, *arg, "--out", str(out)], cwd=path, stdout=f, stderr=subprocess.STDOUT).returncode
+        code = subprocess.run([sys.executable, "-m", module(path, "benchmark"), "--run", run, *arg, "--out", str(out)], cwd=path, stdout=f, stderr=subprocess.STDOUT).returncode
     if code:
         raise SystemExit(f"d1a.eval.benchmark from {path} failed on {suite}; see {log}")
 
