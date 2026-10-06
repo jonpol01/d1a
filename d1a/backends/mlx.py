@@ -4,7 +4,7 @@
 D1A's own encoder and pointer head.
 
 MPS has no Gated DeltaNet kernels, so the PyTorch path runs reference code there (Kev-4B ~0.8 s per request). This module
-runs the same computation on Metal through mlx-lm and keeps everything Kev-specific unchanged: `d1a.backends.torch.encode` builds the
+runs the same computation on Metal through mlx-lm and keeps everything Kev-specific unchanged: `d1a.core.encoding.encode` builds the
 tokens, `rows_of` splits them into one causal row per question (the hybrid form the torch path uses too), and the readout is
 the very same `PointerHead` (fp32, with the checkpoint's temperature) applied to the branch hidden states.
 
@@ -34,7 +34,9 @@ from mlx_lm.utils import load_model
 
 from d1a.backends.backbone import for_mlx
 from d1a.backends.checkpoint import weight_shards
-from d1a.backends.torch import PointerHead, encode, probs_one, rows_of, rows_per_pass
+from d1a.backends.torch import probs_one
+from d1a.core.encoding import encode, rows_of, rows_per_pass
+from d1a.core.head import PointerHead
 
 PLE = "embed_tokens_per_layer"   # Gemma 4's per-layer embedding table
 SAFETENSORS_NP = {"U32": np.uint32, "BF16": np.uint16, "F16": np.float16, "F32": np.float32}   # bf16 is read as its bits
@@ -397,7 +399,7 @@ def export_mlx(ck, out, bits=None, group_size=64, embeddings=True, per_layer_bit
     from safetensors.torch import save_file
 
     from d1a.backends.checkpoint import EXPORT_CONFIG, EXPORT_HEAD, export_config, resolve_run
-    from d1a.backends.torch import layout, load_tokenizer, pad_id
+    from d1a.core.encoding import layout, load_tokenizer, pad_id
 
     if ck.export is not None: raise ValueError(f"{ck.path} is already an MLX export")
     meta, out = ck.meta, Path(out)

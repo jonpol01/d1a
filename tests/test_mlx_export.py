@@ -79,7 +79,7 @@ def tiny_gemma4():
 
 
 def fake_encoding(rng, state, branches):
-    """An encoding (d1a.backends.torch.encode's layout) of random tokens: `state` tokens, then per question (tokens, options)."""
+    """An encoding (d1a.core.encoding.encode's layout) of random tokens: `state` tokens, then per question (tokens, options)."""
     ids, seg, decide, opts = [int(t) for t in rng.integers(1, 64, state)], [0] * state, [], []
     for k, (n, options) in enumerate(branches, start=1):
         start = len(ids); ids += [int(t) for t in rng.integers(1, 64, n)]; seg += [k] * n

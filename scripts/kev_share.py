@@ -18,6 +18,10 @@ ROOT = Path(__file__).resolve().parents[1]
 _MOVED = ast.literal_eval((ROOT / "d1a/_layout.py").read_text(encoding="utf-8").split("MOVED = ", 1)[1])
 KEV_NAME = {f"d1a/{new.replace('.', '/')}.py": f"kev/{old}.py" for old, new in _MOVED.items()}
 SHIMS = {f"d1a/{old}.py" for old in _MOVED}
+# modules split out of one D1A file (#60 phase 2: the torch backend's encoding and head moved to d1a.core): compared with
+# that file's Kev counterpart as one text, in their original order, so a move does not count as new code
+SPLIT = {"d1a/backends/torch.py": ("d1a/core/encoding.py", "d1a/core/head.py", "d1a/backends/torch.py")}
+SPLIT_PART = {part for parts in SPLIT.values() for part in parts if part not in SPLIT}
 CACHE = Path.home() / ".cache" / "d1a" / f"kev-{BASE}"
 TEXT = (".py", ".ts", ".tsx", ".js", ".md", ".toml", ".yml", ".yaml", ".json", ".css", ".txt", ".html", ".sh")
 # generated test data (tests/golden: golden vectors, a committed checkpoint): shown, never counted in TOTAL
@@ -76,8 +80,9 @@ def main():
     stats = defaultdict(lambda: defaultdict(int))
     for p, path in d1a.items():
         if os.path.getsize(path) > 3_000_000: continue
-        if p in SHIMS: continue   # one-release import shims (d1a/<old>.py), not code
-        s = stats[area(p)]; lines = open(path, encoding="utf-8", errors="replace").read().splitlines()
+        if p in SHIMS or p in SPLIT_PART: continue   # one-release import shims (d1a/<old>.py), not code; split parts go with their file
+        s = stats[area(p)]
+        lines = [line for part in SPLIT.get(p, (p,)) for line in Path(ROOT / part if part != p else path).read_text(encoding="utf-8", errors="replace").splitlines()]
         kp = KEV_NAME.get(p) or ("kev/" + p[4:] if p.startswith("d1a/") else p)
         s["lines"] += len(lines)
         if kp not in kev:

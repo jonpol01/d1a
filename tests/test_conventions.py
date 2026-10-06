@@ -25,11 +25,11 @@ RULES = [
      r"MLXDecisionModel\(|merge_lora\(", {"d1a/backends/checkpoint.py", "d1a/backends/mlx.py", "tests/test_mlx.py"}),
     ("option keys come from d1a.core.api.question_keys",
      r"\[\s*\"false\"\s*,\s*\"true\"\s*\]|\[str\(i\) for i in range\(len\(", {"d1a/core/api.py", "tests/test_system_one.py", "tests/test_tiny_checkpoint.py"}),   # these tests pin the contract (the second re-derives it on purpose)
-    ("the training context is d1a.backends.torch.MAX_STATE/MAX_BRANCH/MAX_PACKED, lifted only through d1a.backends.torch.training_context (d1a.eval.suite.CONTEXT in manifests), and d1a.backends.torch.fits",
-     r"(?<![\w.])(>|<=|>=|<)\s*2048\b|\b2048\s*(<|>)|max_(branch|state|packed)\"?\s*[=:]\s*\d{3,}", {"d1a/backends/torch.py"}),
+    ("the training context is d1a.core.encoding.MAX_STATE/MAX_BRANCH/MAX_PACKED, lifted only through d1a.core.encoding.training_context (d1a.eval.suite.CONTEXT in manifests), and d1a.core.encoding.fits",
+     r"(?<![\w.])(>|<=|>=|<)\s*2048\b|\b2048\s*(<|>)|max_(branch|state|packed)\"?\s*[=:]\s*\d{3,}", {"d1a/core/encoding.py"}),
     ("the serving / long-state limits (SERVE_MAX_*, ROW_PASS_TOKENS, MAX_TRAIN_STATE) and the pre-64k aliases the frozen suites' builders "
-     "rebuild byte for byte with (SERVE_MAX_*_8K, MAX_TRAIN_STATE_8K) are defined only in d1a.backends.torch",
-     r"^\s*(SERVE_MAX_(STATE|BRANCH|PACKED)|ROW_PASS_TOKENS|MAX_TRAIN_STATE)(_8K)?\s*(=|,[^\n=]*=)|(?<![\w.])7552\b", {"d1a/backends/torch.py"}),
+     "rebuild byte for byte with (SERVE_MAX_*_8K, MAX_TRAIN_STATE_8K) are defined only in d1a.core.encoding",
+     r"^\s*(SERVE_MAX_(STATE|BRANCH|PACKED)|ROW_PASS_TOKENS|MAX_TRAIN_STATE)(_8K)?\s*(=|,[^\n=]*=)|(?<![\w.])7552\b", {"d1a/core/encoding.py"}),
     ("the serving contexts manifests record (SERVING_CONTEXT, and SERVING_CONTEXT_8K for the suites frozen before 64k states) are defined only in d1a.eval.suite",
      r"^\s*SERVING_CONTEXT(_8K)?\s*=", {"d1a/eval/suite.py"}),
     ("text files are read and written as UTF-8 (d1a.eval.suite.read_json/read_jsonl/write_json/write_jsonl, or an explicit encoding=); "

@@ -24,7 +24,8 @@ from d1a.backends.checkpoint import Checkpoint, Meta, write_meta
 from d1a.backends.device import allocated_bytes, default_device, empty_cache, sync
 from d1a.training.data import EVAL_ONLY, build, augment, load_records, materialize, none_pair, source_seed
 from d1a.eval.suite import ADMISSION_BRANCH_HEADROOM, SYNTHETIC_SOURCES, digest, load_split, read_manifest, validate_training, write_json
-from d1a.backends.torch import MAX_STATE, MAX_TRAIN_STATE, SPECIAL, DecisionModel, delimiter_ids, fits, layout, load_tokenizer, rows_of, training_context, user_tokens
+from d1a.backends.torch import DecisionModel
+from d1a.core.encoding import MAX_STATE, MAX_TRAIN_STATE, SPECIAL, delimiter_ids, fits, layout, load_tokenizer, rows_of, training_context, user_tokens
 
 
 # --- the loss -----------------------------------------------------------------------------------------------------------
@@ -139,7 +140,7 @@ class Variant:
 
 
 def shape(enc):
-    """(state tokens, [branch tokens of each question]) of an encoding (d1a.backends.torch.rows_of)."""
+    """(state tokens, [branch tokens of each question]) of an encoding (d1a.core.encoding.rows_of)."""
     state, _, rows = rows_of(enc)
     return len(state), [len(r["ids"]) for r in rows]
 
@@ -156,7 +157,7 @@ def pass_tokens(shapes, shared):
 
 def question_parts(enc, budget, shared):
     """--row_budget: a record's questions in consecutive groups whose pass fits `budget` tokens (one question always fits:
-    its row is at most d1a.backends.torch.MAX_TRAIN_STATE plus a branch). One group without a budget."""
+    its row is at most d1a.core.encoding.MAX_TRAIN_STATE plus a branch). One group without a budget."""
     state, branches = shape(enc)
     if not budget:
         return [list(range(len(branches)))]
@@ -268,7 +269,7 @@ def row_passes(batch, budget, shared):
 
 
 def state_token_counts(tok, reqs):
-    """{id(record): state tokens} as d1a.backends.torch.encode counts them: the <state> token (after the tokenizer's leading ids:
+    """{id(record): state tokens} as d1a.core.encoding.encode counts them: the <state> token (after the tokenizer's leading ids:
     Gemma's <bos>, none for Qwen) plus user_tokens of the materialised state; the length --none_pair_max_state gates on."""
     head = len(layout(tok)[0]) + 1
     return {id(r): head + len(user_tokens(tok, materialize(r)["state"])) for r in reqs}
@@ -302,7 +303,7 @@ def record_variants(req, a, epoch, pairs=None):
 def plan_shapes(model, tok, a, reqs, epoch, pairs, state_tokens):
     """--pass_tokens_max: {id(record): [(state tokens, [branch tokens of each question]) of every variant it trains this
     epoch, siblings included]}, exactly the shapes encode_batch will build. A branch's tokens do not depend on the state
-    (d1a.backends.torch.encode tokenizes each part on its own), so branches are encoded under an empty state and the state's count
+    (d1a.core.encoding.encode tokenizes each part on its own), so branches are encoded under an empty state and the state's count
     comes from state_token_counts, without tokenizing the states again. Branches are tokenized again each epoch
     (augmentation draws per epoch): a few minutes on the SFT corpus. A branch that fits a one-token state but not its real
     one still raises ContextOverflow in encode_batch, mid-epoch, as without this flag (frozen suites are admitted with

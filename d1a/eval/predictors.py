@@ -18,7 +18,7 @@ from d1a.core.api import question_keys
 from d1a.backends.checkpoint import Checkpoint, LoadOptions
 from d1a.training.data import api_request, materialize
 from d1a.backends.device import sync
-from d1a.backends.torch import ROW_PASS_TOKENS, ContextOverflow, rows_of
+from d1a.core.encoding import ROW_PASS_TOKENS, ContextOverflow, rows_of
 from d1a.eval.suite import CONTEXT
 
 
@@ -28,7 +28,7 @@ LONG_ROW_KERNELS = "efficient"   # the label of a prediction (and its benchmark 
 class LocalPredictor:
     """Scores a checkpoint in-process. Evaluation is fp32-exact (no TF32, no fused SDPA kernels on CUDA), with one
     exception: on CUDA with the torch backend, a record whose longest row (state + one question) exceeds
-    d1a.backends.torch.ROW_PASS_TOKENS runs under SDPA's flash / memory-efficient kernels, because the exact math kernel's L x L
+    d1a.core.encoding.ROW_PASS_TOKENS runs under SDPA's flash / memory-efficient kernels, because the exact math kernel's L x L
     score matrix does not fit (~200 GB per layer pass at 64k). Such a prediction carries `"kernels": LONG_ROW_KERNELS`,
     d1a.eval.benchmark copies it onto the record's rows and counts them in report.json's `long_rows`; shorter records carry
     nothing, so their rows and reports are unchanged. The efficient path is CUDA-only: on CPU / MPS attention stays eager

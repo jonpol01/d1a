@@ -78,7 +78,7 @@ def _masks(allow, dtype, attn):
 
 
 def branch_hidden(lm, splits, pad_id, device):
-    """splits[b] = d1a.backends.torch.rows_of(record b's encoding). -> per record, per question, the branch's final hidden states
+    """splits[b] = d1a.core.encoding.rows_of(record b's encoding). -> per record, per question, the branch's final hidden states
     [branch length, d] in fp32 (what the pointer head reads; the state's own hidden states are never needed)."""
     base = lm.get_base_model() if hasattr(lm, "get_base_model") else lm
     owner = [b for b, (_, _, rows) in enumerate(splits) for _ in rows]

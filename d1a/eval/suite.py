@@ -18,7 +18,7 @@ from pathlib import Path
 
 from d1a.training.composition import DEV_SHAPES, HELD_OUT_KEYS, TEST_SHAPES, TRAIN_SHAPES
 from d1a.training.data import EVAL_ONLY
-from d1a.backends.torch import SERVE_MAX_BRANCH, SERVE_MAX_BRANCH_8K, SERVE_MAX_PACKED, SERVE_MAX_STATE, SERVE_MAX_STATE_8K, training_context
+from d1a.core.encoding import SERVE_MAX_BRANCH, SERVE_MAX_BRANCH_8K, SERVE_MAX_PACKED, SERVE_MAX_STATE, SERVE_MAX_STATE_8K, training_context
 
 SPLITS = ("train", "calibration", "development", "test")
 

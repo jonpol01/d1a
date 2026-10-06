@@ -158,7 +158,7 @@ def options(question) -> list[str]:
 
 
 def to_record(req: SystemOneRequest):
-    """-> (the internal record d1a.backends.torch.encode takes, one metadata dict per question: its "id", "type" and "keys", and for
+    """-> (the internal record d1a.core.encoding.encode takes, one metadata dict per question: its "id", "type" and "keys", and for
     a score the "legend" of level index -> level text)."""
     questions, meta = [], []
     for qid, question in req.questions.items():

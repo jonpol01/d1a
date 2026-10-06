@@ -34,7 +34,7 @@ from d1a.backends.checkpoint import EXPORT_CONFIG, Checkpoint, LoadOptions, fuse
 from d1a.backends.device import allocated_bytes, default_device, empty_cache, out_of_memory, sync
 from d1a.learning.feedback import FeedbackLog, OutcomeCalibrator
 from d1a.serving.media import MEDIA_DIR, MediaEncoder, MediaRequest, OnDemand, with_media
-from d1a.backends.torch import SERVE_MAX_BRANCH, SERVE_MAX_STATE, layout
+from d1a.core.encoding import SERVE_MAX_BRANCH, SERVE_MAX_STATE, layout
 
 PREFIX_CACHE_SIZE = int(os.environ.get("D1A_PREFIX_CACHE", "4"))          # states kept (KV + DeltaNet states; attention-only backbones also the state's hidden states); 0 disables
 PREFIX_MIN_TOKENS = os.environ.get("D1A_PREFIX_MIN_TOKENS")               # states shorter than this are not cached; default = the model's prefix_min_tokens (0 for hybrid backbones and MLX, 384 for attention-only torch models)
