@@ -16,7 +16,8 @@ the question's `<decide>` token. README.md is the user guide; docs/UPSTREAM.md r
   - `learning/`: `feedback.py` (the decision log, outcomes, the outcome calibrator and its promotion gate);
   - `training/`: `train.py` (trainer; default base Gemma 4 E2B), `data.py`, `resume.py` (training resume points),
     `recipe.py` (versioned YAML stages run through d1a.training.train), `calibrate.py` (writes a checkpoint's temperature,
-    refusing fit rows that are not held out from its training), `composition.py`;
+    refusing fit rows that are not held out from its training), `study.py` (recipe -> calibrate -> evaluate -> report ->
+    publish; publishing refuses an uncalibrated checkpoint), `composition.py`;
   - `eval/`: `benchmark.py` (scores a checkpoint or a remote endpoint on a suite), `metrics.py`, `predictors.py`,
     `suite.py` (frozen suites, Hub-mirrored partitions), `suites.py` (D1A's own suites);
   - `agents/`: `presets.py`, `mcp_server.py`.
