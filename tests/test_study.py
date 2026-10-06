@@ -27,7 +27,9 @@ class Machine:
             (self.out / "base" / "recipe.json").write_text(json.dumps({"recipe": {"name": "d1a-e2b"}, "recipe_sha256": "ab" * 32, "d1a_commit": "c0ffee00"}), encoding="utf-8")
         elif name == "d1a.eval.benchmark":
             out = Path(argv[argv.index("--out") + 1]); out.mkdir(parents=True)
-            report = {"temperature": self.meta.temperature, "split": "development", "clean": {"n": 10, "acc": 0.8, "ece": 0.03, "nll": 0.5}}
+            # as d1a.eval.benchmark writes it: "temperature" is the extra metrics temperature (1.0 from the CLI); the one served is under calibration
+            report = {"temperature": 1.0, "calibration": {"inference_temperature": self.meta.temperature, "additional_temperature": 1.0},
+                      "split": "development", "clean": {"n": 10, "acc": 0.8, "ece": 0.03, "nll": 0.5}}
             (out / "report.json").write_text(json.dumps(report), encoding="utf-8"); (out / "rows.json").write_text("[]", encoding="utf-8")
         elif name == "d1a.training.calibrate":
             self.meta = self.fitted

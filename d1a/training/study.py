@@ -76,7 +76,8 @@ class Study:
     def score(self, ref, out, split, temperature=None):
         """Score one reference into `out`, unless a report there was scored at `temperature` (None: any)."""
         report = out / "report.json"
-        if report.exists() and (temperature is None or read_json(report).get("temperature") == temperature):
+        # the temperature it was served at: report["temperature"] is benchmark's extra metrics temperature, 1.0 from its CLI
+        if report.exists() and (temperature is None or read_json(report).get("calibration", {}).get("inference_temperature") == temperature):
             print(f"kept {report}", flush=True)
             return
         shutil.rmtree(out, ignore_errors=True)   # d1a.eval.benchmark refuses an existing --out
