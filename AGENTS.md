@@ -53,6 +53,11 @@ stripped off, and new features come with their tests.
     example (`--playground <d1a-playground checkout>`) and the labeler replay (`runs/labeler-replay`, private, never
     committed), with flips, max |dp| and latency against a base/base floor, plus frozen suites with `--suites`. For a
     torch-only path, also `scripts/equivalence/real_weights.py --interleave`;
+  - **the required `quality-gate` check:** a pull request that changes a module the model server loads, or the dependencies
+    (`scripts/gate_required.py`, from the server's own imports), cannot merge until `scripts/quality_gate.py --post-status`
+    passes on its exact head (`.github/workflows/quality-gate.yml` leaves it pending; any other pull request gets it as
+    success). A new head starts pending again. A playground pin move posts to that pull request
+    (`--post-status jonpol01/d1a-playground@<head>`, which checks that its mini.sh pins the gated head);
   - after a pin move, the Mac mini's demo smoke test (`./mini.sh update` ends with `scripts/demo_smoke.mjs` in
     jonpol01/d1a-playground).
 - **No downgrade.** The answers stay identical, or the PR shows they are better on held-out data. Accuracy and

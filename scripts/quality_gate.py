@@ -12,10 +12,18 @@ accuracy drops or whose calibration (ECE, NLL) gets worse. Exit 0 PASS, 1 FAIL, 
     python scripts/quality_gate.py --base origin/main                        # head: this working tree
     python scripts/quality_gate.py --base 0c601b2a --head origin/main --playground ../d1a-playground \\
         --suites v7/decision-v7,pr-labels:development --suite-run JohnP1/d1a-e2b@v0.2
+    python scripts/quality_gate.py --base origin/main --head <pr branch> --post-status     # sets the PR's required check
+    python scripts/quality_gate.py --base <old pin> --head <new pin> --playground . --post-status jonpol01/d1a-playground@<pr head>
+
+--post-status sets the required `quality-gate` commit status (CI leaves it pending on a pull request that needs the gate,
+.github/workflows/quality-gate.yml) to the verdict, on the exact commit tested: the head checkout's commit, which must
+have no uncommitted changes; or, for a playground pull request that moves the D1A pin, that pull request's commit, whose
+mini.sh must pin the head commit.
 """
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -290,6 +298,63 @@ def suite_records(base_out, head_out):
 
 # --- the gate -----------------------------------------------------------------------------------------------------------
 
+# --- the required status (--post-status) ---------------------------------------------------------------------------------
+
+STATUS_CONTEXT = "quality-gate"
+
+
+def git(directory, *args):
+    return subprocess.run(["git", *args], cwd=directory, capture_output=True, text=True, check=True).stdout.strip()
+
+
+def commit_of(directory):
+    """(the commit a checkout is at, whether its tracked files are exactly that commit)."""
+    return git(directory, "rev-parse", "HEAD"), git(directory, "status", "--porcelain", "--untracked-files=no") == ""
+
+
+def repo_of(directory):
+    """owner/name of a checkout's origin (https or ssh remote)."""
+    url = git(directory, "remote", "get-url", "origin").removesuffix(".git")
+    return "/".join(url.replace(":", "/").split("/")[-2:])
+
+
+def status_target(value, head_commit, head_dirty, default_repo):
+    """(repo, commit) --post-status sets the status on: `value` ("owner/repo@commit"), or the head's own commit, which must
+    be clean (a result for files that are not that commit describes no commit)."""
+    if value:
+        repo, sep, commit = value.partition("@")
+        if not sep or "/" not in repo or len(commit) < 7:
+            raise SystemExit(f"--post-status: give owner/repo@commit, not {value!r}")
+        return repo, commit
+    if head_dirty:
+        raise SystemExit("--post-status: the head checkout has uncommitted changes; commit them, or gate a ref")
+    return default_repo, head_commit
+
+
+def pinned(text):
+    """The D1A commit a d1a-playground mini.sh pins (D1A_SHA="...")."""
+    m = re.search(r'^D1A_SHA="([0-9a-f]{40})"', text, re.M)
+    return m[1] if m else None
+
+
+def status_description(report, base_commit):
+    """At most 140 characters (GitHub's limit): the verdict, the requests, flips, the largest move and the latency."""
+    if report["verdict"] == "FAIL":
+        text = f"FAIL: {len(report['failures'])} failures, e.g. {report['failures'][0]}"
+    else:
+        groups, lat, floor = report["groups"].values(), report["latency"]["all text"], report["floor"]["all text"]
+        text = (f"PASS vs {base_commit[:8]}: {report['requests']} requests, {sum(g['flips'] for g in groups)} flips, "
+                f"max dp {max(g['max_dp'] for g in groups):.0e}, latency {lat['ratio']:.3f} (floor {floor['ratio']:.3f})"
+                + (f", {len(report['suites'])} suites" if report.get("suites") else ""))
+    return text if len(text) <= 140 else text[:139] + "…"
+
+
+def post_status(repo, commit, state, description):
+    subprocess.run(["gh", "api", f"repos/{repo}/statuses/{commit}", "-f", f"state={state}", "-f", f"context={STATUS_CONTEXT}",
+                    "-f", f"description={description}"], check=True, capture_output=True)
+    print(f"status {STATUS_CONTEXT}={state} on {repo}@{commit[:8]}: {description}", flush=True)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--base", required=True, help="git ref or directory of the version to compare against")
@@ -304,6 +369,8 @@ def main():
     ap.add_argument("--tol", type=float, default=1e-6, help="largest probability move allowed (default 1e-6)")
     ap.add_argument("--ports", default="8101,8102")
     ap.add_argument("--out", default=str(ROOT / "runs/quality-gate"))
+    ap.add_argument("--post-status", nargs="?", const="", metavar="OWNER/REPO@COMMIT",
+                    help="set the required quality-gate status to the verdict: on the head's commit (no value), or on that commit")
     a = ap.parse_args()
     out, ports = Path(a.out), [int(p) for p in a.ports.split(",")]
     out.mkdir(parents=True, exist_ok=True)
@@ -321,6 +388,17 @@ def main():
             raise SystemExit("this environment does not meet: " + "; ".join(f"{side}: {', '.join(m)}" for side, m in missing.items() if m))
         rb, rh = set(requirements(base_dir)), set(requirements(head_dir))
         report["dependencies"] = {"base_only": sorted(rb - rh), "head_only": sorted(rh - rb)}   # met here either way
+        base_commit, _ = commit_of(base_dir)
+        head_commit, head_clean = commit_of(head_dir)
+        report |= {"base_commit": base_commit, "head_commit": head_commit}
+        target = None
+        if a.post_status is not None:   # checked before the run: a status for the wrong commit must never be possible
+            target = status_target(a.post_status, head_commit, not head_clean, repo_of(head_dir))
+            if target[0] != repo_of(head_dir):   # a playground pull request: its mini.sh must pin exactly the head
+                mini = subprocess.run(["gh", "api", f"repos/{target[0]}/contents/mini.sh?ref={target[1]}", "-H", "Accept: application/vnd.github.raw"],
+                                      capture_output=True, text=True, check=True).stdout
+                if pinned(mini) != head_commit:
+                    raise SystemExit(f"--post-status: {target[0]}@{target[1][:8]} pins {pinned(mini)}, not the head {head_commit}")
         floor = latency(run_pair(base_dir, base_dir, reqs, a.run, ports, out / "floor"))
         records = run_pair(base_dir, head_dir, reqs, a.run, ports, out / "gate")
         groups, failures = compare(records, a.tol)
@@ -350,6 +428,8 @@ def main():
     for f in failures[:50]:
         print(f"FAIL {f}")
     print(f"quality gate: {report['verdict']} ({len(failures)} failures; {out / 'report.json'})")
+    if target:
+        post_status(*target, "success" if report["verdict"] == "PASS" else "failure", status_description(report, report["base_commit"]))
     sys.exit(1 if failures else 0)
 
 

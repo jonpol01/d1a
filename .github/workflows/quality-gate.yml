@@ -1,0 +1,48 @@
+# The required `quality-gate` status (AGENTS.md, Quality bar). A pull request that changes a module the model server loads,
+# or the dependencies (scripts/gate_required.py), gets it pending until scripts/quality_gate.py --post-status passes on its
+# exact head (real weights, run locally); any other pull request gets it as success, with the reason. A new head starts
+# pending again, so a result never carries over to another commit. A status the gate already set is never overwritten.
+name: quality-gate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  statuses: write   # the quality-gate status on the pull request's head
+
+jobs:
+  required:
+    name: is the quality gate required
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - name: set the quality-gate status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          # the gate's own verdict on this exact commit stands (a re-run of this job must not reset it)
+          if gh api "repos/$REPO/commits/$HEAD/statuses" --jq '.[] | select(.context == "quality-gate" and .creator.login != "github-actions[bot]") | .state' | grep -q .; then
+            echo "the quality gate already reported on $HEAD"; exit 0
+          fi
+          # the base branch's rules, read over the pull request's tree: a pull request cannot change what judges it
+          git show "$BASE:scripts/gate_required.py" > "$RUNNER_TEMP/gate_required.py" 2>/dev/null || cp scripts/gate_required.py "$RUNNER_TEMP/gate_required.py"
+          reasons=$(git diff --name-only "$(git merge-base "$BASE" "$HEAD")" "$HEAD" | xargs -r -d '\n' python3 "$RUNNER_TEMP/gate_required.py" --root .)
+          if [ -n "$reasons" ]; then
+            echo "$reasons"
+            state=pending
+            desc="Required: run scripts/quality_gate.py --post-status on ${HEAD:0:8} ($(echo "$reasons" | wc -l | tr -d ' ') files the server loads or deps)"
+          else
+            state=success
+            desc="Not required: no module the model server loads and no dependency changed"
+          fi
+          gh api "repos/$REPO/statuses/$HEAD" -f state="$state" -f context=quality-gate -f description="${desc:0:140}"
+          echo "quality-gate: $state ($desc)"
