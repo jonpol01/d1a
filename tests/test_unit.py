@@ -1,5 +1,5 @@
 # Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: Gemma 4 tests (from jonpol01/kev); package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); the tests of the removed Modal app and autoresearch left; the d1a.core.api tests rewritten as tests/test_system_one.py; the d1a.training.data tests rewritten as tests/test_data.py; the d1a.backends.checkpoint tests rewritten as tests/test_checkpoint.py; the encoding, mask and pointer-head tests rewritten as tests/test_encoding.py.
+# Changes for D1A Copyright 2026 John Soliva: Gemma 4 tests (from jonpol01/kev); package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); the tests of the removed Modal app and autoresearch left; the d1a.core.api tests rewritten as tests/test_system_one.py; the d1a.training.data tests rewritten as tests/test_data.py; the d1a.backends.checkpoint tests rewritten as tests/test_checkpoint.py; the encoding, mask and pointer-head tests rewritten as tests/test_encoding.py; the serving and pass-sizing tests rewritten as tests/test_serving.py.
 """Fast tests with no model weights and no server: loading, training and serving.
 Run: uv run --extra serve python -m pytest tests/test_unit.py -q
 """
@@ -8,7 +8,6 @@ from types import SimpleNamespace
 
 import pytest
 import torch
-from transformers.cache_utils import Cache, DynamicLayer, LinearAttentionLayer
 from d1a.backends.torch import DecisionModel, SPECIAL
 
 
@@ -36,181 +35,6 @@ def test_soft_targets_and_date_facts():
     assert date_facts("Due July 4, 2026. Received June 26, 2026. Shipped 2026-07-01.") == "June 26, 2026 is 8 days before July 4, 2026. 2026-07-01 is 3 days before July 4, 2026. 2026-07-01 is 5 days after June 26, 2026."
     assert with_date_facts({"case": "one date: May 1, 2026"}) == {"case": "one date: May 1, 2026"}
 
-
-
-@pytest.mark.parametrize("n_perm, code", [(0, 422), (-1, 422), (65, 422), (1, 200), (64, 200)])
-def test_permute_bounds_n_perm(n_perm, code, monkeypatch):
-    """Each option order is a forward pass: 0 divided by nothing and unbounded counts ran forever (#30, @53Abdeali)."""
-    from contextlib import nullcontext
-    from types import SimpleNamespace
-    from fastapi.testclient import TestClient
-    from d1a.serving import serve
-    answer = lambda req: {"answers": {"q": {"probabilities": {"a": 0.75, "b": 0.25}, "choice": "a"}}, "latency_ms": 1.0}
-    monkeypatch.setattr(serve, "server", lambda: nullcontext(SimpleNamespace(answer=answer)))
-    body = {"request": {"state": "s", "questions": {"q": {"type": "choice", "instructions": "Pick", "criteria": {"a": None, "b": None}}}}, "question": "q", "n_perm": n_perm}
-    with TestClient(serve.app) as client:
-        r = client.post("/v1/systemone/permute", json=body)
-    assert r.status_code == code
-    if code == 200: assert len(r.json()["runs"]) == n_perm and r.json()["argmax_stable"]
-
-
-def test_rows_per_pass_is_a_token_budget():
-    from d1a.backends.torch import rows_per_pass
-    assert rows_per_pass([[0] * 30] * 5, prefix_len=270) == 16384 // 300     # a short state: every question of a normal request batches
-    assert rows_per_pass([[0] * 20] * 64, prefix_len=4802) == 3            # a long state: a few cache copies per pass
-    assert rows_per_pass([[0] * 8192], prefix_len=8192) == 1               # a maximal row still runs
-
-
-def test_prefix_cache_keeps_what_survives_the_batch():
-    """d1a.serving.serve.PrefixCache: a batch keeps only its last `size` distinct cacheable states (the rest it would evict
-    itself), hits are reinserted as most recent, short states and size 0 are never cached."""
-    from d1a.serving.serve import PrefixCache
-    enc = lambda state, n=3: {"ids": list(state) + [0] * 5, "seg": [0] * n + [1] * (len(state) + 5 - n)}
-    c = PrefixCache(size=2, min_tokens=3)
-    batch = [enc("abc"), enc("abd"), enc("abe"), enc("abd"), enc("ab", n=2)]
-    keys, cached, keep = c.plan(batch)
-    assert cached == [None] * 5 and keep == [False, True, True, True, False] and keys[4] is None
-    c.store(keys, cached, [None, "p2", "p3", "p2", None])
-    assert list(c.entries.values()) == ["p3", "p2"] and (c.hits, c.misses) == (0, 4)
-    keys, cached, keep = c.plan([enc("abe"), enc("abf")])
-    assert cached == ["p3", None] and keep == [True, True]
-    c.store(keys, cached, ["p3", "p4"])
-    assert list(c.entries.values()) == ["p3", "p4"] and c.hits == 1
-    assert PrefixCache(size=0, min_tokens=0).plan([enc("abc")])[2] == [False]
-
-
-def test_prefix_cache_bounds_the_state_tokens_it_holds():
-    """d1a.serving.serve.PrefixCache.max_tokens (D1A_PREFIX_MAX_TOKENS, default 65,536): the cached states hold at most that many
-    tokens in all, least recently used evicted first, and a longer state is never cached, so a few 64k-token states
-    cannot pin their keys and values; within the bound the count limit still applies."""
-    from d1a.serving.serve import PREFIX_MAX_TOKENS, PrefixCache
-    assert PREFIX_MAX_TOKENS == 65536
-    enc = lambda state: {"ids": list(state) + [0] * 5, "seg": [0] * len(state) + [1] * 5}
-    c = PrefixCache(size=4, min_tokens=0, max_tokens=10)
-    keys, cached, keep = c.plan([enc("a" * 11), enc("b" * 6), enc("c" * 5)])
-    assert keys[0] is None and keep == [False, False, True]   # too long for the cache at all; b and c together exceed 10 tokens
-    c.store(keys, cached, [None, "pb", "pc"])
-    assert list(c.entries.values()) == ["pc"] and (c.hits, c.misses) == (0, 2)
-    keys, cached, keep = c.plan([enc("d" * 4)])
-    c.store(keys, cached, ["pd"])
-    assert list(c.entries.values()) == ["pc", "pd"]            # 5 + 4 tokens fit
-    keys, cached, keep = c.plan([enc("e" * 3)])
-    c.store(keys, cached, ["pe"])
-    assert list(c.entries.values()) == ["pd", "pe"]            # 12 would not: the least recently used goes
-
-
-def test_out_of_memory_drops_the_prefix_cache_and_retries_once():
-    """d1a.serving.serve.Server._run: a pass out of device memory with states cached clears the cache and runs once more (#75: a
-    full cache kept failing every later batch); a second failure fails the batch with the cache left empty, and an
-    out-of-memory pass with nothing cached, or any other error, is not retried. A failed batch's pass is freed with it:
-    the model thread keeps the exception until its next batch, and the exception's frames held the pass's tensors (142 MiB
-    on an H100, tests/test_model.py::test_server_recovers_when_a_pass_runs_out_of_memory)."""
-    import torch, weakref
-    from types import SimpleNamespace
-    from d1a.backends.device import out_of_memory
-    from d1a.serving.serve import Server
-
-    class Tensors: pass   # stands for what a pass allocates
-
-    class Model:
-        prefix_min_tokens, fail, calls, passes = 0, None, 0, []
-        def encode(self, tok, rec, **kw): return rec
-        def probs_batch(self, encs, cached, keep):
-            self.calls += 1
-            tensors = Tensors(); self.passes.append(weakref.ref(tensors))
-            if self.fail == "always" or self.fail == "cached" and any(c is not None for c in cached): raise torch.OutOfMemoryError("CUDA out of memory")
-            if self.fail == "other": raise ValueError("not memory")
-            return [[torch.tensor([0.5, 0.5])] for _ in encs], [("prefix", self.calls) if k else None for k in keep]
-
-    enc = lambda state: {"ids": list(state) + [9], "seg": [0] * len(state) + [1]}
-    model = Model()
-    s = Server(SimpleNamespace(release_date=lambda: "2026-01-01"), None, model, "cpu")
-    try:
-        assert s.probs(enc("abc"))[1]["prefix_cache_hit"] is False and len(s.prefix_cache.entries) == 1
-        assert len(s.batch_ms) == 1   # the batch's model time feeds /v1/models' latency
-        model.fail, model.calls = "cached", 0
-        ps, stats = s.probs(enc("abc"))                       # the hit fails, the retry runs it as a miss
-        assert ps == [[0.5, 0.5]] and stats["prefix_cache_hit"] is False and model.calls == 2
-        assert s.prefix_cache.oom_retries == 1 and list(s.prefix_cache.entries.values()) == [("prefix", 2)]   # only the retry's prefix
-        model.fail, model.calls = "always", 0
-        with pytest.raises(torch.OutOfMemoryError): s.probs(enc("abc"))
-        assert model.calls == 2 and s.prefix_cache.entries == {} and s.prefix_cache.oom_retries == 2
-        s.wait_idle(); assert all(ref() is None for ref in model.passes), "a failed batch's pass outlives it"
-        model.calls = 0
-        with pytest.raises(torch.OutOfMemoryError): s.probs(enc("abc"))   # nothing cached: nothing to drop
-        assert model.calls == 1 and s.prefix_cache.oom_retries == 2
-        model.fail = None; s.probs(enc("abc")); model.fail, model.calls = "other", 0
-        with pytest.raises(ValueError): s.probs(enc("abc"))
-        assert model.calls == 1 and len(s.prefix_cache.entries) == 1
-    finally:
-        s.close()
-    assert out_of_memory(RuntimeError("MPS backend out of memory (MPS allocated: 1 GB)")) and not out_of_memory(RuntimeError("shape mismatch"))
-
-
-def test_graph_buckets_and_length_groups():
-    """d1a.backends.cuda_graphs pads batched passes: counts to count_bucket (under half extra), token lengths to bucket (under a
-    quarter), and length_groups computes the fewest tokens: a pass under PASS_TOKENS stays whole, one long item does not
-    pad the rest, and the grouping beats every other split of the sorted lengths."""
-    import itertools
-    from d1a.backends.cuda_graphs import PASS_TOKENS, bucket, count_bucket, length_groups
-    assert [count_bucket(n) for n in (1, 3, 5, 7, 9, 13, 17, 25)] == [1, 3, 6, 8, 12, 16, 24, 32]
-    assert all(n <= count_bucket(n) < 1.5 * n for n in range(2, 200)) and all(n <= bucket(n) < max(1.25 * n, n + 16) for n in range(1, 5000))
-    assert length_groups([40, 20, 35, 30, 25, 45], 32) == [[1, 4, 3, 2, 0, 5]]            # a small pass stays whole
-    assert length_groups([30] * 20 + [900], 32)[-1] == [20]                              # the outlier gets its own pass
-    assert sorted(len(g) for g in length_groups([100] * 40, 16)) == [8, 16, 16]          # capped per pass
-    cost = lambda groups, L: sum(max(PASS_TOKENS, count_bucket(len(g)) * bucket(max(L[i] for i in g))) for g in groups)
-    lengths = [17, 900, 33, 250, 41, 64, 120, 300, 18, 75]
-    order = sorted(range(len(lengths)), key=lengths.__getitem__)
-    splits = [[order[a:b] for a, b in zip((0, *cuts), (*cuts, len(order)))] for k in range(len(order)) for cuts in itertools.combinations(range(1, len(order)), k)]
-    assert cost(length_groups(lengths, 4), lengths) == min(cost(g, lengths) for g in splits if all(len(x) <= 4 for x in g))
-
-
-def test_rows_hidden_replicates_cache_without_changing_prefix(monkeypatch):
-    import d1a.backends.torch as M
-
-    kv, linear = DynamicLayer(), LinearAttentionLayer()
-    kv.update(torch.ones(1, 1, 2, 2), torch.full((1, 1, 2, 2), 2.0))
-    linear.update_conv_state(torch.ones(1, 2, 2), conv_kernel_size=2)
-    linear.update_recurrent_state(torch.full((1, 2, 2), 3.0))
-    cache = Cache(layers=[kv, linear])
-
-    class LM(torch.nn.Module):
-        def forward(self, input_ids, position_ids, attention_mask, past_key_values, use_cache):
-            copied_kv, copied_linear = past_key_values.layers
-            assert copied_kv.keys.shape[0] == len(input_ids)
-            assert copied_linear.conv_states[0].shape[0] == len(input_ids)
-            assert copied_linear.recurrent_states[0].shape[0] == len(input_ids)
-            assert torch.all(copied_kv.keys == 1) and torch.all(copied_kv.values == 2)
-            assert torch.all(copied_linear.conv_states[0] == 1)
-            assert torch.all(copied_linear.recurrent_states[0] == 3)
-            copied_kv.update(torch.zeros(len(input_ids), 1, 1, 2), torch.zeros(len(input_ids), 1, 1, 2))
-            copied_linear.update_conv_state(torch.zeros(len(input_ids), 2, 1), conv_kernel_size=2)
-            copied_linear.update_recurrent_state(torch.zeros_like(copied_linear.recurrent_states[0]))
-            return SimpleNamespace(last_hidden_state=torch.ones(len(input_ids), input_ids.shape[1], 2))
-
-    model = DecisionModel.__new__(DecisionModel)
-    torch.nn.Module.__init__(model)
-    model.lm, model.device, model.pad_id = LM(), "cpu", 0
-    model.eval()
-    monkeypatch.setattr(M, "rows_per_pass", lambda rows, prefix_len=0: 2)
-    rows = [([1, 2], [2, 3]), ([3], [2]), ([4], [2])]
-    hidden = model._rows_hidden(rows, cache=cache, prefix_len=2)
-    assert [h.shape for h in hidden] == [(2, 2), (1, 2), (1, 2)]
-    assert torch.all(kv.keys == 1) and torch.all(kv.values == 2)
-    assert torch.all(linear.conv_states[0] == 1) and torch.all(linear.recurrent_states[0] == 3)
-    assert linear.has_previous_state[0] and len(cache.layers) == 2
-
-
-def test_bearer_auth_and_request_id(monkeypatch):
-    """D1A_API_KEY (d1a.serving.serve.API_KEY) gates /v1/*; every response carries the request id the TypeSafe clients read."""
-    from fastapi.testclient import TestClient
-    from d1a.serving import serve
-    with TestClient(serve.app) as client:
-        assert client.get("/openapi.json").headers["x-typesafe-request-id"]
-        monkeypatch.setattr(serve, "API_KEY", "secret")
-        assert client.get("/v1/models").status_code == 401
-        assert client.get("/v1/models", headers={"authorization": "Bearer wrong"}).status_code == 401
-        assert client.get("/openapi.json").status_code == 200   # only /v1 is gated
 
 
 # --- training (d1a.training.train): a 2-layer Qwen3.5 with random weights, no downloads -------------------------------------
