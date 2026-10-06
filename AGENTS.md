@@ -7,8 +7,9 @@ the question's `<decide>` token. README.md is the user guide; docs/UPSTREAM.md r
 ## Layout
 - `d1a/` the package, by subpackage (#60; the old flat module paths are one-release shims, removed in 0.5;
   `d1a/_layout.py` maps them):
-  - `core/`: `api.py` (the System One request and answer schema), `versions.py`;
-  - `backends/`: `torch.py` (DecisionModel, encode, masks, the pointer head), `mlx.py` (Apple Silicon backend for Qwen3.5
+  - `core/`: `api.py` (the System One request and answer schema), `encoding.py` (how a request is packed into tokens, the
+    context limits, rows), `head.py` (the pointer head), `versions.py`;
+  - `backends/`: `torch.py` (DecisionModel, masks; re-exports encoding and the head), `mlx.py` (Apple Silicon backend for Qwen3.5
     and Gemma 4, and the MLX export folders `scripts/export_mlx.py` writes), `checkpoint.py` (loading; `D1A_*` load options
     are read only by `LoadOptions.from_env`), `backbone.py`, `device.py`, `shared_prefix.py` (Qwen3.5 training through a
     shared state prefix), `fused_qwen35.py`, `cuda_graphs.py`;

@@ -199,10 +199,13 @@ def positions_continue(mp):
 
 
 def no_bos(mp):
-    """The leading <bos> Gemma's attention relies on is dropped."""
+    """The leading <bos> Gemma's attention relies on is dropped: in d1a.core.encoding, where encode reads the layout, and in
+    the torch backend's own reference to it."""
     import d1a.backends.torch as M
-    real = M.layout
-    mp.setattr(M, "layout", lambda tok: ([], *real(tok)[1:]))
+    import d1a.core.encoding as E
+    real = E.layout
+    mp.setattr(E, "layout", lambda tok: ([], *real(tok)[1:]))
+    mp.setattr(M, "layout", E.layout)
 
 
 @pytest.mark.parametrize("mutate", [shift("opt_idx", -1), shift("decide_idx", -1), leaky_mask, no_sliding_window, positions_continue],
@@ -212,7 +215,7 @@ def test_scoring_mutations_are_caught(tiny, mutate, monkeypatch):
     rec = record_of(request(30))
     mutate(monkeypatch)
     try: paths = scoring_paths(model, tok, rec)
-    except ValueError as e:   # caught by d1a.backends.torch.rows_of's layout check instead
+    except ValueError as e:   # caught by d1a.core.encoding.rows_of's layout check instead
         assert "branch layout mismatch" in str(e); return
     assert gap(paths, reference_logits(model, tok, rec)) > 1e-3
 

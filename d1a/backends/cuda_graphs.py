@@ -43,7 +43,7 @@ import torch
 from transformers import DynamicCache
 from transformers.cache_utils import DynamicLayer, LinearAttentionLayer
 
-# Limits of the graphed passes (not the model's context: that is d1a.backends.torch.MAX_STATE / SERVE_MAX_STATE)
+# Limits of the graphed passes (not the model's context: that is d1a.core.encoding.MAX_STATE / SERVE_MAX_STATE)
 GRAPH_TOKENS = 32768   # rows x positions one row pass may hold in the attention buffers (about 1 GB on Kev-4B and 9B)
 GRAPH_STATE = 1024     # longest state bucket the state pass graphs. A longer state pass is compute-bound, and the padding plus
                        # the explicit mask (no causal flash attention) made a 2,200-token one slower as a graph (L40S, Kev-4B:

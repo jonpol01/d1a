@@ -26,7 +26,8 @@ from typing import Literal
 from d1a.core.api import SystemOneRequest, output_tokens, to_answers, to_record
 from d1a.backends.checkpoint import Checkpoint
 from d1a.backends.device import default_device, empty_cache
-from d1a.backends.torch import PointerHead, encode, layout, rows_of
+from d1a.core.encoding import encode, layout, rows_of
+from d1a.core.head import PointerHead
 
 SAMPLE_RATE = 16_000             # what Gemma 4's audio feature extractor expects
 MAX_AUDIO_S = 30                 # Gemma 4's audio encoder limit
@@ -233,7 +234,7 @@ class MediaEncoder:
 
 
 def with_media(enc, n_head, ids, at, embeds):
-    """An encoding (d1a.backends.torch.encode) with a media span inserted at state index n_head (after <state>): the span's ids
+    """An encoding (d1a.core.encoding.encode) with a media span inserted at state index n_head (after <state>): the span's ids
     join the state and every later position and index shifts by its length. enc["media"] = (absolute placeholder
     indices, their soft tokens) for the backend's state pass."""
     n = len(ids)

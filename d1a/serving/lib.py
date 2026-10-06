@@ -19,7 +19,7 @@ import torch
 from d1a.core.api import SystemOneRequest, to_answers, to_record
 from d1a.backends.checkpoint import Checkpoint, LoadOptions
 from d1a.backends.device import default_device
-from d1a.backends.torch import SERVE_MAX_BRANCH, SERVE_MAX_STATE
+from d1a.core.encoding import SERVE_MAX_BRANCH, SERVE_MAX_STATE
 
 
 class D1A:

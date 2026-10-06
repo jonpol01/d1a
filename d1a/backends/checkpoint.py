@@ -28,7 +28,8 @@ from pathlib import Path
 import torch
 
 from d1a.backends.backbone import for_config
-from d1a.backends.torch import DecisionModel, load_tokenizer, pad_id
+from d1a.backends.torch import DecisionModel
+from d1a.core.encoding import load_tokenizer, pad_id
 
 HUB_ID = re.compile(r"[\w.-]+/[\w.-]+(@[\w.-]+)?")
 EXPORT_CONFIG, EXPORT_HEAD = "d1a_config.json", "head.safetensors"   # an MLX export folder's two D1A files, and a training run's
@@ -372,7 +373,7 @@ class Checkpoint:
 
     def _export_tokenizer(self):
         """An MLX export's own tokenizer, checked against the token layout the export was made for."""
-        from d1a.backends.torch import layout
+        from d1a.core.encoding import layout
         tok, cfg = load_tokenizer(self.path), self.export
         leading, delimiters, _ = layout(tok)
         if (list(leading), list(delimiters), pad_id(tok)) != (cfg["leading_ids"], cfg["delimiter_ids"], cfg["pad_id"]):

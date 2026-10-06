@@ -255,7 +255,7 @@ def length_buckets(edges=LENGTH_EDGES):
 def calibration_by_length(rows, lengths=None, edges=LENGTH_EDGES):
     """{bucket: {"n", acc, ece, brier, confident_error_rate}} of `rows`, scored as given (at T=1: pass them served), split by
     state tokens: the row's own `state_tokens` if it has them, else lengths[row id] ({record id: tokens}). A count is the
-    encoded state segment, its <state> token included (d1a.backends.torch.encode). An empty bucket has n 0 and None values. The
+    encoded state segment, its <state> token included (d1a.core.encoding.encode). An empty bucket has n 0 and None values. The
     one home of per-length calibration."""
     def state_tokens(row):
         if row.get("state_tokens") is not None:

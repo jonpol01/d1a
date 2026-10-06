@@ -504,7 +504,7 @@ def test_shared_prefix_unpadded_states_run_without_a_state_mask(tiny_base, check
 
 
 def test_local_predictor_scores_long_rows_through_the_shared_prefix(tiny_base, tmp_path, monkeypatch):
-    """d1a.eval.benchmark's predictor runs a record whose longest row exceeds d1a.backends.torch.ROW_PASS_TOKENS (a state past 16k
+    """d1a.eval.benchmark's predictor runs a record whose longest row exceeds d1a.core.encoding.ROW_PASS_TOKENS (a state past 16k
     tokens) on a hybrid torch backbone through the shared prefix (the state once, not once per question): same logits as
     the row form. On CUDA such a record also runs under SDPA's flash / memory-efficient kernels, off the fp32-exact
     contract, so it is labelled: the prediction and its rows carry `kernels`, report.json counts them in `long_rows`. A

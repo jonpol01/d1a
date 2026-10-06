@@ -22,7 +22,7 @@ from d1a.backends.checkpoint import LoadOptions
 from d1a.training.data import api_request, load_records
 from d1a.backends.device import default_device
 from d1a.eval.metrics import EPSILON, grouped_metrics, metrics, unknowable_report
-from d1a.backends.torch import ROW_PASS_TOKENS, ContextOverflow
+from d1a.core.encoding import ROW_PASS_TOKENS, ContextOverflow
 from d1a.eval.predictors import LocalPredictor, RemotePredictor, RotationAveraged
 from d1a.eval.suites import resolve
 from d1a.eval.suite import CONTEXT, ENCODING, SERVING_CONTEXT, digest, load_split, read_manifest, record_digest, write_json

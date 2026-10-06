@@ -9,7 +9,7 @@ runs it, and its own CUDA serving kernels (Qwen3.5's, loaded only through Qwen35
     bb = for_config(lm.config)      # Gemma4 (sliding layers), Qwen35 (Gated DeltaNet), or Attention (plain)
     bb.hybrid, bb.sliding_window, bb.new_cache(), bb.lora_extra, bb.prefix_min_tokens, bb.mlx, bb.serve_cuda(m, opts, merged)
 
-Delimiters are not here: they follow the tokenizer (d1a.backends.torch.layout picks the first delimiter set its vocabulary holds),
+Delimiters are not here: they follow the tokenizer (d1a.core.encoding.layout picks the first delimiter set its vocabulary holds),
 so code that only has a tokenizer (encode) needs no backbone.
 """
 from transformers import DynamicCache
@@ -116,7 +116,7 @@ class Gemma4(Attention):
 
 class Qwen35(Attention):
     """Qwen3.5 (Kev's bases): Gated DeltaNet layers, recurrent, so every question runs as its own causal row continuing
-    from the state (d1a.backends.torch.rows_of); the cache carries DeltaNet conv and recurrent states."""
+    from the state (d1a.core.encoding.rows_of); the cache carries DeltaNet conv and recurrent states."""
     name = "qwen35"
     hybrid = True
     # Gated DeltaNet projections (transformers 5 names, verified on Qwen3_5TextModel); the mixer's out_proj too
