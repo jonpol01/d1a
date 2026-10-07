@@ -103,6 +103,25 @@ def test_card_suites():
         ["hard-v1", "pr-labels:development", "v7/decision-v7", "v4/transfer-v4", "devtools-v1", "documents-v1"]
 
 
+def test_all_suites_scores_every_card_suite_and_every_d1a_eval_partition_at_the_serving_context(tmp_path, monkeypatch):
+    """--all-suites (John's rule: a model is judged on every suite): the five card suites, then every evaluation partition
+    of every D1A suite, train partitions never, composites ("all", "<a>-<b>") once through their parts. A D1A partition is
+    benchmarked at the serving context, so no record is skipped as longer than the training context."""
+    import json
+    from types import SimpleNamespace
+    every = gate.suite_list("", False, every=True)
+    want = [f"{m.parent.name}:{n}" for m in sorted((ROOT / "evals/d1a").glob("*/manifest.json"))
+            for n, p in json.loads(m.read_text(encoding="utf-8"))["partitions"].items() if p["role"] == "eval"]
+    assert every[:5] == list(gate.CARD_SUITES) and set(every[5:]) <= set(want) and "pr-labels:test" in every
+    assert set(want) - set(every[5:]) == {"night2:all", "night2:dates-unknowable"} and len(every) == len(set(every))
+    assert gate.suite_list("hard-v1", False, every=True)[:6] == ["hard-v1", "v7/decision-v7", "v4/transfer-v4", "devtools-v1", "documents-v1", every[5]]
+    calls = []
+    monkeypatch.setattr(gate.subprocess, "run", lambda argv, **kw: (calls.append(argv), SimpleNamespace(returncode=0))[1])
+    gate.benchmark(tmp_path, "r@v1", "pr-labels:test", tmp_path / "d1a")
+    gate.benchmark(tmp_path, "r@v1", "hard-v1", tmp_path / "frozen")
+    assert calls[0][calls[0].index("--data") + 2:][:2] == ["--context", "serving"] and "--context" not in calls[1]
+
+
 def test_the_status_goes_on_the_exact_commit_tested():
     """--post-status: the head's own commit only when its checkout is clean; another repository's commit when named."""
     import pytest
