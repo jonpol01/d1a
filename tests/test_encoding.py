@@ -10,7 +10,7 @@ import pytest
 import torch
 
 from d1a.backends.torch import branch_mask, branch_mask_batch, branch_masks
-from d1a.core.encoding import GEMMA_SPECIAL, SPECIAL, encode, layout, load_tokenizer, rows_of, user_tokens
+from d1a.core.encoding import GEMMA_SPECIAL, SPECIAL, ContextOverflow, encode, layout, load_tokenizer, rows_of, user_tokens
 from d1a.core.head import PointerHead
 
 TOKENIZERS = {"qwen": ("Qwen/Qwen2.5-0.5B", None), "gemma": ("google/gemma-4-E2B", "d29ff6b45f081a49ee2733a859c9c9c2d95d1a6f")}
@@ -131,3 +131,33 @@ def test_head_temperature_tempers_served_logits_only():
         assert torch.allclose(batched[owner == k], head(h_decide[k], h_opts[owner == k]))
     head.train()
     assert torch.equal(head(h_decide[0], h_opts[:2]), trained), "training must not be tempered"
+
+
+class CharTokenizer:
+    """One token per character, no download: enough for encode's length rules."""
+    def __call__(self, text, **kwargs):
+        return type("Encoded", (), {"input_ids": [ord(c) % 997 for c in text]})()
+
+    def convert_tokens_to_ids(self, token):
+        return 999
+
+
+def test_a_strict_encode_refuses_the_state_a_lenient_one_cuts():
+    """Frozen suites and training refuse a record that would be truncated; serving cuts the state and says so."""
+    record = {"state": "x" * 12, "questions": [{"instr": "q", "options": ["yes", "no"], "label": 0}]}
+    assert encode(CharTokenizer(), record, max_state=6)["state_truncated"]
+    assert not encode(CharTokenizer(), record, max_state=64)["state_truncated"]
+    with pytest.raises(ContextOverflow, match="state exceeds 6"):
+        encode(CharTokenizer(), record, max_state=6, strict=True)
+
+
+def test_a_batch_mask_is_each_sequence_mask_padded_and_pad_rows_see_no_question():
+    """Batching changes no visible entry: each sequence's corner is its own branch_mask, value for value. A pad query row
+    sees itself and nothing of any question (its output is discarded, but its softmax must stay finite)."""
+    segs = [[0, 0, 1, 1, 2], [0, 2, 2]]
+    batch = branch_mask_batch(segs, "cpu")
+    for b, seg in enumerate(segs):
+        assert torch.equal(batch[b:b + 1, :, :len(seg), :len(seg)], branch_mask(seg, "cpu"))
+    short = batch[1, 0] == 0
+    for pad in range(len(segs[1]), batch.shape[-1]):
+        assert short[pad, pad] and not any(short[pad, j] for j in range(len(segs[1])) if segs[1][j] != 0)

@@ -102,7 +102,8 @@ the Apache License 2.0. This file records where D1A's code came from and what D1
   - `d1a/training/data.py`: the same records from the same seeds (every draw in the same order); its tests are `tests/test_data.py`.
   - `d1a/eval/metrics.py`: bit-identical results; its tests are `tests/test_metrics.py`.
   - `d1a/eval/predictors.py`: the same predictions, requests, retries and rotation averages; checked by
-    `scripts/equivalence/predictors.py` (local, remote and rotation-averaged predictors).
+    `scripts/equivalence/predictors.py` (local, remote and rotation-averaged predictors); its tests are
+    `tests/test_predictors.py`, which with `tests/test_encoding.py` replaced Kev's `tests/test_research.py`.
   - `d1a/backends/torch.py` (its encoding and pointer head now in `d1a/core/encoding.py` and `d1a/core/head.py`, #60): the same
     encodings, masks, probabilities and training gradients, bit for bit, on Gemma 4 and Qwen3.5; its encoding, mask and
     pointer-head tests are `tests/test_encoding.py`.
@@ -133,7 +134,6 @@ tests/test_api.py
 tests/test_conventions.py
 tests/test_mlx.py
 tests/test_model.py
-tests/test_research.py
 tests/test_unit.py
 ```
 
