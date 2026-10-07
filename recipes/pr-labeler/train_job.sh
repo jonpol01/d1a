@@ -11,14 +11,14 @@
 #   INIT               starting checkpoint, repo[@revision][:subfolder] [JohnP1/d1a-e4b@v0.3]
 #   EN                 English PRs from train.jsonl: every rare-label PR (blast, P0, P1, P4) plus a sample of the rest; 0 = all [0]
 #   EN_SKIP            1 = continue a previous round (same EN, same seed): its unsampled PRs plus its rare-label PRs again [0]
-#   EXTRA              more training partitions of evals/d1a/pr-labels, space-separated, e.g. "train-ja train-blast" [train-ja]
+#   EXTRA              more training partitions of evals/d1a/pr-labels, space-separated, [train-ja train-blast]; mix.py refuses a mix that leaves one out
 #   REPLAY_DV7, REPLAY_JA, REPLAY_ROUTING   replay of decision-v7, Japanese JGLUE, routing [1500, 500, 300]
 #   LR, MAX_STATE, CKPT  learning rate, longest PR document in tokens, resume-point directory [5e-5, 1536, /ckpt]
 # Measured on an L4: ~1.26 s per PR record (PR documents average ~680 tokens); budget the timeout from that.
 set -uo pipefail
 : "${D1A_SHA:?}" "${REPO:?}" "${PREFIX:?}"
 INIT=${INIT:-JohnP1/d1a-e4b@v0.3}; EN=${EN:-0}; EN_SKIP=${EN_SKIP:-0}
-EXTRA=${EXTRA:-train-ja}; REPLAY_DV7=${REPLAY_DV7:-1500}; REPLAY_JA=${REPLAY_JA:-500}; REPLAY_ROUTING=${REPLAY_ROUTING:-300}
+EXTRA=${EXTRA:-"train-ja train-blast"}; REPLAY_DV7=${REPLAY_DV7:-1500}; REPLAY_JA=${REPLAY_JA:-500}; REPLAY_ROUTING=${REPLAY_ROUTING:-300}
 LR=${LR:-0.00005}; MAX_STATE=${MAX_STATE:-1536}; CKPT=${CKPT:-/ckpt}
 export INIT EN EN_SKIP EXTRA REPLAY_JA REPLAY_ROUTING
 nvidia-smi --query-gpu=name,memory.total --format=csv

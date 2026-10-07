@@ -69,8 +69,10 @@ stripped off, and new features come with their tests.
 - **No stripping.** No endpoint, demo, example, CLI flag or feature disappears silently. A removal updates a failing
   test on purpose, and the PR says why.
 - **New features ship with their tests** in the same PR.
-- **Fine-tunes keep the skills** (#167; `recipes/README.md`): a run that starts from a trained checkpoint replays the
-  hard-v1, devtools-v1 and documents-v1 train partitions, and its gate adds `--all-suites` (below).
+- **Fine-tunes keep every skill** (#167; `recipes/README.md`; John, 2026-10-07): a run that starts from a trained
+  checkpoint trains on or replays every training source, as `d1a.eval.suites.train_sources()` lists them: hard-v1,
+  devtools-v1, documents-v1 and every D1A train partition (PR labels incl. blast and Japanese, routing, JGLUE), plus
+  decision-v7 through the trainer. Both mix tools refuse a new mix that leaves one out. Its gate adds `--all-suites` (below).
 - **Every model is judged on every suite** (John, 2026-10-07). A new or changed checkpoint runs
   `scripts/quality_gate.py --head-run <new> --all-suites`. That scores, against the checkpoint it replaces:
   - the five card suites;

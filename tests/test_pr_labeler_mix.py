@@ -49,3 +49,29 @@ def test_each_skills_suite_is_replayed(monkeypatch):
     assert mix.mix(replay_ja=2, replay_routing=2, replay_skills=100, seed=1)[1]["skills"] == {s: 30 for s in mix.SKILLS}   # all there is
     assert mix.SKILLS == ("evals/hard-v1", "evals/devtools-v1", "evals/documents-v1")
     assert inspect.signature(mix.mix).parameters["replay_skills"].default > 0                 # replaying them is the default
+
+
+def test_a_new_mix_must_cover_every_training_source(monkeypatch, tmp_path):
+    """A fine-tune forgets what it neither trains on nor replays (#167, #187): the CLI refuses a new mix that leaves a
+    training source out (here the blast PRs, or routing); --replay-skills 0 still rebuilds the v0.3/v0.4 mixes."""
+    import pytest
+    assert mix.uncovered(["train-ja", "train-blast"], 500, 300, 500) == []
+    assert mix.uncovered(["train-ja"], 500, 300, 500) == ["evals/d1a/pr-labels:train-blast"]
+    assert mix.uncovered(["train-ja", "train-blast"], 500, 0, 500) == ["evals/d1a/routing:factory-train", "evals/d1a/routing:generic-train"]
+    monkeypatch.setattr("sys.argv", ["mix.py", "--out", str(tmp_path / "m.jsonl"), "--extra", "train-ja"])
+    with pytest.raises(SystemExit):
+        mix.main()
+    fake(monkeypatch)   # the defaults cover everything, and the mix is written
+    monkeypatch.setattr(mix, "digest", lambda path: "sha")
+    monkeypatch.setattr("sys.argv", ["mix.py", "--out", str(tmp_path / "m.jsonl")])
+    mix.main()
+    assert (tmp_path / "m.jsonl").read_text(encoding="utf-8").count("train-blast") == 10
+
+
+def test_the_hf_job_defaults_pass_the_coverage_check():
+    """train_job.sh forwards its own EXTRA and replay settings to mix.py, so the CLI's new default never applies there:
+    the job's defaults themselves must cover every training source, or every default launch fails (hermes-prbot, #194)."""
+    import re
+    job = (ROOT / "recipes/pr-labeler/train_job.sh").read_text(encoding="utf-8")
+    default = lambda name: re.search(rf'{name}=\$\{{{name}:-"?([^}}"]*)"?\}}', job)[1]
+    assert mix.uncovered(default("EXTRA").split(), int(default("REPLAY_JA")), int(default("REPLAY_ROUTING")), 500) == []
