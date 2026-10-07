@@ -49,7 +49,8 @@ def test_train_sources_are_the_skills_suites_and_every_d1a_train_partition():
     assert train_sources() == ["evals/hard-v1", "evals/devtools-v1", "evals/documents-v1", "evals/d1a/ja-jglue:train",
                                "evals/d1a/pr-labels:train", "evals/d1a/pr-labels:train-ja", "evals/d1a/pr-labels:train-blast",
                                "evals/d1a/routing:factory-train", "evals/d1a/routing:generic-train"]
-    frozen = {f"evals/{m.parent.relative_to(ROOT / 'evals')}" for m in (ROOT / "evals").glob("**/manifest.json") if "d1a" not in m.parts
+    frozen = {f"evals/{m.parent.relative_to(ROOT / 'evals')}" for m in (ROOT / "evals").glob("**/manifest.json")
+              if m.relative_to(ROOT / "evals").parts[0] != "d1a"   # the checkout itself may sit in a folder named d1a (CI does)
               and "train" in (json.loads(m.read_text(encoding="utf-8")).get("partitions") or [])}
     assert frozen == set(SKILLS)
 
