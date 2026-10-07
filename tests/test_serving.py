@@ -141,6 +141,44 @@ def test_running_out_of_memory_with_states_cached_drops_them_and_runs_once_more(
         server.close()
 
 
+def test_make_room_evicts_before_the_pass_exactly_what_store_would_evict_after_it():
+    """PrefixCache.make_room (from Kev 1d77363) drops, before a batch runs, the entries the batch's store() would evict
+    anyway, so an old state never stays resident through the pass of the new one replacing it. Under the model's hit
+    rule (a hit hands its cached prefix back), a cache that makes room and then stores ends identical, order and counts
+    included, to one that only stores, and make_room drops exactly the old states that store would drop."""
+    rng = random.Random(5)
+    for _ in range(150):
+        size, low, high = rng.randint(1, 4), rng.randint(0, 3), rng.randint(6, 30)
+        plain, roomy = PrefixCache(size, low, high), PrefixCache(size, low, high)
+        for _ in range(10):
+            batch = [packed(rng.choice(STATES)) for _ in range(rng.randint(1, 5))]
+            keys, cached, keep = plain.plan(batch)
+            assert roomy.plan(batch) == (keys, cached, keep)
+            prefixes = [c if c is not None else (f"prefix of {k}" if kept else None) for k, c, kept in zip(keys, cached, keep)]
+            before = set(roomy.entries)
+            roomy.make_room(keys, cached, keep)
+            kept_through = set(roomy.entries)
+            plain.store(keys, cached, prefixes); roomy.store(keys, cached, prefixes)
+            assert list(roomy.entries.items()) == list(plain.entries.items()) and (roomy.hits, roomy.misses) == (plain.hits, plain.misses)
+            assert kept_through == before & set(roomy.entries)   # it drops exactly the old states the store would drop
+
+
+def test_the_out_of_memory_retry_still_fires_when_make_room_dropped_the_cached_state():
+    """A batch whose hit make_room drops (the batch's own new state takes the only slot) still holds that hit's prefix
+    for its pass. If the pass runs out of memory, it is retried once: the cache itself is already empty by then."""
+    model = StandInModel()
+    server = Server(SimpleNamespace(release_date=lambda: "2026-01-01"), None, model, "cpu")
+    server.prefix_cache = PrefixCache(size=1, min_tokens=0)
+    try:
+        server.probs(packed("abc", branch=1))
+        model.fail, model.calls = "cached", 0
+        server._run([packed("abc", branch=1), packed("xyz", branch=1)])
+        assert model.calls == 2 and server.prefix_cache.oom_retries == 1
+        assert list(server.prefix_cache.entries) == [tuple("xyz")]
+    finally:
+        server.close()
+
+
 def test_out_of_memory_is_what_cuda_and_mps_raise_when_their_allocator_runs_out():
     assert out_of_memory(torch.OutOfMemoryError("CUDA out of memory"))
     assert out_of_memory(RuntimeError("MPS backend out of memory (MPS allocated: 1 GB)"))
