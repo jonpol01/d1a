@@ -3,9 +3,10 @@ every loader serves calibrated probabilities. Argmax never changes, so accuracy 
 
     python -m d1a.training.calibrate --run runs/new --rows runs/cal/rows.json --rows runs/calpr/rows.json:src_a,src_b
 
---rows are d1a.eval.benchmark rows.json files, pooled; `path:source,...` keeps only those sources (a source the rows' suite
-does not list is refused: a typo would silently shrink the fit set). --exclude_rows drops records by id. --transfer rows
-are reported before and after, never fitted. --temperature T writes a value without fitting and needs --reason.
+--rows are d1a.eval.benchmark rows.json files, pooled; `path:source,...` (here and in --judge, --guard, --confirm and
+--locked) keeps only those sources (a source the rows' suite does not list is refused: a typo would silently shrink the
+set). --exclude_rows drops records from the fit by id. --transfer rows are reported before and after, never fitted.
+--temperature T writes a value without fitting or judging it, needs --reason, and refuses the rule's options.
 
 The fit rows must be held out from the checkpoint's training. A temperature fitted on held-out items of the checkpoint's
 own training data is in distribution and comes out overconfident on anything else (Kev's round 19: T 0.955 on its own
@@ -14,17 +15,33 @@ file (a) comes from a suite the checkpoint trained on, (b) pools a source it tra
 development partition of a training corpus, and when a rows file's suite or the checkpoint's training cannot be placed.
 --allow-in-distribution fits anyway, warns, and records every reason in the checkpoint's temperature_fit.in_distribution.
 
+Every fit also records the 90% bootstrap interval of its temperature (report only). With --judge rows, the fitted temperature
+replaces the checkpoint's current one only when it passes Kev's round 28 rule on them and the --guard rows, and then that
+round's confirmation stages on the --confirm and --locked rows, scored only once the rule passes (d1a.training.temperature_gate);
+otherwise nothing is written and the run names every criterion that failed. Before anything is fitted, a file in any of
+these roles is refused when it overlaps the rows the fit reads (each --rows selection minus --exclude_rows), and so is a
+confirmation file that overlaps a file the rule reads; files overlap when they share a row or the suite partition their
+report.json names, so a copy, whole or part, counts as the file. A selection with no scored rows is refused too: an empty
+judge or guard panel would pass its ECE check on nothing, and an empty --rows selection would shrink the fit unseen. The rule's bootstrap and the interval are Kev's registered reads:
+seed 0 whatever --seed (the cross-validation's) is, and, for the rule, the rows in (id, question) order with every tie broken,
+so reordering a rows file never moves a verdict.
+
+    python -m d1a.training.calibrate --run runs/new --rows runs/pool/rows.json --judge runs/served/rows.json --guard runs/hard/rows.json --confirm runs/test/rows.json --locked runs/locked/rows.json
+
 What the checkpoint trained on comes from its metadata (d1a.training.train records the suite's manifest hash, its args and --data) or a
 provenance.json beside it; where rows came from, from the report.json d1a.eval.benchmark writes beside them.
 """
 import argparse
 import functools
+import hashlib
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
 from d1a.backends.checkpoint import read_meta, write_meta
 from d1a.eval.metrics import TEMPERATURE_FIT, TEMPERATURE_FIT_METHOD, cross_validated_temperature, fit_temperature, metrics, raw_row, recorded, scored_rows
 from d1a.eval.suite import digest, read_json, read_manifest, suite_key
+from d1a.training.temperature_gate import confirmation, interval, keyed, rule
 
 ROOT = Path(__file__).resolve().parents[2]   # the repository: d1a/training/calibrate.py
 HELD_OUT_SPLITS = ("calibration", "development")   # a training corpus's own held-out partitions: in distribution
@@ -121,6 +138,44 @@ def select(reads, exclude=()):
     return [r for path, srcs in reads for r in read_json(path) if (srcs is None or r["source"] in srcs) and r["id"] not in excluded]
 
 
+def panel(path, srcs, exclude=()):
+    """A rows file's clean, knowable rows at T=1, keyed by the file (temperature_gate.keyed)."""
+    return keyed([raw_row(recorded(r)) for r in scored_rows(select([(path, srcs)], exclude))], path)
+
+
+def panels(reads):
+    """{`path` or `path:source,...`: its panel}: two selections of one file are two panels."""
+    return {path + (f":{','.join(srcs)}" if srcs else ""): panel(path, srcs) for path, srcs in reads}
+
+
+def identity(path, srcs=None, exclude=()):
+    """What a rows file holds (its rows select() keeps), as a set two files share an element of when they overlap: the
+    sha256 of each row (a copy of any of them elsewhere, whole or part, re-indented or not, overlaps it), and the (suite or
+    partition sha256, split) of the report.json beside it (another read of the same questions)."""
+    report = Path(path).parent / "report.json"
+    r = read_json(report) if report.exists() else {}
+    return ({hashlib.sha256(json.dumps(row, sort_keys=True).encode()).hexdigest() for row in select([(path, srcs)], exclude)}
+            | ({(r["suite_sha256"], r.get("split", "development"))} if "suite_sha256" in r else set()))
+
+
+def roles_problem(reads, judged, guarded, tests, held, exclude=()):
+    """Why these rows files cannot play these roles together, or None. The fit counts only the rows it reads (each --rows
+    selection minus --exclude_rows: Kev's round 28 guards the transfer-v4 records it drops from its pool); every other role
+    counts its whole file."""
+    if (guarded or tests or held) and not judged:
+        return "--guard, --confirm and --locked need --judge (without the rule they would be ignored and the fit written)"
+    fitted = set().union(*(identity(path, srcs, exclude) for path, srcs in reads))
+    ids = {path: identity(path) for path, _ in judged + guarded + tests + held}
+    def among(mine, theirs): return [path for path, _ in mine if any(ids[path] & ids[other] for other, _ in theirs)]
+    if twice := [path for path, _ in judged + guarded + tests + held if ids[path] & fitted]:
+        return f"refusing to judge a temperature on the rows it is fitted on: {twice}"
+    if twice := among(tests + held, judged + guarded):
+        return f"refusing confirmation rows the rule already reads: {twice}"
+    if twice := [path for i, (path, _) in enumerate(judged) if among([(path, None)], judged[:i])]:
+        return f"refusing judge rows given twice (shared rows would count twice in the pool; name one file's sources in one path:a,b): {twice}"
+    return None
+
+
 def allowlist_typos(reads):
     """A message per `path:source,...` naming a source its suite (or, unplaced, the rows file itself) does not contain."""
     out = []
@@ -156,11 +211,17 @@ def report_line(name, rows, T):
             f" | conf-err {raw['confident_error_rate']:.3f} -> {cal['confident_error_rate']:.3f} | cov@5% {raw['coverage_at_5pct_error']:.2f} -> {cal['coverage_at_5pct_error']:.2f}")
 
 
-def calibrate(run, rows, exclude=(), transfer=None, allow_in_distribution=False, folds=5, seed=0):
-    """Fit, report and write the temperature of `run` (see the module docstring). -> the temperature written."""
-    reads = parse_rows(rows)
-    if typos := allowlist_typos(reads):
-        raise SystemExit("refusing a sources allowlist that names sources its rows do not contain (a typo shrinks the fit set):\n  " + "\n  ".join(typos))
+def calibrate(run, rows, exclude=(), transfer=None, allow_in_distribution=False, folds=5, seed=0, judge=(), guard=(), confirm=(), locked=()):
+    """Fit, report and write the temperature of `run` (see the module docstring). -> the temperature it now serves."""
+    reads, judged, guarded, tests, held = (parse_rows(v) for v in (rows, judge, guard, confirm, locked))
+    if problem := roles_problem(reads, judged, guarded, tests, held, exclude):
+        raise SystemExit(problem)
+    if typos := allowlist_typos(reads + judged + guarded + tests + held):
+        raise SystemExit("refusing a sources allowlist that names sources its rows do not contain (a typo shrinks the selection):\n  " + "\n  ".join(typos))
+    gate = {role: panels(given) for role, given in (("judge", judged), ("guard", guarded), ("confirm", tests), ("locked", held))}
+    if empty := [f"--{role} {name}" for role, named in {"rows": panels(reads), **gate}.items() for name, scored in named.items() if not scored]:
+        raise SystemExit("refusing a selection with no scored rows (a source its suite lists that the read lacks, or only noise or"
+                         " unknowable rows):\n  " + "\n  ".join(empty))
     fitted = []
     for path, srcs in reads:
         suite, split = rows_origin(path)
@@ -176,14 +237,35 @@ def calibrate(run, rows, exclude=(), transfer=None, allow_in_distribution=False,
     T = fit_temperature(fit, **TEMPERATURE_FIT)
     print(report_line("fit rows", fit, T))
     if transfer: print(report_line("transfer", [r for r in read_json(transfer) if r["variant"] == "clean"], T))
-    cv = cross_validated_temperature(fit, folds=folds, seed=seed, **TEMPERATURE_FIT)
+    units = [r for path, srcs in reads for r in panel(path, srcs, exclude)]
+    cv = cross_validated_temperature(units, folds=folds, seed=seed, **TEMPERATURE_FIT)
     ci = cv["ece_ci95"]
     print(f"fit rows     OOF T=[{', '.join(f'{t:.2f}' for t in cv['temperatures'])}] ece raw {cv['raw']['ece']:.3f} [{ci['raw'][0]:.3f}, {ci['raw'][1]:.3f}]"
           f" -> oof {cv['out_of_fold']['ece']:.3f} [{ci['out_of_fold'][0]:.3f}, {ci['out_of_fold'][1]:.3f}]  delta [{ci['delta'][0]:.3f}, {ci['delta'][1]:.3f}] separated={cv['separated']}")
+    spread = interval(units)
+    print(f"fit rows     T={T:.4f} 90% interval [{spread['lower']:.4f}, {spread['upper']:.4f}] over {spread['samples']} cluster resamples")
     meta = read_meta(run)
+    verdict = None
+    if judged:
+        verdict = rule(gate["judge"], gate["guard"], T, meta.temperature)
+        j = verdict["judge"]
+        print(f"rule         T={T:.4f} vs current {meta.temperature:.4f} on {j['n']} judge questions: Brier {j['brier_delta']:+.4f}"
+              f" [{j['brier_ci95'][0]:+.4f}, {j['brier_ci95'][1]:+.4f}], ECE {j['ece']['candidate']:.4f} vs {j['ece']['shipped']:.4f}")
+        if verdict["adopt"] and (tests or held):
+            verdict["confirmation"] = confirmation(gate["confirm"], gate["locked"], T, meta.temperature)
+            for stage, named in (("confirm", verdict["confirmation"]["tests"]), ("locked", verdict["confirmation"]["locked"])):
+                for name, s in named.items():
+                    print(f"{stage:12} {name}: ECE {s['ece']['candidate']:.4f} vs {s['ece']['shipped']:.4f}, Brier {s['brier']['candidate']:.4f}"
+                          f" vs {s['brier']['shipped']:.4f}, acc {s['acc']['candidate']:.4f} vs {s['acc']['shipped']:.4f}")
+        elif tests or held:
+            print("confirmation rows not scored: the rule failed")
+        if failed := verdict["failed"] + verdict.get("confirmation", {}).get("failed", []):
+            print(f"kept temperature {meta.temperature:.4f} in {run}: nothing written\n  " + "\n  ".join(failed))
+            return meta.temperature
     meta.temperature = T
     meta.extra["temperature_fit"] = {"rows": rows[0] if len(rows) == 1 else list(rows), **({"exclude_rows": list(exclude)} if exclude else {}),
                                      "n": len(fit), "method": TEMPERATURE_FIT_METHOD, "cross_validation": cv,
+                                     "interval": spread, **({"rule": verdict} if verdict else {}),
                                      "fit_rows": fitted, "training_suites": sorted(training.suites) if training else None,
                                      **({"in_distribution": {"allowed": True, "problems": problems}} if problems else {})}
     write_meta(run, meta)
@@ -206,17 +288,26 @@ def main(argv=None):
     ap.add_argument("--rows", action="append", default=[], help="fit set: a rows.json, optionally path:source,...; repeat to pool")
     ap.add_argument("--exclude_rows", action="append", default=[], help="rows.json whose record ids are dropped from the fit set; repeatable")
     ap.add_argument("--transfer", help="out-of-domain rows.json, reported before and after (never fitted)")
-    ap.add_argument("--temperature", type=float, help="write this value without fitting; needs --reason")
+    ap.add_argument("--temperature", type=float, help="write this value without fitting or judging it; needs --reason")
     ap.add_argument("--reason", help="with --temperature: where the value comes from (recorded in the checkpoint)")
     ap.add_argument("--allow-in-distribution", action="store_true", help="fit even on rows that share data with the checkpoint's training; warned and recorded")
+    ap.add_argument("--judge", action="append", default=[], help="rows the new temperature must beat the current one on: pooled, Brier"
+                    " (95%% upper bound below 0) and ECE lower; each one's ECE may rise by at most 0.005; path or path:source,...; repeatable")
+    ap.add_argument("--guard", action="append", default=[], help="with --judge: rows whose ECE may rise by at most 0.005; path or path:source,...,"
+                    " each selection its own panel; repeatable")
+    ap.add_argument("--confirm", action="append", default=[], help="with --judge, scored once the rule passes: rows whose ECE must fall (Kev round 28's tests stage); repeatable")
+    ap.add_argument("--locked", action="append", default=[], help="with --judge, scored once the rule passes: locked test rows whose Brier may rise by at most 0.005,"
+                    " accuracy unchanged (round 28's locked stage); repeatable")
     ap.add_argument("--folds", type=int, default=5)
-    ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--seed", type=int, default=0, help="the cross-validation's folds and bootstrap; the rule's bootstrap and the interval are always seed 0 (Kev's registered read)")
     a = ap.parse_args(argv)
     if a.temperature is not None:
         if not (a.reason or "").strip(): ap.error("--temperature needs --reason: where the value comes from (recorded in the checkpoint)")
+        if a.judge or a.guard or a.confirm or a.locked:
+            ap.error("--temperature writes its value unjudged: --judge, --guard, --confirm and --locked would be ignored")
         return write_manual(a.run, a.temperature, a.reason)
     if not a.rows: ap.error("--rows is required unless --temperature is given")
-    return calibrate(a.run, a.rows, a.exclude_rows, a.transfer, a.allow_in_distribution, a.folds, a.seed)
+    return calibrate(a.run, a.rows, a.exclude_rows, a.transfer, a.allow_in_distribution, a.folds, a.seed, a.judge, a.guard, a.confirm, a.locked)
 
 
 if __name__ == "__main__":

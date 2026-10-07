@@ -13,6 +13,21 @@ the Apache License 2.0. This file records where D1A's code came from and what D1
 ## What D1A Changed
 
 - **Ported from later upstream Kev**: the suites mirror pin (`d1a/eval/suite.py` `SUITES_REVISION` = kev-suites `cc4bac8`) from Kev commit `6b1da9d` (#198), which publishes the `hard-v1` and `documents-v1` training partitions. Every other partition is unchanged at that revision. `PrefixCache.make_room` in `d1a/serving/serve.py` from Kev commit `1d77363` (#201): before a batch runs, the cache drops the states that batch's store would evict anyway, so an old long state no longer stays resident through the pass of the new one (#189).
+  `d1a/training/temperature_gate.py`, which `d1a.training.calibrate --judge/--guard/--confirm/--locked` runs, ports Kev's
+  validation of a refitted temperature: `kev/rounds.py` `pooled_temperature_ci` (Kev commit `e52f812`, #168) as every fit's
+  90% bootstrap interval of its temperature; `kev/rounds.py` `paired()`, the registered paired read over
+  `kev.metrics.paired_bootstrap` (Kev `1dc2fbc`, #112: micro, 2,000 record-clustered resamples, seed 0, rows in (id, question)
+  order), as the Brier interval; and round 28's registered temperature rule and confirmation stages
+  (`experiments/rounds/r28.json` and PLAN.md, Kev `ebc8024`, #199). A refitted temperature is written only when, on the judge
+  rows pooled, its Brier score is lower with a 95% upper bound below 0 and its ECE is lower, no judge or guard panel's ECE
+  rises by more than 0.005, and then, scored only once that passes, ECE falls on every `--confirm` file (the tests stage) and
+  Brier rises by at most 0.005 with accuracy identical on every `--locked` file (the locked stage). D1A's changes: panels are
+  rows files given per call, not a registered spec; rows are keyed by their file, so two D1A partitions' `custom/<line>` ids
+  never share a cluster, and each row is paired with itself at the other temperature, ordered by (id, question) and then by
+  file, so the Brier interval equals Kev's `paired()` wherever no source name spans two files (those are resampled as one
+  stratum per file); the confirmation stages run in the same call, once the rule passes. Round 29, registered in the same Kev
+  commit, is not ported: it selects among 9B checkpoints under round 24's audited rule, on accuracy, with a calibration guard of
+  ECE at most the parent's + 0.01 and a locked stage of accuracy at least the parent's − 1 pp and Brier at most + 0.005.
 
 - **Gemma 4 support** (from the jonpol01/kev fork, by John Soliva): Gemma 4 E2B / E4B bases in `d1a/backends/torch.py` and
   `d1a/training/train.py` (Gemma's reserved `<unused0>`–`<unused4>` tokens as delimiters with a leading `<bos>`, a packed mask for
@@ -111,6 +126,7 @@ d1a/backends/cuda_graphs.py
 d1a/backends/fused_qwen35.py
 d1a/backends/mlx.py
 d1a/serving/serve.py
+d1a/training/temperature_gate.py
 pyproject.toml
 scripts/mlx_parity.py
 tests/test_api.py
