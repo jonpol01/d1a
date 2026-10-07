@@ -299,6 +299,7 @@ def test_a_run_stopped_and_resumed_ends_with_the_same_bits(hybrid_base, tmp_path
     metrics = [read_json(tmp_path / d / "training_metrics.json") for d in ("whole", "split")]
     norms = [m["grad_norm"] for m in metrics]
     assert norms[0] == norms[1] and [e["epoch"] for e in norms[0]] == [0, 1] and sum(e["steps"] for e in norms[0]) == metrics[0]["optimizer_steps"]
+    assert all(0 < e["mean"] <= e["max"] for e in norms[0])   # real norms from the run: a summary of zeros would pass the rest
 
     assert ("none pairs: " in log) == (name == "none_pair_gate")
     if name == "pass_tokens_max":   # epoch 0, where the split run stops, has more micro-batches than its 4 steps x --accum 2
