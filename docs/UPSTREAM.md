@@ -35,7 +35,8 @@ the Apache License 2.0. This file records where D1A's code came from and what D1
   `tests/test_encoding.py`, `tests/test_unit.py` and `tests/test_model.py`.
 - **Training robustness**: `d1a/training/train.py` writes resume points for LoRA runs (`--save_every_steps`,
   `--save_every_minutes`, `--resume`; Kev had them for full-weight runs only; now D1A's own `d1a/training/resume.py`), and a non-finite loss or gradient skips
-  its micro-batch or step (up to `MAX_NONFINITE` in a row) instead of ending the run.
+  its micro-batch or step (up to `MAX_NONFINITE` in a row) instead of ending the run; tested in `tests/test_train.py`
+  (resumes, a NaN gradient) and `tests/test_unit.py` (a non-finite loss).
 - **MLX backend for Gemma 4 and MLX exports**: `d1a/backends/mlx.py` runs Gemma 4 bases on Apple Silicon (row form on
   replicated plain and sliding-window caches, KV-shared layers) besides Kev's Qwen3.5 path, and writes merged, optionally
   quantized export folders (`scripts/export_mlx.py`) that `d1a/backends/checkpoint.py` loads from `d1a_config.json` and
@@ -98,7 +99,8 @@ the Apache License 2.0. This file records where D1A's code came from and what D1
   - `d1a/training/calibrate.py`: replaces Kev's calibration script; `scripts/calibrate_checkpoint.py` is now a wrapper around it.
   - `d1a/backends/checkpoint.py`: the same decisions, refusals and on-disk formats; its tests are `tests/test_checkpoint.py`.
   - `d1a/backends/shared_prefix.py`: the same branch hidden states and gradients, bit for bit, on a tiny Qwen3.5 (eager and
-    SDPA, padded and unpadded states, checkpointing on and off); checked by `scripts/equivalence/shared_prefix.py`.
+    SDPA, padded and unpadded states, checkpointing on and off); checked by `scripts/equivalence/shared_prefix.py`; its tests
+    are `tests/test_shared_prefix.py`.
   - `d1a/training/data.py`: the same records from the same seeds (every draw in the same order); its tests are `tests/test_data.py`.
   - `d1a/eval/metrics.py`: bit-identical results; its tests are `tests/test_metrics.py`.
   - `d1a/eval/predictors.py`: the same predictions, requests, retries and rotation averages; checked by
