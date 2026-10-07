@@ -207,9 +207,24 @@ def unmet(reqs):
     return out
 
 
-def suite_list(suites, card):
-    """--suites, plus the five card suites with --card-suites (each once, in that order)."""
-    return list(dict.fromkeys([*filter(None, suites.split(",")), *(CARD_SUITES if card else ())]))
+def eval_partitions(root=ROOT):
+    """Every D1A suite's evaluation partitions as <suite>:<partition>, leaving out the composites whose parts are scored
+    anyway: a partition named "all", or named <a>-<b> after two others in its manifest."""
+    out = []
+    for manifest in sorted((Path(root) / "evals/d1a").glob("*/manifest.json")):
+        parts = json.loads(manifest.read_text(encoding="utf-8"))["partitions"]
+        for name, p in parts.items():
+            composite = name == "all" or any(name == f"{a}-{b}" for a in parts for b in parts if a != b)
+            if p["role"] == "eval" and not composite:
+                out.append(f"{manifest.parent.name}:{name}")
+    return out
+
+
+def suite_list(suites, card, every=False):
+    """--suites, plus the five card suites with --card-suites or --all-suites, plus every D1A evaluation partition with
+    --all-suites (each once, in that order)."""
+    return list(dict.fromkeys([*filter(None, suites.split(",")), *(CARD_SUITES if card or every else ()),
+                               *(eval_partitions() if every else ())]))
 
 
 def module(path, name):
@@ -288,7 +303,9 @@ def latency(records):
 def benchmark(path, run, suite, out):
     if (Path(out) / "report.json").exists():
         return
-    arg = ["--data", str(ROOT / "evals/d1a" / suite)] if ":" in suite else ["--suite", str(ROOT / "evals" / suite)]
+    # a D1A partition at the serving context, as the server would read it: at the training context 770 of pr-labels:test's
+    # 953 PRs were skipped as too long, and the gate scored only the short ones
+    arg = ["--data", str(ROOT / "evals/d1a" / suite), "--context", "serving"] if ":" in suite else ["--suite", str(ROOT / "evals" / suite)]
     out = Path(out)
     shutil.rmtree(out, ignore_errors=True)   # d1a.eval.benchmark refuses an existing --out (an unfinished run left one)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -384,6 +401,8 @@ def main():
     ap.add_argument("--replay", default=str(ROOT / "runs/labeler-replay"), help="the labeler replay kit (labeler-calls.jsonl, questions.json); private, never committed")
     ap.add_argument("--suites", default="", help="comma-separated suites to score too: evals/ directories, or <d1a suite>:<partition>")
     ap.add_argument("--card-suites", action="store_true", help=f"also score the five card suites ({', '.join(CARD_SUITES)}); required for a fine-tune (AGENTS.md)")
+    ap.add_argument("--all-suites", action="store_true", help="score every suite: the card suites and every D1A evaluation partition, "
+                    "with the demos and the labeler replay; the rule for any model or checkpoint change (AGENTS.md)")
     ap.add_argument("--suite-run", help="weights for --suites (default: --run)")
     ap.add_argument("--head-run", help="a new checkpoint: the head server and head suites load these weights, base keeps --run. Changed "
                     "answers are then reported, not failed; suites (no lower accuracy, no worse calibration) and latency still gate it")
@@ -428,7 +447,7 @@ def main():
         lat = latency(records)
         failures += [f for f in [latency_failure(lat["all text"], floor["all text"])] if f]
         report |= {"groups": groups, "latency": lat, "floor": floor}
-        for suite in suite_list(a.suites, a.card_suites):
+        for suite in suite_list(a.suites, a.card_suites, a.all_suites):
             d = out / "suites" / suite.replace("/", "_").replace(":", "_")
             for side, path, run in zip(("base", "head"), (base_dir, head_dir), suite_runs(a.run, a.suite_run, a.head_run)):
                 benchmark(path, run, suite, d / side)
