@@ -1,398 +1,17 @@
 # Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: Gemma 4 tests (from jonpol01/kev); package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); the tests of the removed Modal app and autoresearch left; the d1a.core.api tests rewritten as tests/test_system_one.py; the d1a.training.data tests rewritten as tests/test_data.py; the d1a.backends.checkpoint tests rewritten as tests/test_checkpoint.py; the encoding, mask and pointer-head tests rewritten as tests/test_encoding.py; the serving and pass-sizing tests rewritten as tests/test_serving.py.
-"""Fast tests with no model weights and no server: loading, training and serving.
-Run: uv run --extra serve python -m pytest tests/test_unit.py -q
+# Changes for D1A Copyright 2026 John Soliva: Gemma 4 tests (from jonpol01/kev); package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); the tests of the removed Modal app and autoresearch left; the d1a.core.api tests rewritten as tests/test_system_one.py; the d1a.training.data tests rewritten as tests/test_data.py; the d1a.backends.checkpoint tests rewritten as tests/test_checkpoint.py; the encoding, mask and pointer-head tests rewritten as tests/test_encoding.py; the serving and pass-sizing tests rewritten as tests/test_serving.py; the training tests (epoch planning, --row_budget, non-finite gradients, gradient norms, resume points) rewritten as tests/test_train.py, the shared-prefix tests as tests/test_shared_prefix.py and the long-row LocalPredictor tests as tests/test_predictors.py, on a tiny hybrid Qwen3.5 now built in tests/conftest.py; the soft-target and date-fact test and two unused stand-ins left, their checks made by tests/test_data.py, tests/test_train.py and tests/test_system_one.py.
+"""Fast tests of D1A's additions that have no file of their own, with no real weights: the server's startup checks,
+latency, /metrics and idle unload, media decoding, the presets and MCP tools, the backbone families, Gemma 4's shared
+layers and MLX per-layer embeddings, the training context, calibration's refusals, a non-finite loss, --extra_suites,
+the library against the server, release notes and D1A's suite partitions.
+
+    uv run --extra serve python -m pytest tests/test_unit.py -q
 """
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 import torch
-from d1a.backends.torch import DecisionModel, SPECIAL
-
-
-@pytest.fixture(scope="module")
-def tok():
-    from d1a.backends.torch import load_tokenizer
-    return load_tokenizer("Qwen/Qwen2.5-0.5B")
-
-
-def test_soft_targets_and_date_facts():
-    """Night-2 additions: a question with a soft target materializes to a normalized vector aligned with its keys, survives
-    option permutation, and trains with cross-entropy against the target; date_facts writes one sentence per date pair."""
-    import random, torch
-    from d1a.core.api import date_facts, with_date_facts
-    from d1a.training.data import augment, materialize
-    from d1a.training.train import question_loss
-    req = {"state": "policy text", "questions": {"q": {"type": "choice", "instructions": "Which?", "criteria": {"a": None, "b": None, "c": None}, "label": "a",
-                                                        "target": {"a": 1, "b": 1, "c": 1}, "src": "t"}}}
-    rec = materialize(req)
-    assert rec["questions"][0]["target"] == [1 / 3] * 3
-    aug = augment(req, random.Random(0), p_none=1.0, p_none_distract=0.0, p_distract=0.0)      # would insert a none option for a hard-label question
-    assert set(aug["questions"]["q"]["criteria"]) == {"a", "b", "c"}, "soft-target questions are only permuted"
-    z = torch.tensor([2.0, 0.0, -2.0])
-    assert abs(question_loss(z, rec["questions"][0], "cpu").item() - (-(torch.log_softmax(z, -1) / 3).sum()).item()) < 1e-6
-    assert date_facts("Due July 4, 2026. Received June 26, 2026. Shipped 2026-07-01.") == "June 26, 2026 is 8 days before July 4, 2026. 2026-07-01 is 3 days before July 4, 2026. 2026-07-01 is 5 days after June 26, 2026."
-    assert with_date_facts({"case": "one date: May 1, 2026"}) == {"case": "one date: May 1, 2026"}
-
-
-
-# --- training (d1a.training.train): a 2-layer Qwen3.5 with random weights, no downloads -------------------------------------
-
-@pytest.fixture(scope="module")
-def tiny_base(tmp_path_factory):
-    """A hybrid base (one Gated DeltaNet layer, one attention layer) saved like a Hub snapshot, with a word-level tokenizer
-    that carries Kev's delimiter tokens, and 16 labelled requests."""
-    import json
-    from tokenizers import Tokenizer, models, pre_tokenizers
-    from transformers import PreTrainedTokenizerFast, Qwen3_5ForCausalLM, Qwen3_5TextConfig
-    root = tmp_path_factory.mktemp("tiny")
-    words = "it is charged twice which team billing shipping refund angry the customer".split()
-    vocab = {t: i for i, t in enumerate(["<unk>", "<pad>", *SPECIAL, *words])}
-    tk = Tokenizer(models.WordLevel(vocab, unk_token="<unk>")); tk.pre_tokenizer = pre_tokenizers.Whitespace()
-    config = Qwen3_5TextConfig(vocab_size=len(vocab), hidden_size=32, intermediate_size=64, num_hidden_layers=2, num_attention_heads=2, num_key_value_heads=1,
-                               head_dim=16, linear_num_value_heads=2, linear_num_key_heads=1, linear_key_head_dim=8, linear_value_head_dim=8,
-                               layer_types=["linear_attention", "full_attention"], pad_token_id=1)
-    torch.manual_seed(0)
-    Qwen3_5ForCausalLM(config).to(torch.bfloat16).save_pretrained(root / "base")
-    PreTrainedTokenizerFast(tokenizer_object=tk, unk_token="<unk>", pad_token="<pad>", additional_special_tokens=SPECIAL).save_pretrained(root / "base")
-    rows = [{"state": "the customer is charged twice" + " it" * i, "questions": {
-        "team": {"type": "choice", "instructions": "which team", "criteria": {"billing": None, "shipping": None, "refund": None}, "label": ["billing", "shipping", "refund"][i % 3]},
-        "angry": {"type": "noul", "instructions": "is the customer angry", "label": i % 2 == 0}}} for i in range(16)]
-    (root / "data.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
-    return root
-
-
-def train_tiny(tiny_base, out, *args, monkeypatch=None):
-    import sys
-    from d1a.training import train
-    argv = ["d1a.training.train", "--base", str(tiny_base / "base"), "--data", str(tiny_base / "data.jsonl"), "--device", "cpu", "--batch", "2", "--lr", "1e-3", "--out", str(out), *args]
-    monkeypatch.setattr(sys, "argv", argv)
-    train.main()
-
-
-def test_nonfinite_gradient_never_moves_a_weight(tiny_base, tmp_path, monkeypatch):
-    """A finite loss whose gradient is NaN passes batch_loss's loss check, and no update runs with it: the run skips that
-    optimizer step (counted in training_metrics.json) and finishes."""
-    from d1a.training import train
-    from d1a.eval.suite import read_json
-
-    class NanGrad(torch.autograd.Function):   # the value passes through, its gradient becomes NaN
-        @staticmethod
-        def forward(ctx, x): return x.clone()
-        @staticmethod
-        def backward(ctx, g): return g * float("nan")
-
-    real, calls, updates = train.question_loss, [], []
-    def nan_grad_on_third(*args, **kwargs):   # a question of the first optimizer step
-        calls.append(1); z = real(*args, **kwargs)
-        return NanGrad.apply(z) if len(calls) == 3 else z
-    monkeypatch.setattr(train, "question_loss", nan_grad_on_third)
-    real_step = torch.optim.AdamW.step
-    monkeypatch.setattr(torch.optim.AdamW, "step", lambda self, *a, **k: (updates.append(1), real_step(self, *a, **k))[1])
-    train_tiny(tiny_base, tmp_path / "lora", "--accum", "2", "--max_steps", "2", "--lora", "4", monkeypatch=monkeypatch)
-    assert updates == [1] and read_json(tmp_path / "lora" / "training_metrics.json")["nonfinite_skipped"] == {"steps": 1}   # step 1 skipped, step 2 ran
-
-
-def test_none_pair_max_state_pairs_only_short_states_and_the_plan_counts_them(tiny_base):
-    """--none_pair_max_state: the records that train none pairs are exactly the eligible ones whose state (encode's count,
-    <state> included) is at most N tokens, drawn from each record's own stream (the same set every call, a new draw per
-    epoch); encode_batch gives exactly those records their two siblings; microbatch_plan counts the siblings in a record's
-    cost, and without pairs cuts the same runs as before (the default path is today's)."""
-    from collections import Counter
-    from types import SimpleNamespace
-    from d1a.training.data import load_records, materialize
-    from d1a.backends.torch import MAX_STATE, encode, load_tokenizer
-    from d1a.training.train import encode_batch, microbatch_plan, none_pairs, state_token_counts
-    tok = load_tokenizer(str(tiny_base / "base"))
-    reqs = load_records(tiny_base / "data.jsonl")   # states of 6 + i tokens, each with a 3-option Choice
-    counts = state_token_counts(tok, reqs)
-    assert [counts[id(r)] for r in reqs] == [sum(s == 0 for s in encode(tok, materialize(r))["seg"]) for r in reqs] == [6 + i for i in range(16)]
-    knobs = dict(seed=0, p_none=0.0, p_none_distract=0.0, p_distract=0.0, max_state=MAX_STATE, row_budget=0, shared_prefix=1)
-    a = SimpleNamespace(**knobs, p_none_pair=1.0, none_pair_max_state=10)
-    everything = 100   # a gate every state passes
-    short = {id(r) for r in reqs if counts[id(r)] <= 10}
-    assert none_pairs(a, reqs, 0, counts) == short and len(short) == 5
-    noul = [{**r, "questions": {"angry": r["questions"]["angry"]}} for r in reqs]   # no eligible Choice: no pair
-    assert none_pairs(a, noul, 0, state_token_counts(tok, noul)) == set()
-    half = SimpleNamespace(**{**vars(a), "p_none_pair": 0.5, "none_pair_max_state": everything})
-    drawn = [none_pairs(half, reqs, ep, counts) for ep in (0, 0, 1)]
-    assert drawn[0] == drawn[1] and drawn[0] != drawn[2] and 0 < len(drawn[0]) < 16
-    model = DecisionModel(str(tiny_base / "base"), tok, "cpu")
-    batch = encode_batch(model, tok, a, reqs, 0, short)
-    assert Counter(v.request_id for v in batch) == Counter({r["_meta"]["id"]: 3 if id(r) in short else 1 for r in reqs})
-    assert len(encode_batch(model, tok, SimpleNamespace(**{**knobs, "p_none_pair": 0.0}), reqs, 0)) == 16   # pairs None: today's draw
-    plan_knobs = SimpleNamespace(batch=2, accum=2, length_sort=1, shared_prefix=1)
-    plain = microbatch_plan(reqs, plan_knobs)
-    assert microbatch_plan(reqs, plan_knobs, set()) == plain
-    paired = microbatch_plan(reqs, plan_knobs, short)
-    assert paired != plain and [len(c) for c, _, _ in paired] != [len(c) for c, _, _ in plain]
-    assert sorted(r["_meta"]["id"] for c, _, _ in paired for r in c) == sorted(r["_meta"]["id"] for c, _, _ in plain for r in c)
-
-
-def test_plan_shapes_are_the_encoded_shapes(tiny_base):
-    """--pass_tokens_max plans on plan_shapes: per record, the (state, branches) token shapes of exactly the variants
-    encode_batch then encodes (augmented, none-pair siblings included), with or without the gate's pairs."""
-    from types import SimpleNamespace
-    from d1a.training.data import load_records
-    from d1a.backends.torch import MAX_STATE, load_tokenizer
-    from d1a.training.train import encode_batch, none_pairs, plan_shapes, shape, state_token_counts
-    tok = load_tokenizer(str(tiny_base / "base"))
-    model = DecisionModel(str(tiny_base / "base"), tok, "cpu")
-    reqs = load_records(tiny_base / "data.jsonl")
-    counts = state_token_counts(tok, reqs)
-    a = SimpleNamespace(seed=0, p_none=0.3, p_none_distract=0.3, p_distract=0.3, p_none_pair=0.5, none_pair_max_state=12,
-                        max_state=MAX_STATE, row_budget=0, shared_prefix=1)
-    for pairs in (none_pairs(a, reqs, 1, counts), None):
-        shapes = plan_shapes(model, tok, a, reqs, 1, pairs, counts)
-        assert all(shapes[id(r)] == [shape(v.enc) for v in encode_batch(model, tok, a, [r], 1, pairs)] for r in reqs)
-        assert any(len(s) == 3 for s in shapes.values()) and any(len(s) == 1 for s in shapes.values())
-
-
-def test_pass_tokens_max_caps_every_pass():
-    """--pass_tokens_max: on token shapes, a step whose costliest run is over the ceiling gets more micro-batches until no
-    pass is over it; each step still trains its own records once; a record over the ceiling on its own is refused;
-    without shapes the plan is today's."""
-    from d1a.training.train import microbatch_plan, pass_tokens
-    # four steps of 4 records (2 x 2) and a last step of 3; the short records at indices divisible by 3 carry siblings
-    sizes = [300, 290, 280, 270, 260, 5, 6, 7, 8, 9, 12, 60, 70, 15, 25, 35, 400, 390, 7]
-    reqs = [{"_meta": {"id": f"r{i}"}, "state": "s" * n, "questions": {"q": {"instr": "x"}}} for i, n in enumerate(sizes)]
-    shapes = {id(r): [(n, [4])] + ([(n, [5]), (n, [5])] if n < 100 and i % 3 == 0 else []) for i, (r, n) in enumerate(zip(reqs, sizes))}
-    cost = lambda chunk: pass_tokens([s for r in chunk for s in shapes[id(r)]], True)
-    a = SimpleNamespace(batch=2, accum=2, length_sort=1, shared_prefix=1, pass_tokens_max=450)
-    plan = microbatch_plan(reqs, a, None, shapes)
-    free = microbatch_plan(reqs, SimpleNamespace(**{**vars(a), "pass_tokens_max": 0}), None, shapes)
-    assert max(cost(c) for c, _, _ in plan) <= 450 < max(cost(c) for c, _, _ in free) and len(plan) > len(free) == 10
-    ends = [k for k, (_, _, e) in enumerate(plan) if e]
-    steps = [sorted(r["_meta"]["id"] for c, _, _ in plan[lo:hi + 1] for r in c) for lo, hi in zip([0] + [k + 1 for k in ends], ends)]
-    assert steps == [sorted(r["_meta"]["id"] for r in reqs[k:k + 4]) for k in range(0, 19, 4)]
-    assert [plan[k][1] for k in ends] == [4, 4, 4, 4, 3]   # each step's normaliser: its own records
-    with pytest.raises(ValueError, match="r16"):
-        microbatch_plan(reqs, SimpleNamespace(**{**vars(a), "pass_tokens_max": 400}), None, shapes)   # r16 alone: 400 + 4
-    assert microbatch_plan(reqs, a) == microbatch_plan(reqs, SimpleNamespace(batch=2, accum=2, length_sort=1, shared_prefix=1))
-
-
-def test_pass_tokens_max_refuses_an_attention_only_base(tiny_base, tmp_path, monkeypatch):
-    """pass_tokens measures the row form and the shared prefix, which a hybrid backbone always runs; an attention-only one
-    runs the packed mask (rows_form) for records under ROW_PASS_TOKENS, a cost the ceiling does not see, so d1a.training.train
-    refuses the flag there once the model is built (and trains the hybrid tiny base with it)."""
-    import shutil
-    from transformers import Qwen3_5ForCausalLM, Qwen3_5TextConfig
-    base = tmp_path / "attn"
-    config = Qwen3_5TextConfig.from_pretrained(tiny_base / "base")
-    config.layer_types = ["full_attention", "full_attention"]
-    torch.manual_seed(0)
-    Qwen3_5ForCausalLM(config).to(torch.bfloat16).save_pretrained(base)
-    for f in (tiny_base / "base").iterdir():
-        if "token" in f.name or f.name == "special_tokens_map.json": shutil.copy(f, base / f.name)
-    args = ("--length_sort", "1", "--pass_tokens_max", "160", "--lora", "4", "--max_steps", "1")
-    with pytest.raises(SystemExit, match="needs a hybrid backbone"):
-        train_tiny(tiny_base, tmp_path / "refused", "--base", str(base), *args, monkeypatch=monkeypatch)
-    train_tiny(tiny_base, tmp_path / "hybrid", *args, monkeypatch=monkeypatch)
-    assert (tmp_path / "hybrid" / "head.pt").exists()
-
-
-@pytest.mark.parametrize("shared", [0, 1])
-def test_row_budget_changes_passes_not_gradients(tiny_base, shared):
-    """--row_budget splits a micro-batch into forward/backward passes (here every record by question, each part carrying
-    half of its record's mean); the accumulated gradient equals the single pass's, in the row form and through a shared
-    prefix (whose pass cost counts the state once)."""
-    import contextlib
-    from d1a.training.data import load_records
-    from d1a.backends.torch import MAX_STATE, load_tokenizer
-    from d1a.training.train import batch_loss, encode_batch, row_passes
-    tok = load_tokenizer(str(tiny_base / "base"))
-    model = DecisionModel(str(tiny_base / "base"), tok, "cpu"); model.train()
-    reqs = load_records(tiny_base / "data.jsonl")[:4]
-    knobs = dict(seed=0, p_none=0.0, p_none_distract=0.0, p_distract=0.0, p_none_pair=0.0, max_state=MAX_STATE,
-                 shared_prefix=shared)
-    grads, sizes = [], []
-    for budget in (0, 16):
-        a = SimpleNamespace(**knobs, row_budget=budget)
-        batch = encode_batch(model, tok, a, reqs, 0); model.zero_grad()
-        passes = row_passes(batch, budget, shared)
-        for part in passes:
-            batch_loss(model, a, part, "cpu", contextlib.nullcontext())[0].backward()
-        grads.append([p.grad.clone() for p in model.parameters() if p.grad is not None]); sizes.append((len(batch), len(passes), sum(v.share for v in batch)))
-    assert sizes == [(4, 1, 4.0), (8, 8, 4.0)]
-    scale = max(g.abs().max() for g in grads[0])
-    assert all(torch.allclose(a, b, atol=1e-5 * scale) for a, b in zip(*grads))   # fp32 summation order (the shared prefix pads states differently per pass)
-
-
-@pytest.mark.parametrize("checkpointing,lora", [(False, 0), (True, 0), (True, 4)])
-def test_shared_prefix_equals_rows(tiny_base, checkpointing, lora):
-    """d1a.backends.shared_prefix (each state once, branches continuing from it: attention keys and values, the DeltaNet conv
-    window and recurrent state) gives the row form's logits and gradients in fp32, over states of unequal length (left
-    padding) and 1-4 questions; with gradient checkpointing each layer's two passes are recomputed together. With a LoRA
-    (d1a.training.train --shared_prefix 1) the same holds for the adapter's gradients (dropout off: eval mode,
-    so the two passes draw no different masks)."""
-    assert_shared_prefix_equals_rows(tiny_base, checkpointing, lora, ((5, 3), (17, 4), (1, 2), (40, 1)))
-
-
-@pytest.mark.parametrize("checkpointing", [False, True])
-def test_shared_prefix_unpadded_states_run_without_a_state_mask(tiny_base, checkpointing, monkeypatch):
-    """Under SDPA, states of one length (a long record alone in its micro-batch) run causal with no explicit state mask
-    (a 64k-token state's would be 4 GB, and the flash kernel takes none): same logits and gradients as the row form. Mixed
-    lengths still build the mask."""
-    import d1a.backends.shared_prefix as SP
-    shapes = []
-    real = SP._masks
-    monkeypatch.setattr(SP, "_masks", lambda allow, dtype, attn: (shapes.append(tuple(allow.shape)), real(allow, dtype, attn))[1])
-    assert_shared_prefix_equals_rows(tiny_base, checkpointing, 0, ((23, 3), (23, 1)), attn="sdpa")
-    assert shapes and all(s[1] != s[2] for s in shapes)   # branch masks only: [branches, Lb, Ls + Lb]
-    shapes.clear()
-    assert_shared_prefix_equals_rows(tiny_base, checkpointing, 0, ((23, 3), (9, 1)), attn="sdpa")
-    assert any(s[1] == s[2] == 23 + 1 for s in shapes)   # the padded pair's state mask
-
-
-def test_local_predictor_scores_long_rows_through_the_shared_prefix(tiny_base, tmp_path, monkeypatch):
-    """d1a.eval.benchmark's predictor runs a record whose longest row exceeds d1a.core.encoding.ROW_PASS_TOKENS (a state past 16k
-    tokens) on a hybrid torch backbone through the shared prefix (the state once, not once per question): same logits as
-    the row form. On CUDA such a record also runs under SDPA's flash / memory-efficient kernels, off the fp32-exact
-    contract, so it is labelled: the prediction and its rows carry `kernels`, report.json counts them in `long_rows`. A
-    run with no long row has neither (existing rows and reports are unchanged); on the CPU a long row is exact and
-    unlabelled."""
-    from d1a.eval import predictors as P
-    from d1a.eval.benchmark import evaluate_records
-    from d1a.backends.checkpoint import LoadOptions
-    from d1a.training.data import load_records
-    from d1a.backends.torch import ROW_PASS_TOKENS
-    train_tiny(tiny_base, tmp_path / "lora", "--lora", "4", "--max_steps", "1", monkeypatch=monkeypatch)
-    predictor = P.LocalPredictor(str(tmp_path / "lora"), "cpu", LoadOptions(dtype=torch.float32, temperature=1.0))
-    record = load_records(tiny_base / "data.jsonl")[7]
-    record = {**record, "_meta": {**record["_meta"], "group_id": "g", "variant": "clean"}, "questions": {qid: {**q, "src": "tiny"} for qid, q in record["questions"].items()}}
-    short_report, short_rows = evaluate_records([record], predictor, tmp_path / "short")
-    assert "long_rows" not in short_report and not any("kernels" in r for r in short_rows)
-    rows = predictor(record)
-    real, shared = predictor.model.forward_batch, []
-    monkeypatch.setattr(predictor.model, "forward_batch", lambda encs, shared_prefix=False: (shared.append(shared_prefix), real(encs, shared_prefix))[1])
-    monkeypatch.setattr(P, "ROW_PASS_TOKENS", 8)   # this record's rows (~20 tokens) are now "long"
-    long = predictor(record)
-    assert shared == [True] and long["input_tokens"] == rows["input_tokens"] and "kernels" not in long and "kernels" not in rows
-    for qid, z in rows["logits"].items():
-        assert long["logits"][qid] == pytest.approx(z, abs=1e-5)
-    monkeypatch.setattr(predictor, "device", "cuda"); monkeypatch.setattr(P, "sync", lambda device: None)   # the CUDA policy, on CPU tensors
-    report, scored = evaluate_records([record], predictor, tmp_path / "long")
-    assert shared == [True, True] and [r["kernels"] for r in scored] == [P.LONG_ROW_KERNELS] * 2
-    assert report["long_rows"] == {"count": 2, "records": 1, "kernels": [P.LONG_ROW_KERNELS], "threshold": ROW_PASS_TOKENS}
-    assert [x for r in scored for x in r["logits"]] == pytest.approx([x for z in rows["logits"].values() for x in z.values()], abs=1e-5)
-
-
-def test_local_predictor_long_rows_on_mlx_use_its_forward(monkeypatch):
-    """The MLX backend (what a hybrid checkpoint resolves to on Apple Silicon) has no forward_batch and its forward already
-    runs the state once: a long record goes through model.forward, unlabelled (no CUDA kernels involved)."""
-    from types import SimpleNamespace
-    from d1a.eval import predictors as P
-    calls = []
-    class MLXShaped:   # the scoring interface d1a.backends.mlx.MLXDecisionModel exposes, minus everything unused here
-        backend, hybrid, head = "mlx", True, SimpleNamespace(temperature=1.0)
-        def encode(self, tok, rec, **kw):
-            return {"ids": [1] * 30 + [2, 3, 4], "seg": [0] * 30 + [1, 1, 1], "pos": list(range(33)), "decide_idx": [32], "opt_idx": [[31]]}
-        def forward(self, enc):
-            calls.append(len(enc["ids"])); return [torch.tensor([0.0])]
-    predictor = object.__new__(P.LocalPredictor)
-    predictor.tok, predictor.model, predictor.temperature, predictor.device = None, MLXShaped(), 1.0, "mps"
-    predictor.context = {"max_state": 64, "max_branch": 64, "max_packed": 64}
-    monkeypatch.setattr(P, "ROW_PASS_TOKENS", 8); monkeypatch.setattr(P, "sync", lambda device: None)
-    record = {"state": "x", "questions": {"n": {"type": "choice", "instructions": "q", "criteria": {"a": None}, "label": "a", "src": "t"}}}
-    out = predictor(record)
-    assert calls == [33] and out["probabilities"] == {"n": {"a": 1.0}} and "kernels" not in out
-
-
-def assert_shared_prefix_equals_rows(tiny_base, checkpointing, lora, shapes, attn=None):
-    """(state words, questions) per record -> the shared prefix's logits and gradients equal the row form's in fp32."""
-    import random
-    from d1a.backends.torch import load_tokenizer
-    tok, rng = load_tokenizer(str(tiny_base / "base")), random.Random(0)
-    words = "it is charged twice which team billing shipping refund angry the customer".split()
-    text = lambda n: " ".join(rng.choice(words) for _ in range(n))
-    recs = [{"state": text(n), "questions": [{"instr": text(rng.randint(1, 5)), "options": [text(rng.randint(1, 3)) for _ in range(rng.randint(2, 4))], "label": 0}
-                                              for _ in range(q)]} for n, q in shapes]
-    torch.manual_seed(0)
-    model = DecisionModel(str(tiny_base / "base"), tok, "cpu", lora=lora or None, attn=attn)
-    model.train(not lora)
-    if checkpointing: model.lm.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
-    encs, results = [model.encode(tok, r) for r in recs], []
-    for shared in (False, True):
-        model.zero_grad()
-        logits = [z for zs in model.forward_batch(encs, shared) for z in zs]
-        sum(torch.log_softmax(z, -1)[0] * (i + 1) for i, z in enumerate(logits)).backward()
-        results.append((torch.cat(logits).detach(), {n: p.grad.clone() for n, p in model.named_parameters() if p.grad is not None}))
-    (rows, g_rows), (prefix, g_prefix) = results
-    scale = max(g.abs().max() for g in g_rows.values())
-    assert len(logits) == sum(q for _, q in shapes) and torch.allclose(rows, prefix, atol=1e-5) and g_rows.keys() == g_prefix.keys()
-    assert all(torch.allclose(g_rows[k], g_prefix[k], atol=1e-5 * scale) for k in g_rows)
-    assert not lora or any("lora_" in k for k in g_rows)
-
-
-def _run_train(args, out):
-    import subprocess, sys
-    done = subprocess.run([sys.executable, "-m", "d1a.training.train", *args, "--out", str(out)], capture_output=True, text=True)
-    assert done.returncode == 0, done.stderr[-3000:]
-    return done.stdout
-
-
-@pytest.mark.parametrize("gate", [(), ("--none_pair_max_state", "10"),
-                                  # just above the costliest tiny record alone (siblings included: 157 padded tokens), so some steps split
-                                  ("--pass_tokens_max", "160")])
-def test_resume_is_bit_identical_under_length_sort(tiny_base, tmp_path, gate):
-    """A --length_sort run stopped after step 3 and continued with --resume 1 ends with the same bits as an uninterrupted
-    run, across an epoch boundary; with --none_pair_max_state too (the continuation deals the same gated pairs), and with
-    --pass_tokens_max (it plans the same extra micro-batches)."""
-    import re
-    from safetensors.torch import load_file
-    from d1a.backends.checkpoint import read_meta
-    args = ["--base", str(tiny_base / "base"), "--data", str(tiny_base / "data.jsonl"), "--device", "cpu", "--batch", "2", "--accum", "2",
-            "--lr", "1e-3", "--epochs", "2", "--p_none_pair", "0.5", "--length_sort", "1", "--shared_prefix", "1", "--lora", "4", *gate]
-    out = _run_train(args, tmp_path / "whole")
-    assert ("none pairs: " in out) == ("--none_pair_max_state" in gate)
-    if "--pass_tokens_max" in gate:   # the first epoch (where the run stops) has more micro-batches than --accum per step; no pass is over
-        ceiling = int(gate[-1])
-        plans = [tuple(map(int, m)) for m in re.findall(r"plan: (\d+) micro-batches for (\d+) steps \(--accum \d+\); the plan's largest pass (\d+)", out)]
-        assert len(plans) == 2 and plans[0][0] > plans[0][1] * 2 and all(largest <= ceiling for _, _, largest in plans), out
-    _run_train([*args, "--save_every_steps", "3", "--stop_after", "3"], tmp_path / "split")
-    assert (tmp_path / "split/resume/latest.json").exists() and not (tmp_path / "split/adapter_model.safetensors").exists()
-    _run_train([*args, "--resume", "1"], tmp_path / "split")
-    a, b = load_file(tmp_path / "whole/adapter_model.safetensors"), load_file(tmp_path / "split/adapter_model.safetensors")
-    head_a, head_b = read_meta(tmp_path / "whole").head, read_meta(tmp_path / "split").head
-    assert all(torch.equal(a[k], b[k]) for k in a) and all(torch.equal(head_a[k], head_b[k]) for k in head_a)
-    assert not (tmp_path / "split/resume").exists()   # the finished checkpoint supersedes the resume point
-    from d1a.eval.suite import read_json
-    norms = [read_json(tmp_path / d / "training_metrics.json")["grad_norm"] for d in ("whole", "split")]
-    assert norms[0] == norms[1] and [e["epoch"] for e in norms[0]] == [0, 1]   # carried across the resume point
-
-
-def _parse_train(monkeypatch, *args):
-    import sys
-    from d1a.training import train
-    monkeypatch.setattr(sys, "argv", ["d1a.training.train", "--out", "/nonexistent/kev-test-run", *args])
-    return train.parse_args()
-
-
-def test_grad_norm_in_training_metrics(tiny_base, tmp_path, monkeypatch):
-    """training_metrics.json carries, per epoch, the mean and max global gradient norm before clipping and the number of
-    clipped steps."""
-    from d1a.eval.suite import read_json
-    for name, args in (("lora", ("--lora", "4")),):
-        train_tiny(tiny_base, tmp_path / name, *args, "--accum", "1", "--epochs", "2", monkeypatch=monkeypatch)
-        metrics = read_json(tmp_path / name / "training_metrics.json")
-        norms = metrics["grad_norm"]
-        assert [e["epoch"] for e in norms] == [0, 1] and sum(e["steps"] for e in norms) == metrics["optimizer_steps"]
-        assert all(0 < e["mean"] <= e["max"] and 0 <= e["clipped_steps"] <= e["steps"] for e in norms)
-
-
-class _FakeLM:
-    """save_pretrained stand-in for SnapshotWriter tests: fails the first `failures` calls (a full disk), then writes."""
-    def __init__(self, failures=0): self.failures, self.calls = failures, 0
-
-    def save_pretrained(self, out, state_dict=None, max_shard_size=None):
-        self.calls += 1
-        if self.calls <= self.failures: raise OSError(28, "No space left on device")
-        (Path(out) / "model.safetensors").write_bytes(b"weights"); (Path(out) / "config.json").write_text("{}", encoding="utf-8")
-
-
-def _finish(directory):
-    (Path(directory) / "head.pt").write_bytes(b"head")
+from d1a.backends.torch import DecisionModel
 
 
 def test_serve_self_check():
@@ -409,26 +28,9 @@ def test_serve_device_probe():
     assert usable("cpu") and not usable("no-such-device")
 
 
-def test_lora_resume_is_bit_identical(tiny_base, tmp_path):
-    """A LoRA run stopped after step 3 (resume point: the adapter and head tensors, AdamW moments, scheduler, RNG, data
-    position) and continued with --resume 1 ends with the same bits as an uninterrupted run, across an epoch boundary."""
-    from safetensors.torch import load_file
-    from d1a.backends.checkpoint import read_meta
-    args = ["--base", str(tiny_base / "base"), "--data", str(tiny_base / "data.jsonl"), "--device", "cpu", "--batch", "2", "--accum", "2",
-            "--lr", "1e-3", "--epochs", "2", "--lora", "4"]
-    _run_train(args, tmp_path / "whole")
-    _run_train([*args, "--save_every_steps", "3", "--stop_after", "3"], tmp_path / "split")
-    assert (tmp_path / "split/resume/latest.json").exists() and not (tmp_path / "split/adapter_model.safetensors").exists()
-    _run_train([*args, "--resume", "1"], tmp_path / "split")
-    a, b = load_file(tmp_path / "whole/adapter_model.safetensors"), load_file(tmp_path / "split/adapter_model.safetensors")
-    head_a, head_b = read_meta(tmp_path / "whole").head, read_meta(tmp_path / "split").head
-    assert all(torch.equal(a[k], b[k]) for k in a) and all(torch.equal(head_a[k], head_b[k]) for k in head_a)
-    assert not (tmp_path / "split/resume").exists()
-
-
-def test_nonfinite_loss_skips_its_batch(tiny_base, tmp_path, monkeypatch):
+def test_nonfinite_loss_skips_its_batch(train_hybrid, tmp_path, monkeypatch):
     """A non-finite loss skips its micro-batch and the run finishes (counted in training_metrics.json); MAX_NONFINITE in a
-    row end it. (A NaN gradient from a finite loss: test_nonfinite_gradient_never_moves_a_weight.)"""
+    row end it. (A NaN gradient from a finite loss: tests/test_train.py::test_a_nan_gradient_skips_its_optimizer_step.)"""
     from d1a.training import train
     from d1a.eval.suite import read_json
     real, calls = train.batch_loss, []
@@ -439,18 +41,18 @@ def test_nonfinite_loss_skips_its_batch(tiny_base, tmp_path, monkeypatch):
             return real(*args, **kw)
         return batch_loss
     monkeypatch.setattr(train, "batch_loss", flaky({2}))
-    train_tiny(tiny_base, tmp_path / "one", "--lora", "4", monkeypatch=monkeypatch)
+    train_hybrid(tmp_path / "one", "--lora", "4")
     assert read_json(tmp_path / "one/training_metrics.json")["nonfinite_skipped"] == {"microbatches": 1}
     calls.clear(); monkeypatch.setattr(train, "batch_loss", flaky(set(range(2, 2 + train.MAX_NONFINITE))))
-    with pytest.raises(train.NonFinite): train_tiny(tiny_base, tmp_path / "many", "--lora", "4", monkeypatch=monkeypatch)
+    with pytest.raises(train.NonFinite): train_hybrid(tmp_path / "many", "--lora", "4")
 
 
-def test_library_decide_matches_the_server(tiny_base, tmp_path, monkeypatch):
+def test_library_decide_matches_the_server(train_hybrid, tmp_path):
     """d1a.D1A answers a question set exactly as d1a.serving.serve's Server does for the same checkpoint and request."""
     import d1a
     from d1a.core.api import SystemOneRequest
     from d1a.serving.serve import Server
-    train_tiny(tiny_base, tmp_path / "ck", "--lora", "4", "--max_steps", "2", monkeypatch=monkeypatch)
+    train_hybrid(tmp_path / "ck", "--lora", "4", "--max_steps", "2")
     m = d1a.D1A.load(str(tmp_path / "ck"), device="cpu")
     questions = {"team": {"type": "choice", "instr": "which team", "criteria": {"billing": "billing", "shipping": "shipping"}},
                  "angry": {"type": "noul", "instr": "is the customer angry"}}
@@ -505,11 +107,11 @@ def test_mcp_server_tools(monkeypatch):
     assert out["advice"] == {"decision": "allow"} and sent[0][1] is PRESETS["gate"] and "command: gh run view" in sent[0][0]
 
 
-def test_extra_suites_join_the_run(tiny_base, tmp_path, monkeypatch, capsys):
+def test_extra_suites_join_the_run(train_hybrid, tmp_path, capsys):
     """--extra_suites adds a frozen suite's training partition (checked against that suite's own manifest) to the run."""
     from d1a.eval.suite import load_split
     n = len(load_split("evals/devtools-v1", "train"))
-    train_tiny(tiny_base, tmp_path / "out", "--lora", "4", "--max_steps", "1", "--extra_suites", "evals/devtools-v1", monkeypatch=monkeypatch)
+    train_hybrid(tmp_path / "out", "--lora", "4", "--max_steps", "1", "--extra_suites", "evals/devtools-v1")
     out = capsys.readouterr().out
     assert f"extra suite devtools-v1: {n} training records" in out and "training requests" in out
 
@@ -569,34 +171,6 @@ def test_media_audio_is_mono_16k_and_bounded():
     assert out.ndim == 1 and len(out) == int(1.5 * SAMPLE_RATE) and abs(float(out.mean()) - 0.25) < 1e-3
     with pytest.raises(ValueError):
         decode_audio(wav(MAX_AUDIO_S + 1, 8_000, 1))
-
-
-def test_pass_tokens_max_refusals(monkeypatch, capsys):
-    """The ceiling caps the passes --length_sort plans: refused without it and with --row_budget."""
-    for extra in ((), ("--length_sort", "1", "--row_budget", "8192")):
-        with pytest.raises(SystemExit):
-            _parse_train(monkeypatch, "--pass_tokens_max", "40960", *extra)
-        assert "--pass_tokens_max caps" in capsys.readouterr().err
-    assert _parse_train(monkeypatch, "--pass_tokens_max", "40960", "--length_sort", "1").pass_tokens_max == 40960
-
-
-def test_micro_batches_balance_length():
-    """--length_sort's micro-batch plan: a step's records are cut in length order (its long records share the costliest
-    micro-batch, its short ones the other) and each step holds its own records once; the plain plan cuts --batch
-    consecutive records."""
-    from types import SimpleNamespace
-    from d1a.training.train import microbatch_plan
-    reqs = [{"state": "s" * n, "questions": {"q": {"instr": "x"}}} for n in (1, 90, 5, 70, 3, 80, 2, 4, 6, 7)]
-    knobs = lambda sort: SimpleNamespace(batch=2, accum=2, length_sort=sort, shared_prefix=1)
-    plain = microbatch_plan(reqs, knobs(0))
-    assert [len(c) for c, _, _ in plain] == [2] * 5 and [(n, ends) for _, n, ends in plain] == [(4, False), (4, True), (4, False), (4, True), (2, True)]
-    balanced = microbatch_plan(reqs, knobs(1))
-    assert len(balanced) == 5 and [ends for _, _, ends in balanced] == [False, True, False, True, True]
-    for k in (0, 2):   # each step's two micro-batches hold exactly its four records, long ones first
-        assert sorted(id(r) for c, _, _ in balanced[k:k + 2] for r in c) == sorted(id(r) for r in reqs[2 * k:2 * k + 4])
-        long, short = ([len(r["state"]) for r in c] for c, _, _ in balanced[k:k + 2])
-        assert min(long) > max(short)
-    assert [len(r["state"]) for r in balanced[0][0]] == [90, 70] and [len(r["state"]) for r in balanced[2][0]] == [80]
 
 
 def test_max_state_lifts_row_and_packed_limits_together():
@@ -718,14 +292,15 @@ def test_idle_server_unloads_and_models_never_loads_it(monkeypatch):
     assert loaded[0]() is None   # closed and freed
 
 
-def test_media_span_joins_the_state_and_leaves_every_branch_as_it_was(tok):
+def test_media_span_joins_the_state_and_leaves_every_branch_as_it_was():
     # with_media: the photo's tokens go after <state>; each question's branch must be the same tokens with the same readout
     # offsets, its positions shifted by the span, and the prefix cache must not key the request by its token ids (two
     # photos of one size have the same placeholder ids)
     import numpy as np
     from d1a.serving.media import with_media
-    from d1a.backends.torch import encode, layout, rows_of
+    from d1a.backends.torch import encode, layout, load_tokenizer, rows_of
     from d1a.serving.serve import PrefixCache
+    tok = load_tokenizer("Qwen/Qwen2.5-0.5B")
     rec = {"state": "left at the door", "questions": [{"instr": "Damaged?", "options": ["yes", "no"], "label": 0}]}
     enc = encode(tok, rec)
     n_head = len(layout(tok)[0]) + 1

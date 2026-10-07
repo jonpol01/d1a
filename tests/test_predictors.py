@@ -1,11 +1,18 @@
-"""d1a.eval.predictors: scoring through a remote System One endpoint (RemotePredictor) and test-time order averaging of
-choice options (RotationAveraged). No model and no network: the endpoint and the predictor are stand-ins."""
+"""d1a.eval.predictors: scoring through a remote System One endpoint (RemotePredictor), test-time order averaging of
+choice options (RotationAveraged), and how a local checkpoint (LocalPredictor) scores a record too long for the exact
+kernels. No network: the endpoint is a stand-in; the local model is a one-step LoRA of tests/conftest.py's hybrid base
+or a stand-in for the MLX backend."""
 import json
 import math
 
 import pytest
+import torch
 
+from d1a.backends.checkpoint import LoadOptions
 from d1a.core.api import question_keys
+from d1a.core.encoding import ROW_PASS_TOKENS
+from d1a.eval import predictors
+from d1a.eval.benchmark import evaluate_records
 from d1a.eval.predictors import RemotePredictor, RotationAveraged
 
 RECORD = {"state": "s", "questions": {
@@ -79,3 +86,72 @@ def test_averaging_over_every_rotation_removes_a_position_bias():
     assert one["probabilities"]["yes"] == pytest.approx(position_biased(record)["probabilities"]["yes"])   # yes/no keeps its order
     with pytest.raises(ValueError):
         RotationAveraged(position_biased, 1)
+
+
+# --- LocalPredictor: a record longer than ROW_PASS_TOKENS ----------------------------------------------------------------
+
+def suite_record(record):
+    """A labelled request shaped like a frozen suite's record, which d1a.eval.benchmark scores."""
+    meta = {"id": "long-1", "source": "tiny", "group_id": "g", "variant": "clean"}
+    return {**record, "_meta": meta, "questions": {qid: {**q, "src": "tiny"} for qid, q in record["questions"].items()}}
+
+
+def test_a_long_record_on_a_hybrid_torch_model_runs_its_state_once(train_hybrid, hybrid_base, tmp_path, monkeypatch):
+    """A record whose longest row is over ROW_PASS_TOKENS runs through the shared prefix (its state once) with the row
+    form's logits. Only on CUDA does it leave the fp32-exact kernels, and then the prediction, its benchmark rows and the
+    report's long_rows say so; a run without a long record carries none of it."""
+    from d1a.training.data import load_records
+    run = train_hybrid(tmp_path / "checkpoint", "--lora", "4", "--max_steps", "1")
+    local = predictors.LocalPredictor(str(run), "cpu", LoadOptions(dtype=torch.float32, temperature=1.0))
+    record = suite_record(load_records(hybrid_base / "data.jsonl")[7])
+    shared, real = [], local.model.forward_batch
+    monkeypatch.setattr(local.model, "forward_batch", lambda encs, shared_prefix=False: shared.append(shared_prefix) or real(encs, shared_prefix))
+
+    report, rows = evaluate_records([record], local, tmp_path / "short")
+    assert shared == [False] and "long_rows" not in report and not any("kernels" in row for row in rows)
+    exact = local(record)
+
+    monkeypatch.setattr(predictors, "ROW_PASS_TOKENS", 8)   # this record's rows are about 20 tokens
+    shared.clear()
+    long = local(record)
+    assert shared == [True] and "kernels" not in long and long["input_tokens"] == exact["input_tokens"]
+    for qid, logits in exact["logits"].items():
+        assert long["logits"][qid] == pytest.approx(logits, abs=1e-5)
+
+    monkeypatch.setattr(local, "device", "cuda")             # the CUDA policy, run on CPU tensors
+    monkeypatch.setattr(predictors, "sync", lambda device: None)
+    report, rows = evaluate_records([record], local, tmp_path / "long")
+    assert [row["kernels"] for row in rows] == [predictors.LONG_ROW_KERNELS] * len(record["questions"])
+    assert report["long_rows"] == {"count": 2, "records": 1, "kernels": [predictors.LONG_ROW_KERNELS], "threshold": ROW_PASS_TOKENS}
+    assert [x for row in rows for x in row["logits"]] == pytest.approx([x for q in exact["logits"].values() for x in q.values()], abs=1e-5)
+
+
+class MLXStandIn:
+    """What LocalPredictor uses of d1a.backends.mlx.MLXDecisionModel: encode and forward (which already runs a record's state
+    once), and no forward_batch. Records the length of every encoding it is asked to score."""
+    backend, hybrid = "mlx", True
+    head = type("Head", (), {"temperature": 1.0})()
+
+    def __init__(self):
+        self.scored = []
+
+    def encode(self, tok, rec, **limits):
+        state = [0] * 40 + [1]                               # a 41-token state, then one question: <decide> and one option
+        return {"ids": [5] * len(state) + [6, 7], "seg": state + [1, 1], "pos": list(range(len(state) + 2)),
+                "decide_idx": [len(state)], "opt_idx": [[len(state) + 1]]}
+
+    def forward(self, enc):
+        self.scored.append(len(enc["ids"]))
+        return [torch.zeros(1)]
+
+
+@pytest.mark.parametrize("row_pass_tokens", [ROW_PASS_TOKENS, 8])
+def test_on_mlx_every_record_goes_through_its_forward_unlabelled(row_pass_tokens, monkeypatch):
+    local = object.__new__(predictors.LocalPredictor)          # a loaded checkpoint's attributes, without loading one
+    local.tok, local.model, local.temperature, local.device = None, MLXStandIn(), 1.0, "mps"
+    local.context = {"max_state": 64, "max_branch": 64, "max_packed": 64}
+    monkeypatch.setattr(predictors, "ROW_PASS_TOKENS", row_pass_tokens)
+    monkeypatch.setattr(predictors, "sync", lambda device: None)
+    record = {"state": "s", "questions": {"q": {"type": "choice", "instructions": "?", "criteria": {"only": None}, "label": "only", "src": "t"}}}
+    out = local(record)
+    assert local.model.scored == [43] and out["probabilities"] == {"q": {"only": 1.0}} and "kernels" not in out
