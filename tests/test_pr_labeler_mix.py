@@ -66,3 +66,12 @@ def test_a_new_mix_must_cover_every_training_source(monkeypatch, tmp_path):
     monkeypatch.setattr("sys.argv", ["mix.py", "--out", str(tmp_path / "m.jsonl")])
     mix.main()
     assert (tmp_path / "m.jsonl").read_text(encoding="utf-8").count("train-blast") == 10
+
+
+def test_the_hf_job_defaults_pass_the_coverage_check():
+    """train_job.sh forwards its own EXTRA and replay settings to mix.py, so the CLI's new default never applies there:
+    the job's defaults themselves must cover every training source, or every default launch fails (hermes-prbot, #194)."""
+    import re
+    job = (ROOT / "recipes/pr-labeler/train_job.sh").read_text(encoding="utf-8")
+    default = lambda name: re.search(rf'{name}=\$\{{{name}:-"?([^}}"]*)"?\}}', job)[1]
+    assert mix.uncovered(default("EXTRA").split(), int(default("REPLAY_JA")), int(default("REPLAY_ROUTING")), 500) == []
