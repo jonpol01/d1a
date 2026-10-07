@@ -158,6 +158,8 @@ def test_a_batch_mask_is_each_sequence_mask_padded_and_pad_rows_see_no_question(
     batch = branch_mask_batch(segs, "cpu")
     for b, seg in enumerate(segs):
         assert torch.equal(batch[b:b + 1, :, :len(seg), :len(seg)], branch_mask(seg, "cpu"))
+    for b, seg in enumerate(segs):   # no real token attends to a pad column
+        assert not (batch[b, 0, :len(seg), len(seg):] == 0).any()
     short = batch[1, 0] == 0
     for pad in range(len(segs[1]), batch.shape[-1]):
         assert short[pad, pad] and not any(short[pad, j] for j in range(len(segs[1])) if segs[1][j] != 0)
