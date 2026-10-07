@@ -1,5 +1,6 @@
 import json
 import numpy as np
+import pytest
 
 from d1a.training.data import materialize
 from d1a.learning.feedback import FeedbackLog, OutcomeCalibrator, choice_log_loss, choice_pairs, gate, gate_choice, held_out, log_loss, main, pairs, promote, records, split
@@ -211,3 +212,18 @@ def test_serve_logs_decisions_accepts_outcomes_and_applies_a_reloaded_calibrator
     assert "decision_id" not in plain and plain["answers"]["resolved"]["noul"] == 0.8
     with TestClient(serve.app) as client:
         assert client.post("/v1/feedback", json={"decision_id": "x", "labels": {"resolved": True}}).status_code == 404
+
+
+def test_a_recalibrated_choice_answer_carries_its_own_confidence_and_a_score_answer_is_left_alone():
+    """#195: the served answer must not contradict itself. A choice answer's confidence is read off the recalibrated
+    probabilities; a score answer, which also carries probabilities by level, is never rescaled as a choice."""
+    from d1a.core.api import answer, choice_confidence
+    cal = OutcomeCalibrator({"blast": {"s": 0.5, "n": 100}, "effort": {"s": 0.5, "n": 100}})
+    choice = answer([0.7, 0.2, 0.1], {"type": "choice", "keys": ["contained", "moderate", "massive"]})
+    score = answer([0.1, 0.2, 0.7], {"type": "score", "legend": "0-2"})
+    out = cal.apply({"blast": choice, "effort": score})
+    assert out["blast"]["choice"] == "contained" and out["blast"]["probabilities"]["contained"] < choice["probabilities"]["contained"]
+    # read off the unrounded probabilities, as the server reads it: equal to the shown ones' up to their rounding
+    assert out["blast"]["confidence"] == pytest.approx(choice_confidence(list(out["blast"]["probabilities"].values())), abs=2e-4)
+    assert out["blast"]["confidence"] < choice["confidence"]
+    assert out["effort"] == score
