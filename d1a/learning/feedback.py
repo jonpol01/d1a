@@ -330,7 +330,7 @@ def main(argv=None):
     elif a.cmd == "promote":
         path = Path(a.calibrator); current = OutcomeCalibrator.load(path) if path.exists() else None
         cal, report = promote(res, current, a.held_out, a.min_outcomes)
-        if any(r["promote"] for r in report.values()):   # written whole and renamed into place: the server never reads half a file
+        if any(r["promote"] or r.get("dropped") for r in report.values()):   # written whole and renamed into place: the server never reads half a file
             tmp = path.with_name(path.name + ".tmp"); cal.save(tmp); os.replace(tmp, path)
         print(json.dumps({"promoted": sorted(q for q, r in report.items() if r["promote"]), "report": report}))
     else:

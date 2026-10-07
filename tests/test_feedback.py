@@ -238,3 +238,18 @@ def test_promote_drops_a_choice_calibration_a_score_question_carried_from_before
     served, report = promote(decisions, stale)
     assert "effort" not in served.params and served.params["resolved"] == [1.0, 0.0, 50]
     assert report["effort"]["promote"] is False and "never applied" in report["effort"]["dropped"]
+
+
+def test_the_promote_command_writes_a_drop_even_when_nothing_is_promoted(tmp_path, capsys):
+    """hermes-prbot on #204: promote() dropped a stale score entry in memory, but the CLI wrote the file only when a
+    question was promoted, so a drop alone never reached the server."""
+    from d1a.core.api import answer
+    path = tmp_path / "served.json"; OutcomeCalibrator({"effort": {"s": 0.5, "n": 100}, "resolved": [1.0, 0.0, 50]}).save(path)
+    log = FeedbackLog(tmp_path / "f.jsonl")
+    for i in range(4):
+        did = log.decision(f"s {i}", {"effort": {"type": "score", "criteria": ["low", "mid", "high"]}},
+                           {"effort": answer([0.2, 0.5, 0.3], {"type": "score", "legend": "0-2"})}, run="r@v0.5")
+        log.outcome(did, {"effort": "1"}, {"src": "reviewer", "group": f"g{i}"})
+    main(["promote", str(tmp_path / "f.jsonl"), "--calibrator", str(path)])
+    assert json.loads(capsys.readouterr().out)["promoted"] == []
+    assert OutcomeCalibrator.load(path).params == {"resolved": [1.0, 0.0, 50]}
