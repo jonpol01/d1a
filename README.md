@@ -92,7 +92,7 @@ from d1a.learning.feedback import FeedbackLog
 m, log = D1A.load("JohnP1/d1a-e4b-mlx-q8"), FeedbackLog("runs/feedback/verifier.jsonl")
 q = {"resolved": {"type": "noul", "instr": "Does this patch fix the issue?"}}
 answers = m.decide(issue_and_patch, q)
-did = log.decision(issue_and_patch, q, answers, run="JohnP1/d1a-e4b-mlx-q8@v0.4")
+did = log.decision(issue_and_patch, q, answers, run="JohnP1/d1a-e4b-mlx-q8@v0.5")
 ...                                     # later, when the tests have run
 log.outcome(did, {"resolved": True})
 ```
@@ -107,7 +107,7 @@ python -m d1a.learning.feedback records runs/feedback/verifier.jsonl --out feedb
 
 ```bash
 D1A_FEEDBACK_LOG=runs/feedback/verifier.jsonl D1A_OUTCOME_CALIBRATOR=runs/feedback/cal.json \
-  uv run --extra serve python -m d1a.serving.serve --run JohnP1/d1a-e4b-mlx-q8@v0.4 --port 8009
+  uv run --extra serve python -m d1a.serving.serve --run JohnP1/d1a-e4b-mlx-q8@v0.5 --port 8009
 curl -s localhost:8009/v1/feedback -H 'content-type: application/json' \
   -d '{"decision_id": "<from the answer>", "labels": {"resolved": true}}'
 python -m d1a.learning.feedback calibrate runs/feedback/verifier.jsonl --out runs/feedback/cal.json   # picked up on the next request
@@ -144,12 +144,12 @@ Recalibration on outcomes works at once and needs no restart. Small retraining r
 | Training and serving on Gemma 4 E2B / E4B (and Qwen) | yes, this repo |
 | D1A-E2B (Gemma 4 E2B) | [JohnP1/d1a-e2b](https://huggingface.co/JohnP1/d1a-e2b) `v0.2` (2 epochs, calibrated); `v0.1` (1 epoch) |
 | D1A-E2B for Apple Silicon (MLX, 8-bit) | [JohnP1/d1a-e2b-mlx-q8](https://huggingface.co/JohnP1/d1a-e2b-mlx-q8) `v0.2` (3.0 GB in memory) |
-| D1A-E4B v0.4 (Gemma 4 E4B: pull-request labeling, two rounds, English and Japanese) | [JohnP1/d1a-e4b](https://huggingface.co/JohnP1/d1a-e4b) `v0.4`, the best PR labeler: PR labels 81% (Japanese 74%). `v0.3` (PR labels 78%) is 1–3 points better on general, Japanese and routing questions; `v0.2` (Kev's later stages + Japanese + agent routing) and `v0.1` stay available |
-| D1A-E4B for Apple Silicon (MLX, 8-bit) | [JohnP1/d1a-e4b-mlx-q8](https://huggingface.co/JohnP1/d1a-e4b-mlx-q8) `v0.4` (~6 GB, plus 1 GB of photo, voice and video encoders; what the Mac mini playground serves) |
+| D1A-E4B v0.5 (Gemma 4 E4B: Kev's skills back on top of two pull-request labeling rounds, English and Japanese) | [JohnP1/d1a-e4b](https://huggingface.co/JohnP1/d1a-e4b) `v0.5`: hard decisions 71% (v0.4: 55%), developer tools 70% (64%), transfer 72% (69%), PR change type 90% (88%). `v0.4` is the better PR labeler for blast radius and severity (owner's PRs: blast 87% against 74%); `v0.3`, `v0.2` (Kev's later stages + Japanese + agent routing) and `v0.1` stay available |
+| D1A-E4B for Apple Silicon (MLX, 8-bit) | [JohnP1/d1a-e4b-mlx-q8](https://huggingface.co/JohnP1/d1a-e4b-mlx-q8) `v0.5` (~6 GB, plus 1 GB of photo, voice and video encoders; what the Mac mini playground serves) |
 | Live demos of twelve use cases (two from a photo or a voice note, one labeling pull requests) | [jonpol01/d1a-playground](https://github.com/jonpol01/d1a-playground) |
 | Thin clients (Python, JS) | [`clients/`](clients) |
 
-Model versions: one Hugging Face repository per size and format, and one tag per version (`v0.1`, `v0.2`, `v0.3`, `v0.4`, ...); each version continues training the one before it, and its model card lists what it was trained on. Load a version as `JohnP1/d1a-e4b@v0.3`. Older tag names (`v0.2-hybrid`, `v0.2-2epoch`, ...) still work.
+Model versions: one Hugging Face repository per size and format, and one tag per version (`v0.1`, `v0.2`, `v0.3`, `v0.4`, `v0.5`, ...); each version continues training the one before it, and its model card lists what it was trained on. Load a version as `JohnP1/d1a-e4b@v0.3`. Older tag names (`v0.2-hybrid`, `v0.2-2epoch`, ...) still work.
 
 ## Quick Start
 
@@ -242,7 +242,7 @@ print(answer["answers"]["team"]["probabilities"])
 The model server answers questions about an image, a short voice clip or a video with the same model, the same request shape plus a `media` field. On Apple Silicon, serve an MLX build that carries Gemma 4's vision and audio encoders (`media/`, about 1 GB, fetched on the first such request; `JohnP1/d1a-e4b-mlx-q8@v0.3` has them, and `scripts/export_mlx.py --media` adds them to your own export):
 
 ```bash
-uv run --extra serve --extra media python -m d1a.serving.serve --run JohnP1/d1a-e4b-mlx-q8@v0.4 --port 8009 --idle-unload 600
+uv run --extra serve --extra media python -m d1a.serving.serve --run JohnP1/d1a-e4b-mlx-q8@v0.5 --port 8009 --idle-unload 600
 ```
 
 ```bash

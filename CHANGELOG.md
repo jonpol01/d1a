@@ -261,6 +261,7 @@ Checkpoints on Hugging Face, newest first. Each version continues training the p
 
 | Model | Tag | What it adds | Older tag name |
 |---|---|---|---|
+| JohnP1/d1a-e4b | `v0.5` | Kev's skills back on top of v0.4's pull-request labeling: hard-v1 +16, devtools-v1 +6, transfer-v4 +2.7, JGLUE +1.1, PR change type +2; PR severity −2 and blast radius on the owner's repositories lower than v0.4 | |
 | JohnP1/d1a-e4b | `v0.4` | pull-request labeling round 2: severity, Japanese, a blast-radius answer no longer biased to "broad"; earlier skills 1–3 points lower than v0.3 | |
 | JohnP1/d1a-e4b | `v0.3` | pull-request labeling (type, blast radius, severity), English and Japanese | |
 | JohnP1/d1a-e4b | `v0.2` | Kev's later stages (dates, missing evidence, hard, tool-use and long-document decisions), Japanese (JGLUE), agent routing | `v0.2-hybrid` |
