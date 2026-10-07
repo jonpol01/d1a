@@ -1,5 +1,5 @@
 # Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); serves d1a-latest and keeps kev-latest and jev-latest as compatibility names; model cards name D1A; serves MLX export folders; --device with a GPU usability probe; a startup self-check of the readout and a warning when serving an uncalibrated checkpoint; recent batch latency in /v1/models; a 75 s keep-alive for proxies in front of it; --idle-unload; photos and voice clips through the same model (POST /v1/systemone/media); prefix cache keyed by state ids only (option isolation removed); self-learning hooks (decision log, POST /v1/feedback, outcome calibrator); GET /metrics.
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); serves d1a-latest and keeps kev-latest and jev-latest as compatibility names; model cards name D1A; serves MLX export folders; --device with a GPU usability probe; a startup self-check of the readout and a warning when serving an uncalibrated checkpoint; recent batch latency in /v1/models; a 75 s keep-alive for proxies in front of it; --idle-unload; photos and voice clips through the same model (POST /v1/systemone/media); prefix cache keyed by state ids only (option isolation removed); self-learning hooks (decision log, POST /v1/feedback, outcome calibrator); GET /metrics; PrefixCache.make_room ported from later upstream Kev (1d77363).
 """FastAPI sidecar for the playground: loads one checkpoint, exposes prefill-only decisions.
 
 Run: uv run --extra serve python -m d1a.serving.serve --run runs/d1a --port 8008
@@ -74,6 +74,23 @@ class PrefixCache:
             survivors.add(key); tokens += len(key)
         return keys, [self.entries.get(k) if k is not None else None for k in keys], [k in survivors for k in keys]
 
+    def over(self, keys):
+        """Whether these states exceed either bound: more than `size` of them, or more than `max_tokens` state tokens."""
+        return len(keys) > self.size or sum(len(k) for k in keys) > self.max_tokens
+
+    def make_room(self, keys, cached, keep):
+        """Drop now, before the batch runs, the entries this batch's store() will evict anyway, so an old state does not
+        stay resident through the passes of the new one that replaces it (Kev 1d77363: on MLX a 64k state's cache is
+        2.2 GB). store() (re)inserts every hit (the model hands a hit's prefix back) and every kept new state as most
+        recent, and evicts the least recently used while over a bound; evicting the same keys first leaves the same
+        cache. A hit dropped here is still held by `cached` for this batch."""
+        order = dict.fromkeys(self.entries)   # least recently used first, as store() evicts
+        for key, old, k in zip(keys, cached, keep):
+            if key is not None and (old is not None or k):
+                order.pop(key, None); order[key] = None
+        while self.over(order):
+            key = next(iter(order)); del order[key]; self.entries.pop(key, None)
+
     def store(self, keys, cached, prefixes):
         """Record hits and misses, and (re)insert the batch's prefixes in order: most recently used last."""
         for key, old, new in zip(keys, cached, prefixes):
@@ -81,7 +98,7 @@ class PrefixCache:
             self.hits += old is not None; self.misses += old is None
             if new is None: continue
             self.entries.pop(key, None); self.entries[key] = new
-            while len(self.entries) > self.size or sum(len(k) for k in self.entries) > self.max_tokens: self.entries.pop(next(iter(self.entries)))
+            while self.over(self.entries): self.entries.pop(next(iter(self.entries)))
 
     def clear(self):
         self.entries.clear()
@@ -175,9 +192,11 @@ class Server:
         sync(self.device); t = time.time()
         for retry in (False, True):
             keys, cached, keep = self.prefix_cache.plan(encs)
+            self.prefix_cache.make_room(keys, cached, keep)
             try: ps, prefixes = self.model.probs_batch(encs, cached, keep); break
-            except Exception as e:
-                if retry or not self.prefix_cache.entries or not out_of_memory(e): raise
+            except Exception as e:   # states held: the cache's, and this batch's hits that make_room already dropped from it
+                held = self.prefix_cache.entries or any(c is not None for c in cached)
+                if retry or not held or not out_of_memory(e): raise
             cached = None; self.prefix_cache.clear(); self.prefix_cache.oom_retries += 1   # after the except: its traceback holds the failed pass's tensors
             empty_cache(self.device)
         sync(self.device); dt = round((time.time() - t) * 1000, 1)

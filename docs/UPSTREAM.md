@@ -12,7 +12,7 @@ the Apache License 2.0. This file records where D1A's code came from and what D1
 
 ## What D1A Changed
 
-- **Ported from later upstream Kev**: the suites mirror pin (`d1a/eval/suite.py` `SUITES_REVISION` = kev-suites `cc4bac8`) from Kev commit `6b1da9d` (#198), which publishes the `hard-v1` and `documents-v1` training partitions. Every other partition is unchanged at that revision.
+- **Ported from later upstream Kev**: the suites mirror pin (`d1a/eval/suite.py` `SUITES_REVISION` = kev-suites `cc4bac8`) from Kev commit `6b1da9d` (#198), which publishes the `hard-v1` and `documents-v1` training partitions. Every other partition is unchanged at that revision. `PrefixCache.make_room` in `d1a/serving/serve.py` from Kev commit `1d77363` (#201): before a batch runs, the cache drops the states that batch's store would evict anyway, so an old long state no longer stays resident through the pass of the new one (#189).
 
 - **Gemma 4 support** (from the jonpol01/kev fork, by John Soliva): Gemma 4 E2B / E4B bases in `d1a/backends/torch.py` and
   `d1a/training/train.py` (Gemma's reserved `<unused0>`–`<unused4>` tokens as delimiters with a leading `<bos>`, a packed mask for
