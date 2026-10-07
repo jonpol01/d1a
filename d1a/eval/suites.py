@@ -69,6 +69,19 @@ def resolve(arg, purpose="eval"):
     return path
 
 
+SKILLS = ("evals/hard-v1", "evals/devtools-v1", "evals/documents-v1")   # Kev's frozen suites with a train partition (decision-v7's is replayed by d1a.training.train itself)
+
+
+def train_sources(root=Path(__file__).resolve().parents[2]):
+    """Every training source a fine-tune replays so it keeps what earlier stages taught it (#167): the frozen skills
+    suites' train partitions, then every D1A suite partition whose role is train, as evals/d1a/<suite>:<partition>."""
+    out = list(SKILLS)
+    for m in sorted((Path(root) / "evals/d1a").glob(f"*/{MANIFEST}")):
+        parts = json.loads(m.read_text(encoding="utf-8"))["partitions"]
+        out += [f"evals/d1a/{m.parent.name}:{name}" for name, p in parts.items() if p["role"] == "train"]
+    return out
+
+
 def freeze(suite, dataset, partitions, revision=None, provenance=None):
     """Write `suite`/manifest.json for `partitions` {name: (path in the dataset, role)} of `dataset` at `revision` (default:
     its current commit), hashing each file as it is there. `provenance`: where the data came from, kept in the manifest."""

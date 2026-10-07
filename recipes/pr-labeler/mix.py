@@ -19,7 +19,7 @@ from pathlib import Path
 ROOT_DIR = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT_DIR))
 from d1a.eval.suite import digest, load_split  # noqa: E402
-from d1a.eval.suites import resolve  # noqa: E402
+from d1a.eval.suites import resolve, train_sources  # noqa: E402
 
 PR, JA, ROUTING = "evals/d1a/pr-labels", "evals/d1a/ja-jglue", "evals/d1a/routing"
 RARE_SEVERITIES = ("P0", "P1", "P4")
@@ -40,6 +40,16 @@ def lines(ref):
 def skill_lines(suite):
     """A frozen skills suite's train partition as JSONL lines (checked against its manifest's sha256, fetched if needed)."""
     return [json.dumps(r, ensure_ascii=False) + "\n" for r in load_split(Path(ROOT_DIR / suite), "train")]
+
+
+def uncovered(extra, replay_ja, replay_routing, replay_skills):
+    """The training sources (d1a.eval.suites.train_sources) a mix with these arguments leaves out: a fine-tune forgets
+    what it neither trains on nor replays (#167)."""
+    covered = {f"{PR}:train", *(f"{PR}:{name}" for name in extra)}
+    covered |= {f"{JA}:train"} if replay_ja else set()
+    covered |= {f"{ROUTING}:factory-train", f"{ROUTING}:generic-train"} if replay_routing else set()
+    covered |= set(SKILLS) if replay_skills else set()
+    return [s for s in train_sources() if s not in covered]
 
 
 def mix(en=0, en_skip=False, extra=("train-ja",), replay_ja=500, replay_routing=300, seed=0, replay_skills=500):
@@ -70,12 +80,14 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--en", type=int, default=0, help="English PRs: every rare-label PR plus a sample of the rest up to this many; 0 = all")
     ap.add_argument("--en-skip", type=int, choices=[0, 1], default=0, help="1 = the PRs a previous round with the same --en and seed left out, plus its rare-label PRs")
-    ap.add_argument("--extra", nargs="*", default=["train-ja"], help=f"more training partitions of {PR}")
+    ap.add_argument("--extra", nargs="*", default=["train-ja", "train-blast"], help=f"more training partitions of {PR}")
     ap.add_argument("--replay-ja", type=int, default=500); ap.add_argument("--replay-routing", type=int, default=300)
     ap.add_argument("--replay-skills", type=int, default=500, help=f"train records replayed from each of {', '.join(SKILLS)} (0: none, the "
                     "v0.3/v0.4 mixes; a fine-tune without them loses them, #167)")
     ap.add_argument("--seed", type=int, default=0)
     a = ap.parse_args()
+    if a.replay_skills and (missing := uncovered(a.extra, a.replay_ja, a.replay_routing, a.replay_skills)):
+        ap.error(f"this mix leaves out {', '.join(missing)}: a fine-tune forgets what it neither trains on nor replays (#167)")
     out, counts = mix(a.en, bool(a.en_skip), a.extra, a.replay_ja, a.replay_routing, a.seed, a.replay_skills)
     Path(a.out).write_text("".join(out), encoding="utf-8")
     inputs = [f"{PR}:train", *(f"{PR}:{n}" for n in a.extra), f"{JA}:train", f"{ROUTING}:factory-train", f"{ROUTING}:generic-train"]
