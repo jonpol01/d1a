@@ -227,3 +227,14 @@ def test_a_recalibrated_choice_answer_carries_its_own_confidence_and_a_score_ans
     assert out["blast"]["confidence"] == pytest.approx(choice_confidence(list(out["blast"]["probabilities"].values())), abs=2e-4)
     assert out["blast"]["confidence"] < choice["confidence"]
     assert out["effort"] == score
+
+
+def test_promote_drops_a_choice_calibration_a_score_question_carried_from_before():
+    """A calibrator fitted before #195 may hold choice-type params for a score question. apply() leaves score answers
+    alone now, so promote drops the entry: what the file lists is what is applied."""
+    from d1a.core.api import answer
+    stale = OutcomeCalibrator({"effort": {"s": 0.5, "n": 100}, "resolved": [1.0, 0.0, 50]})
+    decisions = [{"id": f"d{i}", "answers": {"effort": answer([0.2, 0.5, 0.3], {"type": "score", "legend": "0-2"})}, "labels": {"effort": "1"}} for i in range(4)]
+    served, report = promote(decisions, stale)
+    assert "effort" not in served.params and served.params["resolved"] == [1.0, 0.0, 50]
+    assert report["effort"]["promote"] is False and "never applied" in report["effort"]["dropped"]

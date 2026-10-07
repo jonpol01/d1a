@@ -270,7 +270,12 @@ def promote(resolved, current=None, share=0.3, min_outcomes=20, **gate_kw):
     current = current or OutcomeCalibrator()
     fit, test = split(resolved, share)
     cand = OutcomeCalibrator().fit(fit, min_outcomes)
-    out, report = OutcomeCalibrator(current.params), {}
+    # a choice calibration of a score question, fitted before #195, is inert in apply(): drop it, so the calibrator file
+    # and /v1/feedback's calibrated_questions list only what is applied
+    scores = {qid for d in resolved for qid, a in d["answers"].items() if isinstance(a, dict) and a.get("type") == "score"}
+    stale = sorted(qid for qid, params in current.params.items() if qid in scores and isinstance(params, dict))
+    out = OutcomeCalibrator({qid: params for qid, params in current.params.items() if qid not in stale})
+    report = {qid: {"promote": False, "dropped": "a choice calibration of a score question, which is never applied (#195)"} for qid in stale}
     for qid, params in cand.params.items():
         if isinstance(params, dict):
             rows = [d for d in test if _choice_probs(d["answers"].get(qid)) is not None and d["labels"].get(qid) in _choice_probs(d["answers"][qid])]
