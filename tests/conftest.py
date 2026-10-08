@@ -13,7 +13,6 @@ import pytest
 # Test files the unit run (--unit) skips, and why. Every other tests/test_*.py runs in CI as soon as it exists, so two pull
 # requests that each add a test file never edit the same line (they did when CI named every file, #136 and #138).
 OUTSIDE_UNIT_TESTS = {
-    "tests/test_api.py": "needs a running d1a.serving.serve (pytest -m server)",
     "tests/test_model.py": "needs real weights and the smoke checkpoint",
     "tests/test_mlx.py": "needs MLX and real weights; its weight-free tests run in the Apple Silicon job",
 }
