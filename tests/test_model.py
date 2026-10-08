@@ -449,14 +449,15 @@ def test_init_from_warm_start_and_compatibility_checks(tmp_path):
     env = {**os.environ, "OMP_NUM_THREADS": "2"}
     base = [sys.executable, "-m", "d1a.training.train", "--n_per_source", "3", "--epochs", "1", "--accum", "1", "--batch", "1", "--device", "cpu", "--lr", "1e-12", "--base", "Qwen/Qwen2.5-0.5B"]
     subprocess.run(base + ["--out", str(tmp_path / "a")], check=True, capture_output=True, env=env)
-    r = subprocess.run(base + ["--out", str(tmp_path / "b"), "--init_from", str(tmp_path / "a")], check=True, capture_output=True, text=True, env=env)
+    delta = ["--allow_missing_sources", "all", "--reason", "a warm-start test on built records"]   # D1A's training sources are not the point here (#211)
+    r = subprocess.run(base + ["--out", str(tmp_path / "b"), "--init_from", str(tmp_path / "a"), *delta], check=True, capture_output=True, text=True, env=env)
     assert "delta: warm start" in r.stdout
     from d1a.backends.checkpoint import read_meta
     from d1a.eval.suite import read_json
     ha, hb = read_meta(tmp_path / "a"), read_meta(tmp_path / "b")
     assert all((ha.head[k] - hb.head[k]).abs().max() < 1e-6 for k in ha.head), "a warm start at a negligible lr must keep the source head"
     assert hb.extra["init_source"]["weights_sha256"] and read_json(tmp_path / "b/training_config.json")["init_source"]["resolved"] == str(tmp_path / "a")
-    bad = subprocess.run(base + ["--out", str(tmp_path / "c"), "--init_from", str(tmp_path / "a"), "--lora", "8"], capture_output=True, text=True, env=env)
+    bad = subprocess.run(base + ["--out", str(tmp_path / "c"), "--init_from", str(tmp_path / "a"), *delta, "--lora", "8"], capture_output=True, text=True, env=env)
     assert bad.returncode != 0 and "lora is 16 there and 8 here" in bad.stderr
 
 

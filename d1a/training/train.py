@@ -3,7 +3,10 @@ frozen suite's training partition, records built from the public sources, or you
 
     uv run python -m d1a.training.train --suite evals/v7/decision-v7 --out runs/<name>          # Gemma 4 E2B (the default base)
     uv run python -m d1a.training.train --base Qwen/Qwen2.5-0.5B --n_per_source 40 --accum 4 --out runs/smoke   # ~1 min smoke test
-    uv run python -m d1a.training.train --data mine.jsonl --init_from JohnP1/kev-gemma4-e2b --lr 2e-5 --out runs/mine   # delta
+    uv run python -m d1a.training.train --data mix.jsonl --suite evals/v7/decision-v7 --replay 1000 --init_from JohnP1/d1a-e2b --lr 2e-5 --out runs/mine
+    ... --data mine.jsonl --init_from JohnP1/d1a-e2b --allow_missing_sources all --reason "<why>"   # a delta without D1A's sources
+A delta (--init_from) trains on or replays every training source (mix.jsonl from recipes/skills/mix.py or
+recipes/pr-labeler/mix.py, its sidecar mix.jsonl.json naming them) or names what it leaves out and why (#211).
 
 Records vary in length and carry their own masks, so a forward pass holds few of them (--batch) and gradients accumulate
 over --accum micro-batches: an optimizer step sees accum x batch records. Training is reproducible from --seed: the
@@ -122,6 +125,101 @@ def mixed(a, requests):
         requests = requests + extra
         print(f"mix: synthetic_repeat {a.synthetic_repeat} -> +{len(extra)} records", flush=True)
     return requests
+
+
+# --- a fine-tune trains on every source (#211) --------------------------------------------------------------------------
+
+DECISION_V7 = "evals/v7/decision-v7"   # replayed here (--suite evals/v7/decision-v7 --replay N) or mixed into --data
+ROOT_DIR = Path(__file__).resolve().parents[2]
+PR_LABELER_GROUPS = {"evals/d1a/pr-labels": "extra", "evals/d1a/ja-jglue": "ja", "evals/d1a/routing": "routing"}   # recipes/pr-labeler/mix.py's counts
+
+
+def required_sources():
+    """What a fine-tune must train on or replay, or it forgets it (#167): every d1a.eval.suites.train_sources() entry and decision-v7."""
+    return [*suites.train_sources(), DECISION_V7]
+
+
+def source_names(required):
+    """{a name a mix or an option gives a source: the source}. A frozen suite is evals/<suite>, <suite>, or either with
+    :train (its train partition); a D1A partition is evals/d1a/<suite>:<partition> or <suite>:<partition> (the D2 builder's)."""
+    names = {}
+    for s in required:
+        short = s.removeprefix("evals/d1a/") if ":" in s else s.rpartition("/")[2]
+        names.update(dict.fromkeys((s, short) if ":" in s else (s, f"{s}:train", short, f"{short}:train"), s))
+    return names
+
+
+def plain(name):
+    """A source name or suite path as source_names spells it: no ./ or trailing slash, repo-relative when it is in this repo."""
+    p = Path(str(name).strip())
+    if p.is_absolute():
+        with contextlib.suppress(ValueError):
+            p = p.resolve().relative_to(ROOT_DIR)
+    return p.as_posix()
+
+
+def sidecar_counts(meta):
+    """{source as the mix names it: records} from a mix's sidecar (<data>.json), in each writer's shape:
+    recipes/skills/mix.py {"counts": {source: n}}; the D2 builder {"sources": {source: {"records": n}}}, mix-d's {"by_source": {source: n}};
+    recipes/pr-labeler/mix.py {"inputs": {ref: sha256}, "counts": {"english", "extra", "ja", "routing": n, "skills": {suite: n}}},
+    where each input has its group's count (the extra PR partitions, JGLUE and routing are each drawn as one pool)."""
+    if "inputs" in meta:
+        counts, out = meta["counts"], {}
+        for ref in meta["inputs"]:
+            suite, _, part = ref.partition(":")
+            if part.endswith("(manifest sha256)"):   # a skills suite it replays: "evals/hard-v1:train (manifest sha256)"
+                out[suite] = counts.get("skills", {}).get(suite, 0)
+            else:
+                out[ref] = counts.get("english" if ref == "evals/d1a/pr-labels:train" else PR_LABELER_GROUPS.get(suite), 0)
+        return out
+    if isinstance(meta.get("sources"), dict):
+        return {name: v.get("records", 0) if isinstance(v, dict) else v for name, v in meta["sources"].items()}
+    for key in ("counts", "by_source"):   # by_source: the dataset-plan mixes (mix-d)
+        if isinstance(meta.get(key), dict):
+            return dict(meta[key])
+    raise ValueError("no records by source (counts, sources or by_source, as recipes/skills/mix.py, recipes/pr-labeler/mix.py and the D2 builder write them)")
+
+
+def source_coverage(a):
+    """A fine-tune (--init_from) trains on or replays every required_sources() entry (John, 2026-10-08: "make sure all gets
+    in"), checked before any weights load. Its sources: the --data mix's sidecar <data>.json (or --data itself, a D1A
+    partition), --suite (its whole train partition, or --replay records of it beside --data) and --extra_suites. A source
+    left out on purpose is named in --allow_missing_sources with a --reason. -> what training_config.json records (None for
+    a run from the base model); raises SystemExit naming what is missing."""
+    if not a.init_from:
+        return None
+    required = required_sources()
+    names = source_names(required)
+    covered, notes = set(), []
+    if a.data:
+        sidecar = Path(f"{a.data}.json")
+        if plain(a.data) in names:
+            covered.add(names[plain(a.data)])
+        elif sidecar.is_file():
+            try:
+                counts = sidecar_counts(json.loads(sidecar.read_text(encoding="utf-8")))
+            except (ValueError, KeyError, AttributeError) as e:
+                raise SystemExit(f"d1a.training.train: {sidecar} does not say which sources the mix holds: {e}")
+            covered |= {names[plain(n)] for n, records in counts.items() if plain(n) in names and records}
+        else:
+            notes.append(f"{a.data} has no sidecar {sidecar.name} naming its sources")
+    if a.suite and (not a.data or a.replay) and plain(a.suite) in names:
+        covered.add(names[plain(a.suite)])
+    covered |= {names[plain(s)] for s in filter(None, a.extra_suites.split(",")) if plain(s) in names}
+    allowed = [s.strip() for s in a.allow_missing_sources.split(",") if s.strip()]
+    unknown = [s for s in allowed if s != "all" and plain(s) not in names]
+    if unknown:
+        raise SystemExit(f"d1a.training.train: --allow_missing_sources names no training source: {', '.join(unknown)} (they are: all, {', '.join(required)})")
+    allowed = set(required) if "all" in allowed else {names[plain(s)] for s in allowed}
+    missing = [s for s in required if s not in covered]
+    if refused := [s for s in missing if s not in allowed]:
+        raise SystemExit(
+            f"d1a.training.train: this fine-tune (--init_from {a.init_from}) leaves out {len(refused)} training source(s): {', '.join(refused)}. "
+            + "".join(f"{n}. " for n in notes)
+            + "A fine-tune forgets what it neither trains on nor replays (#167, #211). Build --data with recipes/skills/mix.py or "
+            "recipes/pr-labeler/mix.py (each writes <data>.json, which this reads), replay decision-v7 with --suite evals/v7/decision-v7 "
+            "--replay N, or name what is left out on purpose: --allow_missing_sources <source,...|all> --reason \"<why>\".")
+    return {"covered": [s for s in required if s in covered], "allowed_missing": missing, "reason": a.reason or None}
 
 
 # --- encoded examples and their passes ----------------------------------------------------------------------------------
@@ -386,7 +484,12 @@ def parse_args(argv=None):
     add("--replay", type=int, default=0, help="with --data and --suite: mix in this many records sampled (by --seed) from the suite's training partition, so a delta fine-tune does not forget the released recipe")
     add("--init_from", default="", help="delta mode: warm-start LoRA and the pointer head from an existing run "
                                         "(local directory or hub id) instead of starting from the base model; keeps the "
-                                        "released model's in-domain skill while adapting to a new domain")
+                                        "released model's in-domain skill while adapting to a new domain. A fine-tune must "
+                                        "train on or replay every training source (d1a.eval.suites.train_sources() and decision-v7, "
+                                        "read from the --data mix's sidecar <data>.json, --suite with --replay, --extra_suites) or it is refused (#211)")
+    add("--allow_missing_sources", default="", help="with --init_from: comma-separated training sources (or all) this fine-tune leaves out on purpose; "
+                                                    "needs --reason, and both are recorded in training_config.json")
+    add("--reason", default="", help="why --allow_missing_sources leaves those sources out (required with it)")
     add("--row_budget", type=int, default=0, help="padded row tokens per forward/backward pass (0 = the whole micro-batch at once); a micro-batch over it "
                                                   "runs in several passes, a record whose rows do not fit is split by question (long states x many questions)")
     add("--shared_prefix", type=int, choices=[0, 1], default=0, help="hybrid backbones: run each record's state once and its question branches from it "
@@ -415,6 +518,8 @@ def parse_args(argv=None):
         ap.error("--none_pair_max_state is a positive token count and needs --p_none_pair > 0")
     if a.replay and not (a.data and a.suite):
         ap.error("--replay needs both --data and --suite")
+    if bool(a.allow_missing_sources.strip()) != bool(a.reason.strip()):
+        ap.error("--allow_missing_sources and --reason go together: a fine-tune leaves a training source out only with a reason, recorded with the run")
     if a.row_budget < 0 or a.max_steps < 0 or a.pass_tokens_max < 0:
         ap.error("--row_budget, --pass_tokens_max and --max_steps are >= 0")
     if a.pass_tokens_max and (not a.length_sort or a.row_budget):
@@ -529,6 +634,7 @@ def epoch_plan(a, model, tok, reqs, ep, state_tokens):
 
 def main():
     a = parse_args()
+    sources = source_coverage(a)   # before the model loads: a fine-tune that leaves out a training source stops here
     if a.data:
         suites.resolve(a.data, purpose="train")   # before the model loads: a refused or mismatched suite partition fails at once
     dev = a.device or default_device()
@@ -551,7 +657,7 @@ def main():
     state_tokens = state_token_counts(tok, reqs) if a.none_pair_max_state is not None or a.pass_tokens_max else None
     suite_hash = digest(Path(a.suite) / "manifest.json") if manifest else None
     write_json(out_dir / "training_config.json", {"args": vars(a), "suite_sha256": suite_hash, "base_revision": revision, "init_source": init_source,
-                                                "holdout": holdout})
+                                                "holdout": holdout, "sources": sources})
     print(f"{len(reqs)} training requests (holdout={holdout}), questions by type "
           f"{dict(Counter(q['qtype'] for r in reqs for q in materialize(r)['questions']))}")
 
