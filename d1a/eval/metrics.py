@@ -322,6 +322,7 @@ def served(fit_rows, eval_rows, **fit_kwargs):
 # How every released temperature is fitted (d1a.training.calibrate): the least mean NLL over a 121-point log grid on 0.25..4, each
 # question weighted equally. fit_temperature's own default (81 points, per-task macro) is for quick reports, never shipped.
 TEMPERATURE_FIT = {"aggregation": "micro", "points": 121}
+TEMPERATURE_GRID = (0.25, 4.0)   # fit_temperature's grid ends: a fit on either one may lie beyond it
 TEMPERATURE_FIT_METHOD = f"min {TEMPERATURE_FIT['aggregation']} mean NLL over a {TEMPERATURE_FIT['points']}-point log grid 0.25..4"
 
 
@@ -335,7 +336,7 @@ def fit_temperature(rows, aggregation="macro", points=81):
         raise ValueError("cannot fit temperature without labelled calibration rows")
     if any(row.get("inference_temperature", 1.0) != 1.0 for row in rows):
         raise ValueError("fit temperature on raw logits, not previously calibrated outputs")
-    grid = np.exp(np.linspace(np.log(0.25), np.log(4), points))
+    grid = np.exp(np.linspace(*np.log(TEMPERATURE_GRID), points))
     if aggregation == "micro":
         weight = np.ones(len(rows))
     else:
