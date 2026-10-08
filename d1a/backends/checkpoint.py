@@ -16,10 +16,12 @@ vendors this file next to model.py and api.py, so it imports nothing from the da
     ck = Checkpoint("JohnP1/d1a-e2b@v0.4")          # or a local run directory
     tok, model = ck.load("mps", LoadOptions.from_env())
     ck.meta.temperature                             # the calibration the checkpoint carries
+    ck.meta.use_case_temperatures                   # {use case: temperature} a request may select instead (#209)
 """
 import datetime
 import importlib.util
 import json
+import math
 import os
 import re
 from dataclasses import dataclass, field
@@ -36,6 +38,8 @@ EXPORT_CONFIG, EXPORT_HEAD = "d1a_config.json", "head.safetensors"   # an MLX ex
 EXPORT_FORMAT, EXPORT_VERSION = "d1a-mlx", 1
 TORCH_FORMAT, TORCH_VERSION = "d1a-torch", 1
 HEAD_PT_LAST_WRITTEN = "0.4"   # the last release that also writes head.pt (CHANGELOG, Deprecated); reading it has no end
+USE_CASE_TEMPERATURES, USE_CASE_FITS = "use_case_temperatures", "use_case_temperature_fits"   # Meta.extra keys (#209)
+CALIBRATION = ("temperature_fit", USE_CASE_TEMPERATURES, USE_CASE_FITS)   # the extra fields an MLX export carries over
 
 
 # --- where a checkpoint is ----------------------------------------------------------------------------------------------
@@ -86,6 +90,24 @@ class Meta:
 
     def to_dict(self):
         return {**self.extra, **{k: getattr(self, k) for k in self.KNOWN}}   # a known field wins over a stray key in extra
+
+    @property
+    def use_case_temperatures(self):
+        """{use case: temperature}, written by d1a.training.calibrate --use-case: a request naming one of these use cases
+        (SystemOneRequest.use_case) is served at its temperature instead of `temperature`; empty for most checkpoints. Kept
+        in `extra` with its fits (USE_CASE_FITS), so a D1A that predates it keeps it when it rewrites the run."""
+        return checked_use_case_temperatures(self.extra.get(USE_CASE_TEMPERATURES, {}))
+
+
+def checked_use_case_temperatures(table):
+    """`table` as {non-empty name: finite positive float}, or ValueError naming what is wrong (a bad entry would otherwise
+    fail or skew one use case's answers only, long after the checkpoint loaded)."""
+    if not isinstance(table, dict):
+        raise ValueError(f"{USE_CASE_TEMPERATURES} must be an object of use case -> temperature, not {table!r}")
+    for name, t in table.items():
+        if not (isinstance(name, str) and name.strip()) or isinstance(t, bool) or not isinstance(t, (int, float)) or not (math.isfinite(t) and t > 0):
+            raise ValueError(f"{USE_CASE_TEMPERATURES}: {name!r} -> {t!r}; each entry must name a use case and a finite positive temperature")
+    return {name: float(t) for name, t in table.items()}
 
 
 def _read_head_pt(run):
@@ -167,15 +189,17 @@ def weight_shards(path):
 
 def export_config(ck, leading, delimiters, pad, hidden_size, quantization, dtype):
     """The d1a_config.json of an MLX export of checkpoint `ck`: what loading needs (the base, the head's size, the
-    temperature), the token layout the export was made for (checked against its tokenizer when it loads), the weight
-    format, and where it came from."""
+    temperature, the use-case temperatures, and where they were fitted), the token layout the export was made for
+    (checked against its tokenizer when it loads), the weight format, and where it came from."""
     meta = ck.meta
     source_revision = Path(ck.path).name if is_hub_id(ck.requested) else None   # a Hub snapshot directory is named by its commit
     return {"format": EXPORT_FORMAT, "format_version": EXPORT_VERSION, "base": meta.base, "base_revision": meta.base_revision,
             "source": ck.requested, "source_revision": source_revision,
             "adapter_sha256": ck.weights_sha256(), "lora": meta.lora, "head_dim": meta.head_dim, "hidden_size": hidden_size,
             "temperature": meta.temperature, "leading_ids": list(leading), "bos_id": leading[0] if leading else None,
-            "delimiter_ids": list(delimiters), "pad_id": pad, "dtype": dtype, "quantization": quantization, "head": EXPORT_HEAD}
+            "delimiter_ids": list(delimiters), "pad_id": pad, "dtype": dtype, "quantization": quantization, "head": EXPORT_HEAD,
+            "temperature_fit": meta.extra.get("temperature_fit"), USE_CASE_TEMPERATURES: meta.use_case_temperatures,
+            USE_CASE_FITS: meta.extra.get(USE_CASE_FITS, {})}
 
 
 def read_export(path):
@@ -193,10 +217,12 @@ def read_export(path):
 
 
 def export_meta(path, cfg):
-    """An MLX export's Meta: what its d1a_config.json says, and the fp32 head from head.safetensors."""
+    """An MLX export's Meta: what its d1a_config.json says, and the fp32 head from head.safetensors. The calibration
+    records (CALIBRATION) sit in `extra` where a training run keeps them; an export written before they were carried has none."""
     from safetensors.torch import load_file
     return Meta(base=cfg["base"], head=load_file(str(Path(path) / cfg["head"])), base_revision=cfg["base_revision"], lora=cfg["lora"],
-                head_dim=cfg["head_dim"], temperature=cfg["temperature"], weights="mlx", extra={"export": cfg})
+                head_dim=cfg["head_dim"], temperature=cfg["temperature"], weights="mlx",
+                extra={"export": cfg, **{k: cfg[k] for k in CALIBRATION if cfg.get(k)}})
 
 
 # --- how to load it -----------------------------------------------------------------------------------------------------
@@ -222,7 +248,8 @@ class LoadOptions:
     attn         the attention backend; None: the model's default (SDPA on CUDA, eager elsewhere). "sdpa" on MPS
                  matched eager and is a few percent faster.
     lora_scale   WiSE-FT interpolation at inference between the base (0) and the fine-tuned weights (1).
-    temperature  None: the checkpoint's own (fitted by d1a.training.calibrate); 1.0: raw logits.
+    temperature  None: the checkpoint's own (fitted by d1a.training.calibrate), and its use-case temperatures for the requests
+                 that name a use case; a value (1.0: raw logits) serves every request at it, use cases included.
     backend      None: torch, the path every reported number uses. "mlx": d1a.backends.mlx (Metal kernels through mlx-lm for
                  the hybrid Qwen3.5 and the Gemma 4 backbones; the pointer head and encoder are shared; refused for other
                  attention-only bases). "auto": mlx when the device is mps, the base is one of those, mlx-lm is installed
@@ -302,6 +329,8 @@ class Checkpoint:
             raise ValueError(f"{self.requested} was trained with option_isolation, which D1A no longer supports (docs/UPSTREAM.md)")
         if self.meta.weights == "full":   # Kev's full-weight runs (d1a.training.train --full_ft, removed)
             raise ValueError(f"{self.requested} is a full-weight checkpoint, which D1A no longer loads (docs/removed-tools.md)")
+        try: self.meta.use_case_temperatures   # checked now, so a bad entry fails the load, not one use case's requests
+        except ValueError as e: raise ValueError(f"{self.requested}: {e}") from None
 
     def file(self, name):
         return Path(self.path) / name
@@ -369,6 +398,7 @@ class Checkpoint:
         model.head.load_state_dict(meta.head)
         model.eval()
         model.head.temperature = meta.temperature if opts.temperature is None else opts.temperature
+        model.head.use_case_temperatures = meta.use_case_temperatures if opts.temperature is None else {}
         return tok, model
 
     def _export_tokenizer(self):

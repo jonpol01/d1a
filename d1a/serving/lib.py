@@ -37,9 +37,11 @@ class D1A:
         tok, model = ck.load(dev, opts)
         return cls(ck, tok, model, dev)
 
-    def decide(self, state, questions):
-        """state: the document; questions: {id: question} as in a /v1/systemone request. -> {id: answer}."""
-        rec, meta = to_record(SystemOneRequest(model="d1a-latest", state=state, questions=questions))
+    def decide(self, state, questions, use_case=None):
+        """state: the document; questions: {id: question} as in a /v1/systemone request; use_case: as its `use_case` (the
+        checkpoint's temperature for it, if it has one). -> {id: answer}."""
+        rec, meta = to_record(SystemOneRequest(model="d1a-latest", state=state, questions=questions, use_case=use_case))
         enc = self.model.encode(self.tok, rec, max_state=SERVE_MAX_STATE, max_branch=SERVE_MAX_BRANCH)
+        if use_case is not None: enc["use_case"] = use_case
         (ps,), _ = self.model.probs_batch([enc], [None], [False])
         return to_answers([p.tolist() for p in ps], meta)

@@ -65,11 +65,14 @@ class FeedbackLog:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with open(self.path, "a", encoding="utf-8") as f: f.write(json.dumps(event) + "\n")
 
-    def decision(self, state, questions, answers, run, meta=None):
-        """Record a decision as it was made: the request, the answers and the model `run` (repo@tag). -> its id."""
+    def decision(self, state, questions, answers, run, meta=None, use_case=None, temperature=None):
+        """Record a decision as it was made: the request, the answers and the model `run` (repo@tag), and, when known, the
+        request's use case and the temperature its probabilities were read at (a checkpoint's use-case temperature moves
+        them without changing `run`, #209). -> its id."""
         did = uuid.uuid4().hex
         self._append({"kind": "decision", "id": did, "ts": time.time(), "run": run, "state": state, "questions": questions,
-                      "answers": answers, "meta": meta or {}})
+                      "answers": answers, "meta": meta or {}, **({"use_case": use_case} if use_case is not None else {}),
+                      **({"temperature": temperature} if temperature is not None else {})})
         return did
 
     def outcome(self, did, labels, meta=None):

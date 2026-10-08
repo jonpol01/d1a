@@ -231,8 +231,8 @@ def test_dropping_the_leading_bos_is_caught(tiny, monkeypatch):
 
 def ignored_temperature(mp):
     import d1a.backends.torch as M
-    mp.setattr(M.PointerHead, "forward", lambda self, hd, ho: (self.k(ho) @ self.q(hd)) * self.scale)
-    mp.setattr(M.PointerHead, "many", lambda self, hd, ho, owner: (self.k(ho) * self.q(hd)[owner]).sum(-1) * self.scale)
+    mp.setattr(M.PointerHead, "forward", lambda self, hd, ho, temperature=None: (self.k(ho) @ self.q(hd)) * self.scale)
+    mp.setattr(M.PointerHead, "many", lambda self, hd, ho, owner, temperature=None: (self.k(ho) * self.q(hd)[owner]).sum(-1) * self.scale)
 
 
 def answers_misread(qtype, how):

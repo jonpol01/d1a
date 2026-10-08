@@ -1,5 +1,5 @@
 # Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); serves d1a-latest and keeps kev-latest and jev-latest as compatibility names; model cards name D1A; serves MLX export folders; --device with a GPU usability probe; a startup self-check of the readout and a warning when serving an uncalibrated checkpoint; recent batch latency in /v1/models; a 75 s keep-alive for proxies in front of it; --idle-unload; photos and voice clips through the same model (POST /v1/systemone/media); prefix cache keyed by state ids only (option isolation removed); self-learning hooks (decision log, POST /v1/feedback, outcome calibrator); GET /metrics; PrefixCache.make_room ported from later upstream Kev (1d77363).
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); serves d1a-latest and keeps kev-latest and jev-latest as compatibility names; model cards name D1A; serves MLX export folders; --device with a GPU usability probe; a startup self-check of the readout and a warning when serving an uncalibrated checkpoint; recent batch latency in /v1/models; a 75 s keep-alive for proxies in front of it; --idle-unload; photos and voice clips through the same model (POST /v1/systemone/media); prefix cache keyed by state ids only (option isolation removed); self-learning hooks (decision log, POST /v1/feedback, outcome calibrator); GET /metrics; PrefixCache.make_room ported from later upstream Kev (1d77363); per-use-case temperatures (the request's use_case, the map in /v1/models and the decision log, #209).
 """FastAPI sidecar for the playground: loads one checkpoint, exposes prefill-only decisions.
 
 Run: uv run --extra serve python -m d1a.serving.serve --run runs/d1a --port 8008
@@ -11,6 +11,11 @@ comparison), self-learning (D1A_FEEDBACK_LOG=<path>: every answer gets a decisio
 {decision_id, labels} records what actually happened; D1A_OUTCOME_CALIBRATOR=<file>: yes/no and choice answers recalibrated by d1a.learning.feedback's
 calibrator, re-read when the file changes), POST /v1/systemone/media (a /v1/systemone request plus a photo, voice clip or video, d1a.serving.media.MediaRequest,
 answered by the same model: an MLX export with its media/ folder, scripts/export_mlx.py --media).
+
+A request may name its use case ("use_case": "routing", d1a.core.api.SystemOneRequest): when the checkpoint carries a
+temperature for it (d1a.training.calibrate --use-case; GET /v1/models lists them under use_case_temperatures), that
+request's probabilities are read at it; otherwise, and for a request without one, at the checkpoint's temperature. Each
+request in a batch keeps its own, and the prefix cache holds states only, so cached requests are read at theirs too.
 
 --idle-unload N drops the model (and the media encoders) after N seconds without a request and loads it again on the
 next one; GET /v1/models answers either way without loading it, and so does GET /metrics (Prometheus text: loaded, requests,
@@ -146,22 +151,24 @@ class Server:
             self.queue.get_nowait()[1].set_exception(RuntimeError("the server stopped")); self.queue.task_done()
         sys.setswitchinterval(self.switch_interval)
 
-    def submit(self, rec, media=None):
+    def submit(self, rec, media=None, use_case=None):
         """Queue one record for the model thread. -> a Future of (probabilities, stats). The state prefix (tokens up to the
         first question) is cached across requests, so a repeated state only pays for its question rows. latency_ms is the
         model time of the batch the request ran in (not its wait in the queue). media: MediaEncoder.encode's output, put
-        right after <state>."""
+        right after <state>. use_case: the request's (SystemOneRequest.use_case); the readout reads it off the encoding
+        (d1a.backends.torch.temperature_of)."""
         if self.stopping.is_set(): raise HTTPException(503, "the server is stopping")
         try:
             enc = self.model.encode(self.tok, rec, max_state=SERVE_MAX_STATE, max_branch=SERVE_MAX_BRANCH)
             if media is not None: enc = with_media(enc, len(layout(self.tok)[0]) + 1, *media)
         except ValueError as e: raise HTTPException(422, str(e))
+        if use_case is not None: enc["use_case"] = use_case
         done = Future()
         self.queue.put((enc, done))
         return done
 
-    def probs(self, rec):
-        return self.submit(rec).result()
+    def probs(self, rec, use_case=None):
+        return self.submit(rec, use_case=use_case).result()
 
     def _work(self):
         graphs = getattr(self.model, "graphs", None)
@@ -216,13 +223,13 @@ class Server:
     def answer(self, req):
         """The /v1/systemone response body for one request."""
         rec, meta = to_record(prepare(req))
-        return self._body(req, meta, *self.probs(rec))
+        return self._body(req, meta, *self.probs(rec, req.use_case))
 
     async def answer_async(self, req):
         """answer() for the event loop: a request waiting on the model thread holds no worker thread, so a container takes
         as many concurrent requests as its batches can absorb (FastAPI runs sync endpoints on a 40-thread pool)."""
         rec, meta = to_record(prepare(req))
-        return self._body(req, meta, *await asyncio.wrap_future(self.submit(rec)))
+        return self._body(req, meta, *await asyncio.wrap_future(self.submit(rec, use_case=req.use_case)))
 
     def media_encoder(self):
         """Gemma 4's vision and audio encoders for this model, loaded on the first photo or voice request: the export's
@@ -247,10 +254,12 @@ class Server:
         rec, meta = to_record(prepare(req))
         try: media = await asyncio.to_thread(lambda: self.media_encoder().encode(req.media))
         except ValueError as e: raise HTTPException(422, str(e))
-        return self._body(req, meta, *await asyncio.wrap_future(self.submit(rec, media)))
+        return self._body(req, meta, *await asyncio.wrap_future(self.submit(rec, media, req.use_case)))
 
     def _body(self, req, meta, ps, m):
-        answers, did = LEARNING.decide(req, to_answers(ps, meta), self.checkpoint.requested)
+        head = getattr(getattr(self, "model", None), "head", None)   # the temperature the readout used (PointerHead.temperature_for), for the log
+        T = head.temperature_for(req.use_case) if hasattr(head, "temperature_for") else None
+        answers, did = LEARNING.decide(req, to_answers(ps, meta), self.checkpoint.requested, T)
         body = {"model": req.model, "answers": answers, "usage": {"input_tokens": m["tokens"], "output_tokens": output_tokens(self.tok, answers)}, "latency_ms": m["latency_ms"]}
         if did is not None: body["decision_id"] = did
         return body
@@ -275,14 +284,16 @@ class Learning:
             if mtime != self._mtime: self._cal, self._mtime = OutcomeCalibrator.load(self.calibrator_path), mtime
             return self._cal
 
-    def decide(self, req, answers, run):
+    def decide(self, req, answers, run, temperature=None):
         """Answers as served (recalibrated when a calibrator is set), and the decision id when logging is on. The log keeps the
-        model's own answers, which the next `d1a.learning.feedback calibrate` must fit; what was served is kept beside them in meta."""
+        model's own answers, which the next `d1a.learning.feedback calibrate` must fit; what was served is kept beside them in meta,
+        and so are the request's use case and the temperature its probabilities were read at."""
         cal = self.calibrator()
         served = cal.apply(answers) if cal is not None else answers
         if self.log is None: return served, None
         questions = {qid: q.model_dump(exclude_none=True) for qid, q in req.questions.items()}
-        with self._lock: did = self.log.decision(req.state, questions, answers, run=run, meta={"served": served} if served is not answers else None)
+        with self._lock: did = self.log.decision(req.state, questions, answers, run=run, meta={"served": served} if served is not answers else None,
+                                                 use_case=req.use_case, temperature=temperature)
         return served, did
 
     def outcome(self, did, labels, meta=None):
@@ -414,7 +425,8 @@ def systemone_separate(req: SystemOneRequest):
 @app.get("/v1/models")
 def models():
     """One TypeSafe model card (name, description, release_date) per accepted model name, plus the D1A serving details
-    a client may ignore: the run, the base, the device, the backend and precision, the temperature, whether the model is
+    a client may ignore: the run, the base, the device, the backend and precision, the temperature and the use-case
+    temperatures a request may select (use_case_temperatures, {} for most checkpoints), whether the model is
     in memory (--idle-unload), and while it is, prefix-cache and batch stats. Answers without loading the model, so a
     client polling it does not keep an idle model in memory."""
     od = app.state.models
@@ -476,7 +488,7 @@ def card(s):
     ck, meta, T = s.checkpoint, s.checkpoint.meta, s.model.head.temperature
     return {"description": f"D1A pointer head on {meta.base}, serving {ck.requested} at temperature {T:.2f}", "release_date": s.release_date,
             "run": ck.requested, "base": meta.base, "lora": meta.lora, "device": s.device, "backend": s.model.backend, "dtype": s.model.dtype,
-            "temperature": T, "calibrated": T != 1.0}
+            "temperature": T, "calibrated": T != 1.0, "use_case_temperatures": dict(s.model.head.use_case_temperatures)}
 
 
 def usable(device):

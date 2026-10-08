@@ -1,11 +1,12 @@
 """Ready-made question sets for an agent factory (a kanban of agents: intake, an orchestrator, workers, tool calls).
 
 Each preset is a `questions` dict for /v1/systemone or D1A.decide, worded exactly as D1A's routing and agent-kit training
-data asks it (JohnP1/d1a-routing), so a trained checkpoint is asked what it learned. `advise` turns the answers into
+data asks it (JohnP1/d1a-routing), so a trained checkpoint is asked what it learned. Send each with its USE_CASES entry as the
+request's `use_case`: a checkpoint with a routing temperature (d1a.training.calibrate --use-case routing) reads them at it. `advise` turns the answers into
 an action with fail-safe defaults: an unsure model routes up, consults, or asks a person, never the reverse.
 
     from d1a.agents.presets import PRESETS, advise
-    answers = D1A.load(run).decide(request_text, PRESETS["intake"])
+    answers = D1A.load(run).decide(request_text, PRESETS["intake"], use_case=USE_CASES["intake"])
     advise("intake", answers)   # {"consult": False, "worker": "developer", "tier": "medium"}
 """
 
@@ -47,6 +48,10 @@ GATE = {"decision": {"type": "choice", "instructions": "Should this tool call ru
     "deny": "never: destructive or irreversible, leaks secrets, or outside the card's scope"}}}
 
 PRESETS = {"intake": INTAKE, "judge": JUDGE, "tier": {"tier": TIER}, "gate": GATE, "route": {"route": ROUTE}}
+# The request use case of each preset (SystemOneRequest.use_case). All of them are the routing use case: the factory
+# questions (intake, judge, tier, gate) and the generic route question are the two halves of JohnP1/d1a-routing, and one
+# temperature fits both (v0.5: T 0.85 on factory and on generic development rows, #209).
+USE_CASES = {kind: "routing" for kind in PRESETS}
 
 
 def judge_state(card, report):

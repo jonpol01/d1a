@@ -55,6 +55,10 @@ class SystemOneRequest(BaseModel):
     state: JSONContent
     model: str = "d1a-latest"
     questions: dict[str, Question] = Field(min_length=1)
+    # D1A's own optional field (#209), never model input: the request's use case (e.g. "routing"). A checkpoint with a
+    # temperature for it (d1a.training.calibrate --use-case) reads this request's probabilities at that temperature; absent,
+    # or a name the checkpoint has no temperature for, the checkpoint's own temperature applies. Never guessed from the text.
+    use_case: str | None = None
 
 
 # --- text the model reads -----------------------------------------------------------------------------------------------

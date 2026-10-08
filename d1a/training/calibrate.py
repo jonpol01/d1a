@@ -28,6 +28,20 @@ so reordering a rows file never moves a verdict.
 
     python -m d1a.training.calibrate --run runs/new --rows runs/pool/rows.json --judge runs/served/rows.json --guard runs/hard/rows.json --confirm runs/test/rows.json --locked runs/locked/rows.json
 
+--use-case NAME fits (or with --temperature, writes) the temperature of one use case instead: the requests that name it
+(SystemOneRequest.use_case) are served at it, every other request keeps the checkpoint's temperature, which this never
+touches. It goes into the checkpoint's use_case_temperatures map (d1a_config.json's extra, carried by MLX exports), its
+record into use_case_temperature_fits[NAME], with the same fit, report and refusals; --judge compares it with the
+temperature that use case is served at now (its entry, else the checkpoint's).
+
+    python -m d1a.training.calibrate --run runs/v0.5 --use-case routing --rows <generic-development + handlabelled-45 rows>.json --transfer <factory-development rows>.json --allow-in-distribution
+    python -m d1a.training.calibrate --run runs/v0.5 --use-case routing --temperature 0.85 --reason "fitted on ..., report ..."
+
+The only held-out rows a routing checkpoint has are its own suite's development partitions (evals/d1a/routing), which the
+held-out check refuses: the checkpoint trained on that suite's train partitions, so they are in distribution (and the check
+cannot place D1A suite partitions yet, #196). Fit on them with --allow-in-distribution (recorded), and judge the result out
+of sample: by the cross-fit line (OOF) below, and by fitting on some partitions and scoring another with --transfer.
+
 What the checkpoint trained on comes from its metadata (d1a.training.train records the suite's manifest hash, its args and --data) or a
 provenance.json beside it; where rows came from, from the report.json d1a.eval.benchmark writes beside them.
 """
@@ -35,10 +49,11 @@ import argparse
 import functools
 import hashlib
 import json
+import math
 from dataclasses import dataclass
 from pathlib import Path
 
-from d1a.backends.checkpoint import read_meta, write_meta
+from d1a.backends.checkpoint import USE_CASE_FITS, USE_CASE_TEMPERATURES, checked_use_case_temperatures, read_meta, write_meta
 from d1a.eval.metrics import TEMPERATURE_FIT, TEMPERATURE_FIT_METHOD, cross_validated_temperature, fit_temperature, metrics, raw_row, recorded, scored_rows
 from d1a.eval.suite import digest, read_json, read_manifest, suite_key
 from d1a.training.temperature_gate import confirmation, interval, keyed, rule
@@ -211,8 +226,27 @@ def report_line(name, rows, T):
             f" | conf-err {raw['confident_error_rate']:.3f} -> {cal['confident_error_rate']:.3f} | cov@5% {raw['coverage_at_5pct_error']:.2f} -> {cal['coverage_at_5pct_error']:.2f}")
 
 
-def calibrate(run, rows, exclude=(), transfer=None, allow_in_distribution=False, folds=5, seed=0, judge=(), guard=(), confirm=(), locked=()):
-    """Fit, report and write the temperature of `run` (see the module docstring). -> the temperature it now serves."""
+def serving(meta, use_case):
+    """The temperature requests of `use_case` (None: every request without one) are served at now."""
+    return meta.use_case_temperatures.get(use_case, meta.temperature) if use_case else meta.temperature
+
+
+def write(run, meta, T, fit, use_case):
+    """Write T and its fit record: the checkpoint's temperature, or with `use_case` only that use case's entry (the
+    checkpoint's temperature and temperature_fit stay as they are)."""
+    if use_case:
+        meta.extra[USE_CASE_TEMPERATURES] = checked_use_case_temperatures({**meta.use_case_temperatures, use_case: T})
+        meta.extra[USE_CASE_FITS] = {**meta.extra.get(USE_CASE_FITS, {}), use_case: fit}
+    else:
+        meta.temperature = T
+        meta.extra["temperature_fit"] = fit
+    write_meta(run, meta)
+    print(f"wrote temperature {T:.2f}" + (f" for use case {use_case!r}" if use_case else "") + f" to {run}/d1a_config.json")
+
+
+def calibrate(run, rows, exclude=(), transfer=None, allow_in_distribution=False, folds=5, seed=0, judge=(), guard=(), confirm=(), locked=(), use_case=None):
+    """Fit, report and write the temperature of `run`, or with `use_case` that use case's (see the module docstring).
+    -> the temperature it (that use case) now serves."""
     reads, judged, guarded, tests, held = (parse_rows(v) for v in (rows, judge, guard, confirm, locked))
     if problem := roles_problem(reads, judged, guarded, tests, held, exclude):
         raise SystemExit(problem)
@@ -245,14 +279,15 @@ def calibrate(run, rows, exclude=(), transfer=None, allow_in_distribution=False,
     spread = interval(units)
     print(f"fit rows     T={T:.4f} 90% interval [{spread['lower']:.4f}, {spread['upper']:.4f}] over {spread['samples']} cluster resamples")
     meta = read_meta(run)
+    current = serving(meta, use_case)
     verdict = None
     if judged:
-        verdict = rule(gate["judge"], gate["guard"], T, meta.temperature)
+        verdict = rule(gate["judge"], gate["guard"], T, current)
         j = verdict["judge"]
-        print(f"rule         T={T:.4f} vs current {meta.temperature:.4f} on {j['n']} judge questions: Brier {j['brier_delta']:+.4f}"
+        print(f"rule         T={T:.4f} vs current {current:.4f} on {j['n']} judge questions: Brier {j['brier_delta']:+.4f}"
               f" [{j['brier_ci95'][0]:+.4f}, {j['brier_ci95'][1]:+.4f}], ECE {j['ece']['candidate']:.4f} vs {j['ece']['shipped']:.4f}")
         if verdict["adopt"] and (tests or held):
-            verdict["confirmation"] = confirmation(gate["confirm"], gate["locked"], T, meta.temperature)
+            verdict["confirmation"] = confirmation(gate["confirm"], gate["locked"], T, current)
             for stage, named in (("confirm", verdict["confirmation"]["tests"]), ("locked", verdict["confirmation"]["locked"])):
                 for name, s in named.items():
                     print(f"{stage:12} {name}: ECE {s['ece']['candidate']:.4f} vs {s['ece']['shipped']:.4f}, Brier {s['brier']['candidate']:.4f}"
@@ -260,26 +295,19 @@ def calibrate(run, rows, exclude=(), transfer=None, allow_in_distribution=False,
         elif tests or held:
             print("confirmation rows not scored: the rule failed")
         if failed := verdict["failed"] + verdict.get("confirmation", {}).get("failed", []):
-            print(f"kept temperature {meta.temperature:.4f} in {run}: nothing written\n  " + "\n  ".join(failed))
-            return meta.temperature
-    meta.temperature = T
-    meta.extra["temperature_fit"] = {"rows": rows[0] if len(rows) == 1 else list(rows), **({"exclude_rows": list(exclude)} if exclude else {}),
-                                     "n": len(fit), "method": TEMPERATURE_FIT_METHOD, "cross_validation": cv,
-                                     "interval": spread, **({"rule": verdict} if verdict else {}),
-                                     "fit_rows": fitted, "training_suites": sorted(training.suites) if training else None,
-                                     **({"in_distribution": {"allowed": True, "problems": problems}} if problems else {})}
-    write_meta(run, meta)
-    print(f"wrote temperature {T:.2f} to {run}/d1a_config.json")
+            print(f"kept temperature {current:.4f}" + (f" for use case {use_case!r}" if use_case else "") + f" in {run}: nothing written\n  " + "\n  ".join(failed))
+            return current
+    write(run, meta, T, {"rows": rows[0] if len(rows) == 1 else list(rows), **({"exclude_rows": list(exclude)} if exclude else {}),
+                         "n": len(fit), "method": TEMPERATURE_FIT_METHOD, "cross_validation": cv,
+                         "interval": spread, **({"rule": verdict} if verdict else {}),
+                         "fit_rows": fitted, "training_suites": sorted(training.suites) if training else None,
+                         **({"in_distribution": {"allowed": True, "problems": problems}} if problems else {})}, use_case)
     return T
 
 
-def write_manual(run, temperature, reason):
-    """Write a temperature without fitting, recording where it comes from."""
-    meta = read_meta(run)
-    meta.temperature = temperature
-    meta.extra["temperature_fit"] = {"method": "manual", "reason": reason.strip()}
-    write_meta(run, meta)
-    print(f"wrote temperature {temperature:.2f} to {run}/d1a_config.json")
+def write_manual(run, temperature, reason, use_case=None):
+    """Write a temperature without fitting, recording where it comes from (with `use_case`, that use case's only)."""
+    write(run, read_meta(run), temperature, {"method": "manual", "reason": reason.strip()}, use_case)
 
 
 def main(argv=None):
@@ -290,7 +318,11 @@ def main(argv=None):
     ap.add_argument("--transfer", help="out-of-domain rows.json, reported before and after (never fitted)")
     ap.add_argument("--temperature", type=float, help="write this value without fitting or judging it; needs --reason")
     ap.add_argument("--reason", help="with --temperature: where the value comes from (recorded in the checkpoint)")
-    ap.add_argument("--allow-in-distribution", action="store_true", help="fit even on rows that share data with the checkpoint's training; warned and recorded")
+    ap.add_argument("--allow-in-distribution", action="store_true", help="fit even on rows that share data with the checkpoint's training; warned and recorded."
+                    " A routing --use-case fit on evals/d1a/routing's development partitions needs it: they come from the corpus the checkpoint"
+                    " trained on (and #196: the check cannot place D1A suite partitions yet); judge it by the OOF line and --transfer")
+    ap.add_argument("--use-case", help="fit or write the temperature of this use case only (requests with \"use_case\": NAME), into the"
+                    " checkpoint's use_case_temperatures; the checkpoint's own temperature is left as it is")
     ap.add_argument("--judge", action="append", default=[], help="rows the new temperature must beat the current one on: pooled, Brier"
                     " (95%% upper bound below 0) and ECE lower; each one's ECE may rise by at most 0.005; path or path:source,...; repeatable")
     ap.add_argument("--guard", action="append", default=[], help="with --judge: rows whose ECE may rise by at most 0.005; path or path:source,...,"
@@ -301,13 +333,15 @@ def main(argv=None):
     ap.add_argument("--folds", type=int, default=5)
     ap.add_argument("--seed", type=int, default=0, help="the cross-validation's folds and bootstrap; the rule's bootstrap and the interval are always seed 0 (Kev's registered read)")
     a = ap.parse_args(argv)
+    if a.use_case is not None and not a.use_case.strip(): ap.error("--use-case needs a name")
     if a.temperature is not None:
         if not (a.reason or "").strip(): ap.error("--temperature needs --reason: where the value comes from (recorded in the checkpoint)")
         if a.judge or a.guard or a.confirm or a.locked:
             ap.error("--temperature writes its value unjudged: --judge, --guard, --confirm and --locked would be ignored")
-        return write_manual(a.run, a.temperature, a.reason)
+        if a.use_case and not (math.isfinite(a.temperature) and a.temperature > 0): ap.error("--temperature must be finite and positive")
+        return write_manual(a.run, a.temperature, a.reason, a.use_case)
     if not a.rows: ap.error("--rows is required unless --temperature is given")
-    return calibrate(a.run, a.rows, a.exclude_rows, a.transfer, a.allow_in_distribution, a.folds, a.seed, a.judge, a.guard, a.confirm, a.locked)
+    return calibrate(a.run, a.rows, a.exclude_rows, a.transfer, a.allow_in_distribution, a.folds, a.seed, a.judge, a.guard, a.confirm, a.locked, a.use_case)
 
 
 if __name__ == "__main__":
