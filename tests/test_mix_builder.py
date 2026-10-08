@@ -1,7 +1,9 @@
 """recipes/mix/build_mix.py and verify_mix.py (#202): the plan-driven mix builder draws the same bytes for the same plan and
-seed, stratifies and weights, fills label quotas, keeps only unseen records when asked, screens exact and near-duplicate
-eval states and eval PR ids, refuses a plan that leaves out a training source, and writes a sidecar d1a.training.train
-accepts; the verifier catches a changed record. Synthetic records stand in for the suites (no private rows)."""
+seed (a pinned sha256), stratifies and weights, fills label quotas, keeps only unseen records when asked, screens exact and
+near-duplicate eval states (the nearest one by shingles, a PR's title and body), eval and hand-labelled PR ids, the Japanese
+twins of eval-like PRs and repeated states (every copy when their labels disagree), refuses a plan that leaves out a
+training source, and writes a sidecar d1a.training.train accepts; the verifier catches a changed record. Synthetic records
+stand in for the suites (no private rows)."""
 import argparse
 import importlib.util
 import json
@@ -179,3 +181,66 @@ def test_the_sidecar_passes_the_trainers_source_check(tmp_path):
     out = built(tmp_path, train, evals)
     a = argparse.Namespace(init_from="JohnP1/d1a-e4b", data=str(out), suite=None, replay=0, extra_suites="", allow_missing_sources="", reason="")
     assert trainer.source_coverage(a) == {"covered": trainer.required_sources(), "allowed_missing": [], "reason": None}
+
+
+def test_the_shingle_screen_finds_the_nearest_eval_state_not_the_ones_sharing_most():
+    train, evals = suites()
+    rng = random.Random(11)
+    t = words(rng, 200).split()
+    train["hard-v1:train"][5] = dict(train["hard-v1:train"][5], state=" ".join(t))
+    # five long eval states that hold all of the record (Jaccard about 0.09) and one that holds 92% of it and nothing else
+    evals["hard-v1:development"] = [{"state": " ".join(words(rng, 2000).split() + t), "questions": {}} for _ in range(5)]
+    evals["hard-v1:development"].append({"state": " ".join(t[15:]), "questions": {}})
+    drop, _ = bm.screen(train, evals)
+    assert drop["hard-v1:train"] == {5: "near-eval-shingle"}
+
+
+def test_the_japanese_twin_of_an_eval_like_pr_is_dropped():
+    train, evals = suites()
+    en = train["pr-labels:train"][5]
+    evals["pr-labels:test"].append({"state": en["state"], "questions": {}})   # the English PR's text in an eval partition, no id
+    ja = train["pr-labels:train-ja"]
+    ja[2] = dict(ja[2], id=f"{en['id']}:ja")                              # its Japanese twin: other text, the PR's id with a suffix
+    ja[3] = dict(ja[3], id=f"{evals['pr-labels:test'][0]['id']}:ja")      # the twin of an eval PR
+    drop, _ = bm.screen(train, evals)
+    assert drop["pr-labels:train"] == {5: "exact-eval"}
+    assert drop["pr-labels:train-ja"] == {2: "ja-twin-of-eval-like", 3: "eval-pr-id"}
+
+
+def test_repeated_states_keep_the_first_copy_unless_their_labels_disagree():
+    train, evals = suites()
+    rows = train["documents-v1:train"]
+    rows[7] = dict(rows[7], state=rows[1]["state"])                       # the same label as row 1
+    rows[9] = dict(rows[9], state=rows[2]["state"], questions={"label": dict(rows[2]["questions"]["label"], label="b")})
+    drop, _ = bm.screen(train, evals)
+    assert drop["documents-v1:train"] == {7: "dup", 2: "dup-conflict", 9: "dup-conflict"}
+
+
+def test_a_pr_with_an_eval_prs_title_and_body_is_dropped():
+    train, evals = suites()
+    rng = random.Random(3)
+    head, body = evals["pr-labels:test"][2]["state"].split("\nbody: ", 1)
+    # a long file list between them keeps the whole state's shingle Jaccard near 0.1 and its 300-character prefix apart
+    train["pr-labels:train"][8] = dict(train["pr-labels:train"][8], state=f"{head.upper()}\nfiles: {words(rng, 400)}\nbody: {body} more")
+    train["pr-labels:train"][9] = dict(train["pr-labels:train"][9], state=f"{head}\nbody: {words(rng)}")   # the title alone: kept
+    drop, _ = bm.screen(train, evals)
+    assert drop["pr-labels:train"] == {8: "near-eval-title-body"}
+
+
+def test_hand_labelled_prs_are_screened_by_id_too(tmp_path, monkeypatch):
+    train, _ = suites()
+    monkeypatch.setattr(bm, "D1A_EVAL_SUITES", ()); monkeypatch.setattr(bm, "FROZEN_EVALS", ())   # the kit alone
+    (tmp_path / "evals/d1a").mkdir(parents=True)
+    pr = train["pr-labels:train"][4]
+    human = [{"id": pr["id"], "state": "the same PR labelled by hand, other text", "labels": {}}]
+    (tmp_path / "human.json").write_text(json.dumps(human), encoding="utf-8")
+    evals = bm.load_evals(tmp_path, human=tmp_path / "human.json")
+    drop, _ = bm.screen(train, evals)
+    assert drop["pr-labels:train"] == {4: "eval-pr-id"}
+
+
+def test_a_fixed_plan_gives_a_pinned_mix():
+    train, evals = suites()
+    p = plan(n=7)
+    spec(p, "hard-v1:train").update(n=12, stratify="_meta.family")
+    assert bm.build(p, train, evals)[2]["sha256"] == "39f9dcb3f2f372168393c0d3dc6c17da211d6ad95b2f4b3cf48158f4b5ec457c"

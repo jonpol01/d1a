@@ -7,10 +7,10 @@ pinned suites only, after screening every eval partition. CPU only, no model.
 
 The leak screens drop a training record whose normalised state is in any eval partition or eval-only kit, a near-duplicate
 of one (the same 300-character prefix and word 5-shingle Jaccard >= 0.5; a PR with the same title and body Jaccard >= 0.9;
-a word 5-shingle Jaccard >= 0.8 against its own family's eval partitions, found through an inverted index), a repeated
-state inside a source (conflicting labels drop every copy), a PR whose id is in a pr-labels eval partition, and the
-Japanese twin of an English PR dropped as eval-like. The mix holds no exact eval state and no eval PR id (checked again on
-the whole mix).
+a word 5-shingle Jaccard >= 0.8 against its own family's eval partitions, exact over every eval state an inverted index
+finds), a repeated state inside a source (conflicting labels drop every copy), a PR whose id is in a pr-labels eval
+partition or the hand-labelled kit, and the Japanese twin of an English PR dropped as eval-like. The mix holds no exact
+eval state and no eval PR id (checked again on the whole mix).
 
 A plan covers every d1a.eval.suites.train_sources() entry and decision-v7 (in the mix, or "dv7_replay" > 0 for the trainer's
 --replay), as recipes/skills/mix.py, recipes/pr-labeler/mix.py and d1a.training.train require (#167, #211), or names what it
@@ -50,8 +50,9 @@ from d1a.eval.suite import digest, load_split, normalise_text, read_jsonl  # noq
 from d1a.eval.suites import manifest, resolve, train_sources  # noqa: E402
 
 DECISION_V7 = "evals/v7/decision-v7"
-# The eval partitions every mix is screened against, in this order (the shingle screen's ties follow it): every eval
-# partition of the D1A suites (these first, then any other suite under evals/d1a), and these frozen suites' splits.
+# The eval partitions every mix is screened against, in this order (of two equally near eval states, the verifier names the
+# first): every eval partition of the D1A suites (these first, then any other suite under evals/d1a), and these frozen
+# suites' splits.
 D1A_EVAL_SUITES = ("pr-labels", "routing", "ja-jglue", "night2", "external")
 FROZEN_EVALS = (("evals/hard-v1", ("development", "test")), ("evals/devtools-v1", ("development", "test")),
                 ("evals/documents-v1", ("development", "test")), ("evals/v7/decision-v7", ("development", "test", "calibration")),
@@ -61,6 +62,7 @@ FROZEN_EVALS = (("evals/hard-v1", ("development", "test")), ("evals/devtools-v1"
                 ("evals/decision-v2", ("development", "test", "calibration")))
 REPLAY_KIT, DEMO_KIT, HUMAN_KIT = ("EVAL-ONLY labeler-replay (distinct states)", "EVAL-ONLY playground demo requests",
                                    "EVAL-ONLY human-labeled owner PRs")
+PR_ID_EVALS = ("pr-labels", HUMAN_KIT)   # the eval partitions and kits whose PR ids a training PR must not share
 # word 5-shingle screen (Jaccard >= 0.8): a training source against the eval partitions of its own family
 FAMILIES = {"pr-labels": ("pr-labels:", "EVAL-ONLY labeler", "EVAL-ONLY human"), "documents-v1": ("documents-v1:",),
             "devtools-v1": ("devtools-v1:",), "hard-v1": ("hard-v1:",), "routing": ("routing:", "EVAL-ONLY playground"),
@@ -97,6 +99,17 @@ def word_shingles(t):
     """Hashed word 5-shingles of a text (the pool-level and the verifier's near-duplicate screens)."""
     w = re.findall(r"\w+", t.casefold())
     return {hashlib.blake2b(" ".join(w[i:i + 5]).encode(), digest_size=8).digest() for i in range(max(1, len(w) - 4))}
+
+
+def nearest(sa, shared, E):
+    """-> (Jaccard, j): the eval state E[j] (a shingle set) nearest to the shingle set `sa`, given `shared` {j: |sa & E[j]|}.
+    Exact over every candidate, ties to the lowest j, so the answer does not depend on the order `shared` was filled in."""
+    best, bj = 0, None
+    for j in sorted(shared):
+        n = shared[j]
+        jac = n / max(1, len(sa) + len(E[j]) - n)   # |sa | E[j]| from the counts
+        if jac > best: best, bj = jac, j
+    return best, bj
 
 
 def get(r, key):
@@ -186,7 +199,8 @@ def load_evals(root=ROOT_DIR, replay=None, human=None):
                 seen.add(r["state"]); states.append({"state": r["state"], "questions": {}})
         evals[REPLAY_KIT] = states
     if human is not None:
-        evals[HUMAN_KIT] = [{"state": r["state"], "questions": {}} for r in json.loads(Path(human).read_text(encoding="utf-8"))]
+        evals[HUMAN_KIT] = [{"state": r["state"], "questions": {}, **({"id": r["id"]} if r.get("id") else {})}
+                            for r in json.loads(Path(human).read_text(encoding="utf-8"))]
     if replay is not None:
         evals[DEMO_KIT] = [{"state": r["body"]["state"], "questions": {}}
                            for r in json.loads((Path(replay) / "demo-requests.json").read_text(encoding="utf-8")) if "state" in r.get("body", {})]
@@ -243,7 +257,7 @@ def screen(train, evals):
     """guards(), then the PR title-body screen, the family shingle screen and the Japanese twins -> (drop, report)."""
     drop = guards(train, evals)
     pid = lambda r: str(r.get("id")).split(":")[0]  # noqa: E731   (a Japanese twin's id is its PR's, with a suffix)
-    eval_prs = {pid(r) for k, rs in evals.items() if k.startswith("pr-labels") for r in rs if r.get("id")}
+    eval_prs = {pid(r) for k, rs in evals.items() if k.startswith(PR_ID_EVALS) for r in rs if r.get("id")}
     for src in [k for k in train if k.startswith("pr-labels")]:
         for i, r in enumerate(train[src]):
             if r.get("id") and pid(r) in eval_prs:
@@ -276,7 +290,7 @@ def screen(train, evals):
                 sa = word_shingles(state_text(r)); c = Counter()
                 for x in sa:
                     for j in ix.get(x, ()): c[j] += 1
-                best = max((n / max(1, len(sa | E[j])) for j, n in c.most_common(5)), default=0)
+                best, _ = nearest(sa, c, E)
                 if best >= NEAR_SHINGLE:
                     drop[src][i] = "near-eval-shingle"; dropped[src] += 1
                 elif best >= 0.5:
@@ -406,7 +420,7 @@ def build(plan, train, evals, exposure=None, root=ROOT_DIR):
     # whole-mix checks: no eval state, no repeated state, no eval PR id
     eval_h = {state_hash(r) for rows in evals.values() for r in rows}
     mix_h = Counter(state_hash(r) for r in out_rows)
-    eval_ids = {str(r.get("id")) for k, rows in evals.items() if k.startswith("pr-labels") for r in rows}
+    eval_ids = {str(r.get("id")) for k, rows in evals.items() if k.startswith(PR_ID_EVALS) for r in rows}
     sev, blast, typ = Counter(), Counter(), Counter()
     for r in out_rows:
         q = r["questions"]
@@ -451,7 +465,7 @@ def main():
     ap.add_argument("--root", default=str(ROOT_DIR), help="the checkout whose evals/ holds the pinned suites")
     ap.add_argument("--exposure", help="the per-record exposure index (JSONL); without it every record counts as never trained")
     ap.add_argument("--replay", help="the labeler replay kit (labeler-calls.jsonl, demo-requests.json): screened as eval-only")
-    ap.add_argument("--human", help="the owner's hand-labelled PRs (JSON list of {state, ...}): screened as eval-only")
+    ap.add_argument("--human", help="the owner's hand-labelled PRs (JSON list of {state, id, ...}): screened as eval-only, by state and id")
     ap.add_argument("--no-kits", action="store_true", help="build without the eval-only kits (the sidecar lists what was screened)")
     a = ap.parse_args()
     if not a.no_kits and not (a.replay and a.human):

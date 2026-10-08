@@ -4,8 +4,8 @@ Every dataset a D1A model can train on, what it teaches, and which runs used how
 cases with one set of weights, so it drifts away from whatever a fine-tune leaves out.
 
 **Two rules** (John, 2026-10-08):
-- **All gets in.** Every fine-tune trains on or replays every source below. The mix tools refuse a mix that leaves one
-  out (#194), and so does `d1a.training.train` (#211).
+- **All gets in.** Every fine-tune trains on or replays every source below. The mix tools refuse or replay a source a mix
+  leaves out (#194), and `d1a.training.train` refuses the run (#211).
 - **All gets tested.** Every new checkpoint is gated on every suite (`scripts/quality_gate.py --all-suites`) and judged
   by `scripts/decide.py`, which answers INCOMPLETE if anything is missing (#210).
 
@@ -64,5 +64,10 @@ What the runs taught about the mix:
 - **What the builder adds:** each source's count, stratification, weights, label quotas and "only unseen" filter are set
   in a plan. Every eval partition and eval-only kit is screened out, by exact state, PR id and near-duplicate.
   `recipes/mix/verify_mix.py` checks the result.
-- **All three refuse a mix that leaves out a source above**, unless it names the source and says why.
+- **None of the three writes a mix that leaves out a source above unasked; each refuses or replays:**
+  - `recipes/skills/mix.py` replays records of each source its plan leaves out (`--replay-rest`, 300 by default and at
+    least 1); only `--recorded`, which rebuilds v0.5's mix, skips that;
+  - `recipes/pr-labeler/mix.py` refuses such a mix, with no way to name a source and say why; only `--replay-skills 0`,
+    which rebuilds the v0.3 and v0.4 mixes, skips the check;
+  - `recipes/mix/build_mix.py` refuses such a plan unless it names the source in `allow_missing_sources` with a `reason`.
 - See `recipes/README.md` for the commands.

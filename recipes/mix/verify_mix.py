@@ -4,9 +4,9 @@
 - every line is, byte for byte, json.dumps(record, ensure_ascii=False) of the source row its index line names, with that
   row's state sha256;
 - decision-v7's records pass the trainer's validate_training against the decision-v7 manifest;
-- no normalised state of an eval partition or eval-only kit is in the mix, no PR id of a pr-labels eval partition, no state
-  twice; a word 5-shingle screen of the whole mix against each family's eval partitions (any eval-only kit counting as a PR
-  one) finds no Jaccard >= 0.8;
+- no normalised state of an eval partition or eval-only kit is in the mix, no PR id of a pr-labels eval partition or the
+  hand-labelled kit, no state twice; a word 5-shingle screen of the whole mix against each family's eval partitions (any
+  eval-only kit counting as a PR one) finds no Jaccard >= 0.8;
 - the sidecar's records by source match the index, and d1a.training.train's source check accepts the sidecar.
 Also reports label shares, and with --tokenizer the exact token lengths. Writes <mix>.verify.json; exits 1 on a failure.
 
@@ -52,7 +52,7 @@ def verify(text, index, sidecar, train, evals, root=bm.ROOT_DIR):
     ov = {}
     for k, rs in evals.items():
         ns = sum(bm.state_hash(r) in mh for r in rs)
-        ni = sum(str(r.get("id")).split(":")[0] in ids for r in rs if r.get("id") and k.startswith("pr-labels"))
+        ni = sum(str(r.get("id")).split(":")[0] in ids for r in rs if r.get("id") and k.startswith(bm.PR_ID_EVALS))
         if ns or ni: ov[k] = {"states": ns, "pr_ids": ni}
     out["eval_partitions_read"] = len(evals); out["eval_overlap"] = ov
     if "eval_partitions" in sidecar and sorted(sidecar["eval_partitions"]) != sorted(evals):
@@ -63,6 +63,7 @@ def verify(text, index, sidecar, train, evals, root=bm.ROOT_DIR):
     scr = {}
     for fam, pre in FAMILIES.items():
         E = [(k, bm.word_shingles(bm.state_text(r))) for k, rs in evals.items() if k.startswith(pre) for r in rs]
+        shingles = [s for _, s in E]
         ix = defaultdict(list)
         for j, (_, s) in enumerate(E):
             for x in s: ix[x].append(j)
@@ -72,10 +73,8 @@ def verify(text, index, sidecar, train, evals, root=bm.ROOT_DIR):
             s = bm.word_shingles(bm.state_text(r)); c = Counter()
             for y in s:
                 for j in ix.get(y, ()): c[j] += 1
-            best, bk = 0, None
-            for j, n in c.most_common(5):
-                jac = n / max(1, len(s | E[j][1]))
-                if jac > best: best, bk = jac, E[j][0]
+            best, j = bm.nearest(s, c, shingles)
+            bk = E[j][0] if j is not None else None
             mx = max(mx, best)
             for th in (0.5, bm.NEAR_SHINGLE):
                 if best >= th: hits[f"{th}|{bk}"] += 1
