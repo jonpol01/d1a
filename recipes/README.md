@@ -6,9 +6,9 @@ README.
 
 ## Fine-tunes keep the skills (#167)
 
-A fine-tune is any run that starts from a trained checkpoint (`--init_from`, or a recipe stage after the first). Two rules,
-from #167: D1A-E4B's PR-labeler fine-tunes cost up to 4 points on hard-v1, devtools-v1 and documents-v1, because their
-mixes replayed none of them.
+A fine-tune is any run that starts from a trained checkpoint (`--init_from`, or a recipe stage after the first). Three
+rules. The first two come from #167: D1A-E4B's PR-labeler fine-tunes cost up to 4 points on hard-v1, devtools-v1 and
+documents-v1, because their mixes replayed none of them.
 
 1. **Replay every skill.** The fine-tune's mix trains on or replays every training source, beside decision-v7 (which
    the trainer replays): the train partitions of `evals/hard-v1`, `evals/devtools-v1` and `evals/documents-v1`, and every
@@ -45,6 +45,12 @@ mixes replayed none of them.
          count as their original's source.
      - **NOT BETTER** covers the rest. A near miss (pooled Δ > 0, 2 wins, no loss) earns one rerun with a new seed.
      - V2, a person reading the safety demos' flips, comes before any deploy. Every significant loss becomes a follow-up.
+
+3. **Judge the refit against the init's temperature (#207).** Training writes every run at temperature 1.0, so a
+   fine-tune's refit would otherwise be judged against an uncalibrated model. With `--judge`, `d1a.training.calibrate`
+   judges a fine-tune not yet calibrated against the temperature its `--init_from` checkpoint serves (v0.5: 1.78), says
+   so, and records it in `temperature_fit.rule.incumbent`; `--incumbent <run|T>` names another. If the refit fails, nothing
+   is written and the run still serves 1.0: write the incumbent's value with `--temperature <T> --reason "<why>"`.
 
 ## The skills stage (`skills/`, #175)
 
