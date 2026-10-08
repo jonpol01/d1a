@@ -36,8 +36,9 @@ so reordering a rows file never moves a verdict.
 (SystemOneRequest.use_case) are served at it, every other request keeps the checkpoint's temperature, which this never
 touches. It goes into the checkpoint's use_case_temperatures map (d1a_config.json's extra, carried by MLX exports), its
 record into use_case_temperature_fits[NAME], with the same fit, report and refusals; --judge compares it with the
-incumbent's temperature for that use case (its entry, else the checkpoint's): --incumbent's, or for a fine-tune with
-neither a fitted temperature nor an entry of its own its --init_from checkpoint's, else the run's own. --incumbent T is used as given.
+incumbent's temperature for that use case (its entry, else the checkpoint's): --incumbent's, or for a fine-tune with no
+entry of its own its --init_from checkpoint's (even when its main temperature is fitted: that fit says nothing about this
+use case), else the run's own. --incumbent T is used as given.
 
     python -m d1a.training.calibrate --run runs/v0.5 --use-case routing --rows <generic-development + handlabelled-45 rows>.json --transfer <factory-development rows>.json --allow-in-distribution
     python -m d1a.training.calibrate --run runs/v0.5 --use-case routing --temperature 0.85 --reason "fitted on ..., report ..."
@@ -258,7 +259,9 @@ def incumbent_of(run, meta, given=None, use_case=None):
         return {"temperature": served_temperature(given, f"--incumbent {given}", use_case), "source": "incumbent", "name": given}
     init = init_of(run, meta)
     own = use_case in meta.use_case_temperatures if use_case else False   # an entry is only ever written by calibrate
-    if init and not own and "temperature_fit" not in meta.extra:   # still training's 1.0: the init's temperature is the one it would replace
+    # still training's 1.0, or (with a use case) no entry of its own: the init's temperature is the one it would replace; a
+    # main fit says nothing about one use case's requests
+    if init and (not own if use_case else "temperature_fit" not in meta.extra):
         return {"temperature": served_temperature(init[0], f"--init_from {init[1]}", use_case), "source": "init_from", "name": init[1]}
     return {"temperature": serving(meta, use_case), "source": "run", "name": str(run)}
 
@@ -374,14 +377,16 @@ def main(argv=None):
                     " A routing --use-case fit on evals/d1a/routing's development partitions needs it: they come from the corpus the checkpoint"
                     " trained on (and #196: the check cannot place D1A suite partitions yet); judge it by the OOF line and --transfer")
     ap.add_argument("--use-case", help="fit or write the temperature of this use case only (requests with \"use_case\": NAME), into the"
-                    " checkpoint's use_case_temperatures; the checkpoint's own temperature is left as it is")
+                    " checkpoint's use_case_temperatures; the checkpoint's own temperature is left as it is; --judge compares"
+                    " it with the incumbent's temperature for this use case (see --incumbent)")
     ap.add_argument("--judge", action="append", default=[], help="rows the new temperature must beat the current one on: pooled, Brier"
                     " (95%% upper bound below 0) and ECE lower; each one's ECE may rise by at most 0.005; path or path:source,...; repeatable")
     ap.add_argument("--guard", action="append", default=[], help="with --judge: rows whose ECE may rise by at most 0.005; path or path:source,...,"
                     " each selection its own panel; repeatable")
     ap.add_argument("--incumbent", help="with --judge: the checkpoint (local run or Hub id) whose served temperature, or the"
                     " temperature T, the refit must beat; default: for a fine-tune not calibrated since training, the temperature"
-                    " its --init_from checkpoint serves, else the run's own; with --use-case, the checkpoint's temperature for that use case;"
+                    " its --init_from checkpoint serves, else the run's own; with --use-case, the checkpoint's temperature for that use case,"
+                    " and the init stays the incumbent until the fine-tune has an entry for it;"
                     " recorded in temperature_fit.rule.incumbent (use_case_temperature_fits[NAME] with --use-case)")
     ap.add_argument("--confirm", action="append", default=[], help="with --judge, scored once the rule passes: rows whose ECE must fall (Kev round 28's tests stage); repeatable")
     ap.add_argument("--locked", action="append", default=[], help="with --judge, scored once the rule passes: locked test rows whose Brier may rise by at most 0.005,"

@@ -286,3 +286,14 @@ def test_a_use_case_refit_of_a_fine_tune_is_judged_against_the_inits_temperature
     calibrate.main(["--run", str(run), "--use-case", "routing", "--rows", fit, "--judge", judge, "--allow-in-distribution"])
     out = capsys.readouterr().out
     assert "vs incumbent 0.8500" in out and "kept temperature" in out and read_meta(run).use_case_temperatures == {}
+    # its main temperature calibrated since, still no routing entry: a main fit says nothing about routing, so the init's
+    # routing temperature stays the bar
+    write_meta(run, Meta(base="b", temperature=1.8, extra={"temperature_fit": {"method": "manual"}}))
+    calibrate.main(["--run", str(run), "--use-case", "routing", "--rows", fit, "--judge", judge, "--allow-in-distribution"])
+    out = capsys.readouterr().out
+    assert "vs incumbent 0.8500" in out and "kept temperature" in out and read_meta(run).use_case_temperatures == {}
+    # an explicit --incumbent checkpoint is read for the use case too: its routing entry, not its 1.8
+    write_meta(run, Meta(base="b", temperature=1.0))
+    calibrate.main(["--run", str(run), "--use-case", "routing", "--rows", fit, "--judge", judge, "--allow-in-distribution", "--incumbent", str(init)])
+    out = capsys.readouterr().out
+    assert "vs incumbent 0.8500" in out and f"--incumbent {init}" in out and read_meta(run).use_case_temperatures == {}
