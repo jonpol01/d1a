@@ -388,8 +388,9 @@ class DecisionModel(nn.Module):
         dec = torch.tensor(starts[:-1]).to(self.device, non_blocking=True)
         opt, own, sl = torch.tensor([[starts[q] + 1 + j for q, j in zip(owner, slot)], owner, slot]).to(self.device, non_blocking=True)
         t = None
-        if temperatures is not None and any(x != self.head.temperature for x in temperatures):   # a batch mixing temperatures (#209)
-            t = torch.tensor([temperatures[q] for q in owner], dtype=torch.float32).to(self.device, non_blocking=True)
+        if temperatures is not None and any(x != self.head.temperature for x in temperatures):   # a use case's temperature (#209)
+            # one shared value stays a Python scalar: only a batch genuinely mixing temperatures divides by a device tensor
+            t = temperatures[0] if len(set(temperatures)) == 1 else torch.tensor([temperatures[q] for q in owner], dtype=torch.float32).to(self.device, non_blocking=True)
         z = self.head.many(X[dec], X[opt], own, t)
         Z = torch.full((len(ks), max(ks)), float("-inf"), device=self.device).index_put_((own, sl), z)
         return torch.softmax(Z, -1)[own, sl].cpu().split(ks)

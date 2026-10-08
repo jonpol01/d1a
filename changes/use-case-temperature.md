@@ -6,7 +6,8 @@
   before. The top answer never moves. `python -m d1a.training.calibrate --use-case routing` fits or writes the temperature
   into the checkpoint's `use_case_temperatures`, leaving its own temperature alone. `GET /v1/models` lists the map, and
   the decision log records each request's use case and temperature. The agent presets (`USE_CASES`), the MCP tools,
-  `D1A.decide(..., use_case=...)` and both clients send it. For v0.5, routing at T 0.85 instead of 1.78 lowers held-out
+  `D1A.decide(..., use_case=...)` and both clients send it. `use_case` is at most 64 characters (longer is a 422), and a
+  use-case name in the map or in `--use-case` is stored without surrounding whitespace. For v0.5, routing at T 0.85 instead of 1.78 lowers held-out
   factory-routing ECE from 0.132 to 0.030 with the same accuracy.
 
 ### Fixed

@@ -58,7 +58,8 @@ class SystemOneRequest(BaseModel):
     # D1A's own optional field (#209), never model input: the request's use case (e.g. "routing"). A checkpoint with a
     # temperature for it (d1a.training.calibrate --use-case) reads this request's probabilities at that temperature; absent,
     # or a name the checkpoint has no temperature for, the checkpoint's own temperature applies. Never guessed from the text.
-    use_case: str | None = None
+    # Bounded: the decision log records it verbatim.
+    use_case: str | None = Field(None, max_length=64)
 
 
 # --- text the model reads -----------------------------------------------------------------------------------------------

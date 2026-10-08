@@ -100,14 +100,19 @@ class Meta:
 
 
 def checked_use_case_temperatures(table):
-    """`table` as {non-empty name: finite positive float}, or ValueError naming what is wrong (a bad entry would otherwise
-    fail or skew one use case's answers only, long after the checkpoint loaded)."""
+    """`table` as {non-empty name: finite positive float}, names stripped (" routing " would never match a request), or
+    ValueError naming what is wrong (a bad entry would otherwise fail or skew one use case's answers only, long after the
+    checkpoint loaded)."""
     if not isinstance(table, dict):
         raise ValueError(f"{USE_CASE_TEMPERATURES} must be an object of use case -> temperature, not {table!r}")
+    out = {}
     for name, t in table.items():
         if not (isinstance(name, str) and name.strip()) or isinstance(t, bool) or not isinstance(t, (int, float)) or not (math.isfinite(t) and t > 0):
             raise ValueError(f"{USE_CASE_TEMPERATURES}: {name!r} -> {t!r}; each entry must name a use case and a finite positive temperature")
-    return {name: float(t) for name, t in table.items()}
+        if name.strip() in out:
+            raise ValueError(f"{USE_CASE_TEMPERATURES}: {name!r} names {name.strip()!r} twice")
+        out[name.strip()] = float(t)
+    return out
 
 
 def _read_head_pt(run):

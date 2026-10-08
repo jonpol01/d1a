@@ -36,6 +36,6 @@ class PointerHead(nn.Module):
         return self._tempered((self.k(h_opts) @ self.q(h_decide)) * self.scale, temperature)
 
     def many(self, h_decide, h_opts, owner, temperature=None):   # [Q, d], [sum K, d], each option's question [sum K] -> logits [sum K]
-        """forward() for many questions in one pass (serving batches). temperature: None (the head's own), or one value
-        per option ([sum K]) when the batch's requests are read at different temperatures."""
+        """forward() for many questions in one pass (serving batches). temperature: None (the head's own), one value for
+        the whole batch, or one per option ([sum K]) when the batch's requests are read at different temperatures."""
         return self._tempered((self.k(h_opts) * self.q(h_decide)[owner]).sum(-1) * self.scale, temperature)

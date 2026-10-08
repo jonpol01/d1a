@@ -11,7 +11,7 @@ backends) is free, as long as the answers are the same.
 ## 1. Requests
 
 A request is TypeSafe's System One request (`POST /v1/systemone`): a `state` (any JSON value), a `model` name, and
-`questions`, an object of question id → question, plus D1A's optional `use_case` (a string; §6), which is never model input.
+`questions`, an object of question id → question, plus D1A's optional `use_case` (a string of at most 64 characters; §6), which is never model input.
 A question is one of:
 
 | type | fields | options, in this order | reported under the keys |
@@ -115,7 +115,8 @@ A checkpoint carries one temperature `T` (§4), fitted on held-out rows by `d1a.
 `D1A_TEMPERATURE` overrides it at load.
 
 A checkpoint may also carry use-case temperatures, `extra.use_case_temperatures` (use case → finite positive `T`, written by
-`d1a.training.calibrate --use-case`, with each fit in `extra.use_case_temperature_fits`). A request whose `use_case` has an entry
+`d1a.training.calibrate --use-case`, with each fit in `extra.use_case_temperature_fits`); a name is read with surrounding
+whitespace stripped, and two entries that strip to one name are refused. A request whose `use_case` has an entry
 is read at that `T` in §4; a request without `use_case`, or whose use case has no entry, at the checkpoint's `T`, and an
 unknown use case is not an error. Each request of a batch is read at its own `T`. `D1A_TEMPERATURE` serves every request at
 its value, use cases included. A port without use cases gives D1A's answers for every request that names none. Learning from outcomes (`d1a.learning.feedback`: the outcome calibrator, and the outcome

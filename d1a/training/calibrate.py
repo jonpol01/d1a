@@ -333,7 +333,9 @@ def main(argv=None):
     ap.add_argument("--folds", type=int, default=5)
     ap.add_argument("--seed", type=int, default=0, help="the cross-validation's folds and bootstrap; the rule's bootstrap and the interval are always seed 0 (Kev's registered read)")
     a = ap.parse_args(argv)
-    if a.use_case is not None and not a.use_case.strip(): ap.error("--use-case needs a name")
+    if a.use_case is not None:
+        if not a.use_case.strip(): ap.error("--use-case needs a name")
+        a.use_case = a.use_case.strip()   # stored as the map stores it, so the fit and serving() find the same entry
     if a.temperature is not None:
         if not (a.reason or "").strip(): ap.error("--temperature needs --reason: where the value comes from (recorded in the checkpoint)")
         if a.judge or a.guard or a.confirm or a.locked:

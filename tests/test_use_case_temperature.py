@@ -17,6 +17,7 @@ import torch.nn.functional as F
 from d1a.backends.checkpoint import Checkpoint, LoadOptions, Meta, mlx_available, read_meta, write_meta
 from d1a.core.api import SystemOneRequest, to_answers, to_record
 from d1a.core.encoding import SERVE_MAX_BRANCH, SERVE_MAX_STATE
+from d1a.core.head import PointerHead
 from d1a.training import calibrate
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -178,6 +179,11 @@ def test_the_graphed_batch_readout_reads_each_question_at_its_requests_temperatu
     for q, t in enumerate(temps):
         assert torch.equal(mixed[q], (routing if t == ROUTING_T else plain)[q]), q
     assert same(model._readout_many(X, ks, [CHECKPOINT_T] * len(ks)), plain)
+    seen, many = [], model.head.many
+    model.head.many = lambda *a: seen.append(a[3]) or many(*a)
+    try: model._readout_many(X, ks, [ROUTING_T] * len(ks)), model._readout_many(X, ks, temps)
+    finally: del model.head.many
+    assert seen[0] == ROUTING_T and not torch.is_tensor(seen[0]) and torch.is_tensor(seen[1])   # a shared value stays a scalar
 
 
 @pytest.mark.skipif(platform.system() != "Darwin" or platform.machine() != "arm64" or not mlx_available(), reason="MLX runs on Apple Silicon only")
@@ -265,6 +271,25 @@ def test_a_checkpoint_with_a_bad_use_case_temperature_is_refused_at_load(tmp_pat
             Checkpoint(tmp_path)
 
 
+def test_a_use_case_is_bounded_and_map_names_are_stripped(tmp_path):
+    """use_case is echoed into the decision log, so it has a length bound; a map name or --use-case with stray spaces is
+    stored as the name a request sends ("routing"), and two entries naming one use case are refused."""
+    request = {"state": "s", "questions": {"a": {"type": "noul", "instructions": "Is it fine?"}}}
+    assert SystemOneRequest(**request, use_case="x" * 64).use_case == "x" * 64
+    with pytest.raises(ValueError, match="use_case"):
+        SystemOneRequest(**request, use_case="x" * 65)
+    write_meta(tmp_path, Meta(base="b", extra={"use_case_temperatures": {" routing ": ROUTING_T}}))
+    head = PointerHead(4)
+    head.use_case_temperatures = read_meta(tmp_path).use_case_temperatures
+    assert head.use_case_temperatures == {"routing": ROUTING_T} and head.temperature_for("routing") == ROUTING_T
+    calibrate.main(["--run", str(tmp_path), "--use-case", " triage ", "--temperature", "2.5", "--reason", "test"])
+    meta = read_meta(tmp_path)
+    assert meta.use_case_temperatures == {"routing": ROUTING_T, "triage": 2.5} and list(meta.extra["use_case_temperature_fits"]) == ["triage"]
+    write_meta(tmp_path, Meta(base="b", extra={"use_case_temperatures": {"routing": 1.0, "routing ": 2.0}}))
+    with pytest.raises(ValueError, match="twice"):
+        read_meta(tmp_path).use_case_temperatures
+
+
 def test_models_lists_the_map_and_the_decision_log_records_the_use_case_and_temperature(models, golden, tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
     from d1a.serving import serve
@@ -280,6 +305,7 @@ def test_models_lists_the_map_and_the_decision_log_records_the_use_case_and_temp
             for use_case in ("routing", None, "triage"):
                 body = {**golden[0]["request"], **({"use_case": use_case} if use_case else {})}
                 assert client.post("/v1/systemone", json=body).status_code == 200
+            assert client.post("/v1/systemone", json={**golden[0]["request"], "use_case": "x" * 65}).status_code == 422
         logged = [e for e in serve.LEARNING.log.events() if e["kind"] == "decision"]
         assert [(e.get("use_case"), e["temperature"]) for e in logged] == [("routing", ROUTING_T), (None, CHECKPOINT_T), ("triage", CHECKPOINT_T)]
         assert "use_case" not in logged[1]
