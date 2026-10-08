@@ -14,6 +14,12 @@ mixes replayed none of them.
    the trainer replays): the train partitions of `evals/hard-v1`, `evals/devtools-v1` and `evals/documents-v1`, and every
    D1A train partition: PR labels (train, train-ja, train-blast), routing (factory-train, generic-train) and JGLUE.
    `d1a.eval.suites.train_sources()` lists them, and both mix tools refuse a new mix that leaves one out.
+   - **The trainer enforces it too (#211).** With `--init_from`, `d1a.training.train` reads the `--data` mix's sidecar
+     (`<data>.json`, as both mix tools and the D2 builder write it), adds `--suite` with `--replay` and `--extra_suites`, and
+     refuses the run before any weights load if a training source or decision-v7 is missing, naming each. A hand-built mix
+     needs a sidecar with its records by source; without one a fine-tune is refused. A source left out on purpose is named:
+     `--allow_missing_sources <source,...|all> --reason "<why>"`, and both are recorded in the run's `training_config.json`
+     (`sources`), beside what it covered.
    - `recipes/pr-labeler/mix.py` replays JGLUE 500, routing 300 and each skills suite 500 by default, and takes the
      train-ja and train-blast PRs; `--replay-skills 0` only rebuilds the v0.3 and v0.4 mixes.
    - `recipes/skills/mix.py` adds 300 records of each source its plan leaves out (`--replay-rest`); `--recorded` only

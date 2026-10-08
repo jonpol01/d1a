@@ -22,7 +22,7 @@ stages:
   - name: base
     train: {suite: evals/v7/decision-v7, epochs: 2, lr: 1.0e-4, extra_suites: [evals/hard-v1, evals/devtools-v1], checkpointing: true}
   - name: skills
-    train: {suite: evals/v7/decision-v7, epochs: 1, lr: 2.0e-5}
+    train: {allow_missing_sources: all, reason: stage chaining only, suite: evals/v7/decision-v7, epochs: 1, lr: 2.0e-5}
 """
 
 
@@ -63,6 +63,8 @@ def test_stages_chain_and_are_recorded(tmp_path):
     (("name: skills", "name: base"), "unique name"),
     (("  - name: base\n", "  - name: base\n    init_from: previous\n"), "it is the first stage"),
     (("name: two\n", "name: two\nowner: me\n"), "unknown top-level keys"),
+    # #211: the second stage, a fine-tune on decision-v7 alone, is refused before the first one trains
+    (("allow_missing_sources: all, reason: stage chaining only, ", ""), r"stage skills: d1a.training.train: this fine-tune \(--init_from \S+/run/base\) leaves out 9 "),
 ])
 def test_bad_recipes_are_refused_before_anything_runs(tmp_path, change, message):
     path = write(tmp_path, TWO_STAGES.replace(*change, 1))
