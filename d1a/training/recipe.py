@@ -1,5 +1,5 @@
 """Training recipes: a run's stages in one versioned YAML file instead of a long command line, checked against d1a.training.train's
-own options before anything runs, and recorded next to every checkpoint it produces (#63).
+own options (and a fine-tune stage against its source check) before anything runs, and recorded next to every checkpoint it produces (#63).
 
     python -m d1a.training.recipe run recipes/d1a-e2b.yaml --out runs/d1a-e2b --device cuda
     python -m d1a.training.recipe run recipes/d1a-e2b.yaml --out runs/d1a-e2b --device cuda --dry-run   # the commands, nothing run
@@ -15,7 +15,7 @@ A recipe:
         train: {suite: evals/v7/decision-v7, epochs: 2, lr: 1.0e-4, batch: 4, accum: 2}
       - name: skills
         init_from: previous               # the previous stage's checkpoint (the default after the first stage), or a run
-        train: {extra_suites: evals/hard-v1, epochs: 1, lr: 2.0e-5}
+        train: {data: runs/mix/train.jsonl, suite: evals/v7/decision-v7, replay: 160, epochs: 1, lr: 2.0e-5}   # a recipes/skills/mix.py mix + decision-v7: every source (#211)
 
 A stage's `train` keys are d1a.training.train's options without the dashes; the machine settings (--device, --out, --resume,
 --save_every_minutes) come from this command, never from the recipe. Each stage's directory gets recipe.json: the recipe,
@@ -68,7 +68,8 @@ def flag(key, value):
 
 
 def commands(recipe, out, machine):
-    """[(stage name, d1a.training.train argv)] in order. Each argv is checked by d1a.training.train's own parser (types, choices, its rules)."""
+    """[(stage name, d1a.training.train argv)] in order. Each argv is checked by d1a.training.train's own parser (types, choices, its rules)
+    and, for a fine-tune stage, by its source check (#211)."""
     from d1a.training import train
     out, steps, previous = Path(out), [], None
     for stage in recipe["stages"]:
@@ -90,9 +91,13 @@ def commands(recipe, out, machine):
                 argv += flag(key, machine[key])
         argv += flag("out", str(out / stage["name"]))
         try:
-            train.parse_args(argv)
+            a = train.parse_args(argv)
         except SystemExit as e:   # argparse reports the problem on stderr and exits
             raise ValueError(f"stage {stage['name']}: d1a.training.train refuses these options (see above): {' '.join(argv)}") from e
+        try:
+            train.source_coverage(a)   # a fine-tune stage that leaves out a training source fails here, not after the stages before it trained
+        except SystemExit as e:
+            raise ValueError(f"stage {stage['name']}: {e}") from e
         steps.append((stage["name"], argv))
         previous = stage["name"]
     return steps

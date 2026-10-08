@@ -108,3 +108,20 @@ def test_an_exception_without_its_reason_is_refused(argv, tmp_path, monkeypatch,
 def test_a_run_from_the_base_model_is_not_checked(tmp_path, monkeypatch):
     with pytest.raises(Loading):
         run(tmp_path, monkeypatch)   # --data with no sidecar and no other source: fine without --init_from
+
+
+@pytest.mark.parametrize("records", ["lots", 10.0, True, -1])
+def test_a_record_count_that_is_not_a_whole_number_is_refused(records, tmp_path, monkeypatch):
+    sidecar, extra = skills_mix()
+    sidecar["counts"]["evals/hard-v1"] = records
+    with pytest.raises(SystemExit, match="gives record counts that are not whole numbers: {'evals/hard-v1': "):
+        run(tmp_path, monkeypatch, "--init_from", "JohnP1/d1a-e4b", *extra, sidecar=sidecar)
+
+
+def test_the_log_names_what_is_left_out_on_purpose(tmp_path, monkeypatch, capsys):
+    sidecar, extra = skills_mix(drop=ROUTING)
+    with pytest.raises(Loading):
+        run(tmp_path, monkeypatch, "--init_from", "JohnP1/d1a-e4b", *extra, "--allow_missing_sources", "all", "--reason", "routing is retrained next",
+            sidecar=sidecar)
+    assert capsys.readouterr().out.splitlines()[0] == (
+        "sources left out on purpose (--allow_missing_sources all): " + ", ".join(ROUTING) + "; reason: routing is retrained next")

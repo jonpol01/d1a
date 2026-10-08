@@ -200,7 +200,10 @@ def source_coverage(a):
                 counts = sidecar_counts(json.loads(sidecar.read_text(encoding="utf-8")))
             except (ValueError, KeyError, AttributeError) as e:
                 raise SystemExit(f"d1a.training.train: {sidecar} does not say which sources the mix holds: {e}")
-            covered |= {names[plain(n)] for n, records in counts.items() if plain(n) in names and records}
+            counts = {n: records for n, records in counts.items() if plain(n) in names}
+            if bad := {n: records for n, records in counts.items() if type(records) is not int or records < 0}:
+                raise SystemExit(f"d1a.training.train: {sidecar} gives record counts that are not whole numbers: {bad}")
+            covered |= {names[plain(n)] for n, records in counts.items() if records > 0}
         else:
             notes.append(f"{a.data} has no sidecar {sidecar.name} naming its sources")
     if a.suite and (not a.data or a.replay) and plain(a.suite) in names:
@@ -529,7 +532,8 @@ def parse_args(argv=None):
     return a
 
 
-RESUME_KNOBS = ("resume", "save_every_steps", "save_every_minutes", "stop_after")   # may differ between a run and its continuation
+RESUME_KNOBS = ("resume", "save_every_steps", "save_every_minutes", "stop_after",   # may differ between a run and its continuation
+                "allow_missing_sources", "reason")   # source_coverage checks them again at every start; points before #211 lack them
 RESUMED = ("step", "seen", "tokens_seen", "peak_mem", "optimizer_seconds", "step_seconds", "elapsed", "epoch", "microbatch", "grad_norms")   # counters a resume point carries
 
 
@@ -635,6 +639,9 @@ def epoch_plan(a, model, tok, reqs, ep, state_tokens):
 def main():
     a = parse_args()
     sources = source_coverage(a)   # before the model loads: a fine-tune that leaves out a training source stops here
+    if a.allow_missing_sources:   # in the run's log, not only in training_config.json
+        left_out = ", ".join(sources["allowed_missing"]) if sources and sources["allowed_missing"] else "none"
+        print(f"sources left out on purpose (--allow_missing_sources {a.allow_missing_sources}): {left_out}; reason: {a.reason}", flush=True)
     if a.data:
         suites.resolve(a.data, purpose="train")   # before the model loads: a refused or mismatched suite partition fails at once
     dev = a.device or default_device()
