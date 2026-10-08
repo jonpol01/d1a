@@ -7,6 +7,7 @@ import math
 from pathlib import Path
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -189,6 +190,28 @@ def test_a_loss_blocks_the_wins_path(tmp_path, kit):
     assert card["verdict"].startswith("NOT BETTER (pooled") and "significant loss: external_wanli-v2" in card["follow_ups"]
 
 
+# --- the intervals ----------------------------------------------------------------------------------------------------------
+
+def test_pooled_ci_is_the_95_percent_interval():
+    """Two lines of fixed +1/0/-1 deltas: equal weight per line, and a 95% CI that matches mean +- 1.96 sd/sqrt(n) (x100)."""
+    a = np.array([1.0] * 200 + [-1.0] * 100 + [0.0] * 700); b = np.array([1.0] * 30 + [-1.0] * 50 + [0.0] * 320)
+    p = decide.pooled([a, b])
+    half = 1.96 * 100 * math.sqrt(a.var() / len(a) + b.var() / len(b)) / 2
+    assert (p["delta"], p["lines"]) == (pytest.approx(2.5), 2)
+    assert p["lo"] == pytest.approx(2.5 - half, abs=0.15) and p["hi"] == pytest.approx(2.5 + half, abs=0.15)
+
+
+def test_a_live_line_resamples_items_not_questions(kit):
+    """An item's questions flip together (8 of 20 items lose both): the item-level CI is wider than a per-question one."""
+    want = kit.want["replay"]
+    B = [{q: [lab, lab, 0.8] for q, lab in w.items()} for w in want]
+    H = [{q: ["zz-wrong" if i % 5 < 2 else lab, lab, 0.8] for q, lab in w.items()} for i, w in enumerate(want)]
+    line, d = decide.part_line(B, H, want)
+    per_question = decide.item_bootstrap(d, np.arange(len(d)))
+    assert line["delta"] == per_question["delta"] == pytest.approx(-40)
+    assert line["hi"] - line["lo"] > 1.2 * (per_question["hi"] - per_question["lo"])
+
+
 # --- vetoes -----------------------------------------------------------------------------------------------------------------
 
 def test_v1_card_suite_delta_floor(tmp_path, kit):
@@ -219,11 +242,27 @@ def test_v3_latency_against_the_floor(tmp_path, kit, ratio, verdict):
     assert card["verdict"].startswith(verdict)
 
 
+@pytest.mark.parametrize("over, verdict", [(0.0, "NOT BETTER"), (1e-9, "VETO: V3")], ids=["at floor + 0.015", "just above"])
+def test_v3_tolerance_is_floor_plus_0_015(tmp_path, kit, over, verdict):
+    ratio = 1.02 + 0.015 + over
+    card = judge(tmp_path, kit, rep=report(latency={"all text": {"ratio": ratio, "lo": ratio, "hi": ratio, "n": 100}},
+                                           floor={"all text": {"ratio": 1.02, "lo": 1.01, "hi": 1.03, "n": 100}}))
+    assert card["verdict"].startswith(verdict)
+
+
 @pytest.mark.parametrize("suite", ["ja-jglue_development", "night2_dates"])
 def test_v4_a_large_suite_five_points_down(tmp_path, kit, suite):
     card = judge(tmp_path, kit, {suite: (0, 12)}, sizes={suite: 200})
     assert card["suites"][suite]["delta"] == pytest.approx(-6) and card["suites"][suite]["hi"] < 0
     assert card["verdict"] == "VETO: V4"
+
+
+@pytest.mark.parametrize("size, verdict", [(150, "VETO: V4"), (149, "NOT BETTER")])
+def test_v4_starts_at_150_questions(tmp_path, kit, size, verdict):
+    card = judge(tmp_path, kit, {"ja-jglue_development": (0, 8)}, sizes={"ja-jglue_development": size})
+    s = card["suites"]["ja-jglue_development"]
+    assert s["n"] == size and -5.5 < s["delta"] <= -5 and s["hi"] < 0     # only n differs between the cases
+    assert card["verdict"].startswith(verdict)
 
 
 @pytest.mark.parametrize("change, size", [((0, 6), 60), ((30, 38), 150)], ids=["small suite", "CI reaches 0"])
@@ -308,10 +347,11 @@ def side(name, edit):
     (lambda d: {"base": d["base"]}, "labeler dump: no 'head' side"),
     (lambda d: {"head": d["head"]}, "labeler dump: no 'base' side"),
     (side("head", lambda part, items: items[:5]), "labeler dump: 'head' replay has 5 items, the kit 20"),
+    (side("head", lambda part, items: items + items[:1]), "labeler dump: 'head' replay has 21 items, the kit 20"),
     (side("head", lambda part, items: [{q: a for q, a in it.items() if q != "blast"} for it in items]), "labeler dump: 'head' replay: 20 of 20 items"),
     (side("head", lambda part, items: [{q: [None, *a[1:]] for q, a in it.items()} for it in items]), "labeler dump: 'head' replay: 20 of 20 items"),
     (side("base", lambda part, items: items[::-1]), "labeler dump: 'base' replay:"),
-], ids=["no head side", "no base side", "items short", "question missing", "null choice", "items reordered"])
+], ids=["no head side", "no base side", "items short", "items extra", "question missing", "null choice", "items reordered"])
 def test_incomplete_when_the_labeler_dump_is_partial(tmp_path, kit, edit, why):
     incomplete(judge(tmp_path, kit, dump=edit(make_dump(kit))), why)
 
