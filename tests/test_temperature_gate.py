@@ -1,7 +1,7 @@
 """d1a.training.calibrate's adopt-or-keep gate (--judge, --guard, --confirm, --locked; d1a.training.temperature_gate), the roles
-a rows file may not play twice, the selections refused before anything is fitted, and the fit pool's clusters. Rows are
-synthetic two-option questions; no model is loaded. Each rule and confirmation case fails exactly one criterion, so removing or
-loosening that criterion fails its case."""
+a rows file may not play twice, the selections refused before anything is fitted, the fit pool's clusters, and the
+incumbent a refit is judged against (#207). Rows are synthetic two-option questions; no model is loaded. Each rule and
+confirmation case fails exactly one criterion, so removing or loosening that criterion fails its case."""
 import json
 import shutil
 
@@ -10,7 +10,7 @@ import pytest
 
 from d1a.backends.checkpoint import Meta, read_meta, write_meta
 from d1a.eval.metrics import paired_bootstrap, served_at
-from d1a.eval.suite import digest, read_json
+from d1a.eval.suite import digest, read_json, write_json
 from d1a.training import calibrate
 from d1a.training.temperature_gate import confirmation, interval, keyed, rule
 
@@ -225,3 +225,53 @@ def test_pooled_partitions_keep_their_clusters(tmp_path):
     first, second = write(tmp_path / "a", generated(1.5, n=120, seed=4)), write(tmp_path / "b", generated(1.5, n=80, seed=5))
     calibrate.main(["--run", str(run), "--rows", first, "--rows", second, "--allow-in-distribution"])
     assert read_meta(run).extra["temperature_fit"]["cross_validation"]["groups"] == 200
+
+
+def fine_tune(tmp_path, init_temperature):
+    """A fine-tune as d1a.training.train leaves it: temperature 1.0, its --init_from checkpoint (serving `init_temperature`)
+    named in training_config.json."""
+    init = tmp_path / "init"; init.mkdir()
+    write_meta(init, Meta(base="b", temperature=init_temperature))
+    run = checkpoint(tmp_path, 1.0)
+    write_json(run / "training_config.json", {"args": {"init_from": str(init)}, "init_source": {"init_from": str(init), "resolved": str(init)}})
+    return run
+
+
+def test_a_fine_tunes_refit_is_judged_against_the_temperature_its_init_served(tmp_path, capsys):
+    # #207: the refit (1.91) beats training's 1.0 on these rows (Brier upper bound -0.0096), but not the 1.8 the starting
+    # checkpoint served (+0.0008), so nothing is written
+    run = fine_tune(tmp_path, 1.8)
+    fit, judge = write(tmp_path / "pool", generated(1.8, seed=1)), write(tmp_path / "served", generated(1.8, n=800, seed=2))
+    assert calibrate.main(["--run", str(run), "--rows", fit, "--judge", judge, "--allow-in-distribution"]) == 1.0
+    out = capsys.readouterr().out
+    assert "vs incumbent 1.8000" in out and f"--init_from {tmp_path / 'init'} serves" in out and "temperature_fit" not in read_meta(run).extra
+
+
+def test_an_explicit_incumbent_wins_over_the_init_and_is_recorded(tmp_path, capsys):
+    run = fine_tune(tmp_path, 1.8)
+    other = tmp_path / "other"; other.mkdir(); write_meta(other, Meta(base="b", temperature=2.0))
+    fit, judge = write(tmp_path / "pool", generated(1.0, seed=1)), write(tmp_path / "served", generated(1.0, n=400, seed=2))
+    for given in ("2.0", str(other)):   # a temperature, or a checkpoint's served one
+        write_meta(run, Meta(base="b", temperature=1.0))   # back to training's state
+        adopted = calibrate.main(["--run", str(run), "--rows", fit, "--judge", judge, "--allow-in-distribution", "--incumbent", given])
+        verdict = read_meta(run).extra["temperature_fit"]["rule"]
+        assert adopted < 1.5 and verdict["shipped"] == 2.0 and verdict["incumbent"] == {"temperature": 2.0, "source": "incumbent", "name": given}
+    with pytest.raises(SystemExit):   # nothing to judge against it without the rule
+        calibrate.main(["--run", str(run), "--rows", fit, "--allow-in-distribution", "--incumbent", "2.0"])
+    assert "--incumbent needs --judge" in capsys.readouterr().err
+
+
+def test_the_init_is_the_incumbent_until_the_fine_tune_is_calibrated_and_a_base_run_judges_against_its_own(tmp_path, capsys):
+    fit, judge = write(tmp_path / "pool", generated(1.8, seed=1)), write(tmp_path / "served", generated(1.8, n=800, seed=2))
+    run = fine_tune(tmp_path, 0.6)
+    adopted = calibrate.main(["--run", str(run), "--rows", fit, "--judge", judge, "--allow-in-distribution"])
+    verdict = read_meta(run).extra["temperature_fit"]["rule"]
+    assert verdict["shipped"] == 0.6 and verdict["incumbent"] == {"temperature": 0.6, "source": "init_from", "name": str(tmp_path / "init")}
+    # calibrated now, it serves its own fit: a second refit is judged against that, not the init's
+    calibrate.main(["--run", str(run), "--rows", fit, "--judge", judge, "--allow-in-distribution"])
+    assert f"vs incumbent {adopted:.4f}" in capsys.readouterr().out
+    # a run trained from a base model (no --init_from) is judged against its own 1.0, as before
+    base = tmp_path / "base"; base.mkdir(); write_meta(base, Meta(base="b"))
+    write_json(base / "training_config.json", {"args": {"init_from": ""}, "init_source": None})
+    assert calibrate.main(["--run", str(base), "--rows", fit, "--judge", judge, "--allow-in-distribution"]) > 1.5
+    assert read_meta(base).extra["temperature_fit"]["rule"]["incumbent"] == {"temperature": 1.0, "source": "run", "name": str(base)}
