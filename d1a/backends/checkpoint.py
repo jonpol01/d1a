@@ -31,6 +31,7 @@ import torch
 
 from d1a.backends.backbone import for_config
 from d1a.backends.torch import DecisionModel
+from d1a.core.api import USE_CASE_MAX_LENGTH
 from d1a.core.encoding import load_tokenizer, pad_id
 
 HUB_ID = re.compile(r"[\w.-]+/[\w.-]+(@[\w.-]+)?")
@@ -100,15 +101,16 @@ class Meta:
 
 
 def checked_use_case_temperatures(table):
-    """`table` as {non-empty name: finite positive float}, names stripped (" routing " would never match a request), or
+    """`table` as {non-empty name: finite positive float}, names stripped (" routing " would never match a request) and at
+    most USE_CASE_MAX_LENGTH long (a longer one could never match a request either: SystemOneRequest refuses it), or
     ValueError naming what is wrong (a bad entry would otherwise fail or skew one use case's answers only, long after the
     checkpoint loaded)."""
     if not isinstance(table, dict):
         raise ValueError(f"{USE_CASE_TEMPERATURES} must be an object of use case -> temperature, not {table!r}")
     out = {}
     for name, t in table.items():
-        if not (isinstance(name, str) and name.strip()) or isinstance(t, bool) or not isinstance(t, (int, float)) or not (math.isfinite(t) and t > 0):
-            raise ValueError(f"{USE_CASE_TEMPERATURES}: {name!r} -> {t!r}; each entry must name a use case and a finite positive temperature")
+        if not (isinstance(name, str) and 0 < len(name.strip()) <= USE_CASE_MAX_LENGTH) or isinstance(t, bool) or not isinstance(t, (int, float)) or not (math.isfinite(t) and t > 0):
+            raise ValueError(f"{USE_CASE_TEMPERATURES}: {name!r} -> {t!r}; each entry must name a use case (at most {USE_CASE_MAX_LENGTH} characters) and a finite positive temperature")
         if name.strip() in out:
             raise ValueError(f"{USE_CASE_TEMPERATURES}: {name!r} names {name.strip()!r} twice")
         out[name.strip()] = float(t)

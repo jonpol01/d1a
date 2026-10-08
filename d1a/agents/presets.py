@@ -3,12 +3,16 @@
 Each preset is a `questions` dict for /v1/systemone or D1A.decide, worded exactly as D1A's routing and agent-kit training
 data asks it (JohnP1/d1a-routing), so a trained checkpoint is asked what it learned. Send each with its USE_CASES entry as the
 request's `use_case`: a checkpoint with a routing temperature (d1a.training.calibrate --use-case routing) reads them at it. `advise` turns the answers into
-an action with fail-safe defaults: an unsure model routes up, consults, or asks a person, never the reverse.
+an action with fail-safe defaults: an unsure model routes up, consults, or asks a person, never the reverse. Give it the
+checkpoint's temperatures (D1A.temperatures, or the server's /v1/models entry) and the use case the request was sent with,
+so that fail_up's threshold follows the temperature the answers were read at.
 
-    from d1a.agents.presets import PRESETS, advise
-    answers = D1A.load(run).decide(request_text, PRESETS["intake"], use_case=USE_CASES["intake"])
-    advise("intake", answers)   # {"consult": False, "worker": "developer", "tier": "medium"}
+    from d1a.agents.presets import PRESETS, USE_CASES, advise
+    m = D1A.load(run)
+    answers = m.decide(request_text, PRESETS["intake"], use_case=USE_CASES["intake"])
+    advise("intake", answers, temperatures=m.temperatures, use_case=USE_CASES["intake"])   # {"consult": False, "worker": "developer", "tier": "medium"}
 """
+import math
 
 TIER = {"type": "choice", "instructions": "How large a model does the implementation need?", "criteria": {
     "small": "Trivial: a lookup, rename, config value, or a one-line or copy change",
@@ -64,25 +68,49 @@ def gate_state(agent, card, command):
     return f"agent: {agent}\ncard: {card.strip()}\ncommand: {command.strip()}"
 
 
-def fail_up(probs, small=0.7, medium=0.5):
+def carried(threshold, ratio):
+    """A probability threshold set for answers read at the checkpoint's temperature, carried to answers read at T_checkpoint /
+    `ratio` (temperature_ratio): the same logit margin, sigmoid(logit(threshold) * ratio). 0.5 stays 0.5."""
+    return threshold if ratio == 1 else 1 / (1 + math.exp(-math.log(threshold / (1 - threshold)) * ratio))
+
+
+def temperature_ratio(temperatures, use_case):
+    """T_checkpoint / T_applied for a request sent with `use_case`: `temperatures` is the checkpoint's {"temperature",
+    "use_case_temperatures"} (D1A.temperatures, or its /v1/models entry). A use case with no temperature of its own, no use
+    case, or no temperatures given (a server that lists none): the checkpoint's own temperature applied, 1.0 (as
+    PointerHead.temperature_for)."""
+    own = (temperatures or {}).get("temperature")
+    if own is None or use_case is None: return 1.0
+    return own / (temperatures.get("use_case_temperatures") or {}).get(use_case.strip(), own)
+
+
+def fail_up(probs, small=0.7, medium=0.5, ratio=1.0):
     """The smallest tier the model is sure enough is enough: small only if p(small) >= `small`, medium only if
-    p(small) + p(medium) >= `medium`, else large. On the calibrated routing checkpoint (JohnP1/d1a-e4b-routing, held-out
-    factory cards) small >= 0.7 sends 2.8% too low against 4.6% at 0.6, for 9% sent too high; zero-shot it also beats
-    argmax (6% vs 8% too low)."""
-    if probs["small"] >= small: return "small"
+    p(small) + p(medium) >= `medium`, else large. `small` is set for answers read at the checkpoint's temperature; at a
+    use case's temperature (`ratio`, temperature_ratio) it is carried through the ratio (carried), `medium` is not.
+    On the calibrated routing checkpoint (JohnP1/d1a-e4b-routing, held-out factory cards) small >= 0.7 sends 2.8% too low
+    against 4.6% at 0.6, for 9% sent too high; zero-shot it also beats argmax (6% vs 8% too low). On v0.5's factory tier
+    cards (108): 3 too low and 12 too high at its T 1.78; read at the routing T 0.85, 0.7 gives 5 too low, and 0.855 (0.7
+    carried by 1.78 / 0.85) 3 too low and 12 too high again."""
+    if probs["small"] >= carried(small, ratio): return "small"
     if probs["small"] + probs["medium"] >= medium: return "medium"
     return "large"
 
 
-def advise(kind, answers, consult_at=0.5, allow_at=0.8, deny_at=0.5, done_at=0.8):
-    """An action from a preset's answers (the /v1/systemone `answers` dict), each default failing safe."""
+def advise(kind, answers, consult_at=0.5, allow_at=0.8, deny_at=0.5, done_at=0.8, temperatures=None, use_case=None):
+    """An action from a preset's answers (the /v1/systemone `answers` dict), each default failing safe. `temperatures` (the
+    checkpoint's, D1A.temperatures or its /v1/models entry) and `use_case` (the one the request was sent with,
+    USE_CASES[kind] for the presets) tell the temperature the answers were read at, which fail_up's `small` follows. The other
+    thresholds stay as they are at any temperature: at v0.5's routing temperature the gate and the judge already advise better
+    with them, and a 0.5 on a yes/no answer cannot move."""
     p = lambda q: answers[q]["probabilities"]
+    ratio = temperature_ratio(temperatures, use_case)
     if kind in ("tier", "route"):
-        return {"tier": fail_up(p(kind))}
+        return {"tier": fail_up(p(kind), ratio=ratio)}
     if kind == "intake":
         # consult when D1A says so, or when what the consult label is made of looks missing (target, finished state)
         missing = answers["has_target"]["noul"] < 0.5 or answers["clear_done"]["noul"] < 0.5
-        return {"consult": answers["consult"]["noul"] >= consult_at or missing, "worker": answers["worker"]["choice"], "tier": fail_up(p("tier"))}
+        return {"consult": answers["consult"]["noul"] >= consult_at or missing, "worker": answers["worker"]["choice"], "tier": fail_up(p("tier"), ratio=ratio)}
     if kind == "gate":
         g = p("decision")
         return {"decision": "deny" if g["deny"] >= deny_at else "allow" if g["allow"] >= allow_at else "ask"}

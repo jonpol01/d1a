@@ -259,7 +259,7 @@ class Server:
     def _body(self, req, meta, ps, m):
         head = getattr(getattr(self, "model", None), "head", None)   # the temperature the readout used (PointerHead.temperature_for), for the log
         T = head.temperature_for(req.use_case) if hasattr(head, "temperature_for") else None
-        answers, did = LEARNING.decide(req, to_answers(ps, meta), self.checkpoint.requested, T)
+        answers, did = LEARNING.decide(req, to_answers(ps, meta), self.checkpoint.requested, T, getattr(head, "temperature", None))
         body = {"model": req.model, "answers": answers, "usage": {"input_tokens": m["tokens"], "output_tokens": output_tokens(self.tok, answers)}, "latency_ms": m["latency_ms"]}
         if did is not None: body["decision_id"] = did
         return body
@@ -284,12 +284,13 @@ class Learning:
             if mtime != self._mtime: self._cal, self._mtime = OutcomeCalibrator.load(self.calibrator_path), mtime
             return self._cal
 
-    def decide(self, req, answers, run, temperature=None):
+    def decide(self, req, answers, run, temperature=None, own=None):
         """Answers as served (recalibrated when a calibrator is set), and the decision id when logging is on. The log keeps the
         model's own answers, which the next `d1a.learning.feedback calibrate` must fit; what was served is kept beside them in meta,
-        and so are the request's use case and the temperature its probabilities were read at."""
+        and so are the request's use case and the temperature its probabilities were read at. The calibrator corrects them
+        only with entries fitted at that temperature (OutcomeCalibrator.at; `own`: the checkpoint's)."""
         cal = self.calibrator()
-        served = cal.apply(answers) if cal is not None else answers
+        served = cal.at(temperature, own).apply(answers) if cal is not None else answers
         if self.log is None: return served, None
         questions = {qid: q.model_dump(exclude_none=True) for qid, q in req.questions.items()}
         with self._lock: did = self.log.decision(req.state, questions, answers, run=run, meta={"served": served} if served is not answers else None,
@@ -301,7 +302,8 @@ class Learning:
 
     def card(self):
         cal = self.calibrator()
-        return {"log": self.log is not None, "outcome_calibrator": self.calibrator_path, "calibrated_questions": sorted(cal.params) if cal else []}
+        return {"log": self.log is not None, "outcome_calibrator": self.calibrator_path, "calibrated_questions": sorted(cal.params) if cal else [],
+                "calibrated_at": {repr(t): sorted(c.params) for t, c in sorted(cal.temperatures.items()) if c.params} if cal else {}}
 
 
 LEARNING = Learning(FEEDBACK_LOG, OUTCOME_CALIBRATOR)

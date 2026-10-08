@@ -32,9 +32,17 @@ def ask(state, questions, use_case=None):
     return json.load(urllib.request.urlopen(req, timeout=60))
 
 
+def temperatures():
+    """The checkpoint's temperature and use-case temperatures (D1A.temperatures, or the server's /v1/models entry), read on
+    every call: a server reloaded with a new map is followed at once."""
+    if RUN: return _local.temperatures
+    with urllib.request.urlopen(f"{URL}/v1/models", timeout=60) as r: return json.load(r)["models"][0]
+
+
 def preset(kind, state):
     r = ask(state, PRESETS[kind], USE_CASES[kind])
-    return {"answers": r["answers"], "advice": advise(kind, r["answers"]), "latency_ms": r.get("latency_ms")}
+    advice = advise(kind, r["answers"], temperatures=temperatures(), use_case=USE_CASES[kind])   # fail_up follows the temperature read at
+    return {"answers": r["answers"], "advice": advice, "latency_ms": r.get("latency_ms")}
 
 
 def d1a_intake(request: str) -> dict:

@@ -18,7 +18,7 @@ import re
 from datetime import datetime
 from typing import Any, Literal, Union
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 JSONContent = Union[str, dict, list, int, float, bool, None]
 MAX_OPTIONS = 255   # TypeSafe's limit for a choice's criteria and a score's levels
@@ -49,6 +49,7 @@ class Score(BaseModel):
 
 
 Question = Union[Noul, Choice, Score]
+USE_CASE_MAX_LENGTH = 64   # SystemOneRequest.use_case, and a name in a checkpoint's use_case_temperatures
 
 
 class SystemOneRequest(BaseModel):
@@ -58,8 +59,13 @@ class SystemOneRequest(BaseModel):
     # D1A's own optional field (#209), never model input: the request's use case (e.g. "routing"). A checkpoint with a
     # temperature for it (d1a.training.calibrate --use-case) reads this request's probabilities at that temperature; absent,
     # or a name the checkpoint has no temperature for, the checkpoint's own temperature applies. Never guessed from the text.
-    # Bounded: the decision log records it verbatim.
-    use_case: str | None = Field(None, max_length=64)
+    # Bounded: the decision log records it verbatim. Stripped, as the map's names are (" routing " is routing).
+    use_case: str | None = Field(None, max_length=USE_CASE_MAX_LENGTH)
+
+    @field_validator("use_case", mode="before")
+    @classmethod
+    def _strip_use_case(cls, v):
+        return v.strip() if isinstance(v, str) else v
 
 
 # --- text the model reads -----------------------------------------------------------------------------------------------

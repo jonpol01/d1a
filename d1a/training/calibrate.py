@@ -53,6 +53,7 @@ import math
 from dataclasses import dataclass
 from pathlib import Path
 
+from d1a.core.api import USE_CASE_MAX_LENGTH
 from d1a.backends.checkpoint import USE_CASE_FITS, USE_CASE_TEMPERATURES, checked_use_case_temperatures, read_meta, write_meta
 from d1a.eval.metrics import TEMPERATURE_FIT, TEMPERATURE_FIT_METHOD, cross_validated_temperature, fit_temperature, metrics, raw_row, recorded, scored_rows
 from d1a.eval.suite import digest, read_json, read_manifest, suite_key
@@ -335,6 +336,7 @@ def main(argv=None):
     a = ap.parse_args(argv)
     if a.use_case is not None:
         if not a.use_case.strip(): ap.error("--use-case needs a name")
+        if len(a.use_case.strip()) > USE_CASE_MAX_LENGTH: ap.error(f"--use-case: at most {USE_CASE_MAX_LENGTH} characters, as a request's use_case")
         a.use_case = a.use_case.strip()   # stored as the map stores it, so the fit and serving() find the same entry
     if a.temperature is not None:
         if not (a.reason or "").strip(): ap.error("--temperature needs --reason: where the value comes from (recorded in the checkpoint)")

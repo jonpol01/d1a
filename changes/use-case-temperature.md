@@ -7,8 +7,16 @@
   into the checkpoint's `use_case_temperatures`, leaving its own temperature alone. `GET /v1/models` lists the map, and
   the decision log records each request's use case and temperature. The agent presets (`USE_CASES`), the MCP tools,
   `D1A.decide(..., use_case=...)` and both clients send it. `use_case` is at most 64 characters (longer is a 422), and a
-  use-case name in the map or in `--use-case` is stored without surrounding whitespace. For v0.5, routing at T 0.85 instead of 1.78 lowers held-out
+  use-case name in the map or in `--use-case` is stored without surrounding whitespace and refused beyond 64 characters; a
+  request's own `use_case` is read stripped too. For v0.5, routing at T 0.85 instead of 1.78 lowers held-out
   factory-routing ECE from 0.132 to 0.030 with the same accuracy.
+- The agent presets' advice follows the temperature an answer was read at: `advise(..., temperatures=, use_case=)` (the
+  checkpoint's temperatures from `D1A.temperatures` or `/v1/models`, which the MCP tools read on each call) carries
+  `fail_up`'s small threshold through the temperature ratio, 0.7 at v0.5's T 1.78 becoming 0.855 at the routing T 0.85, so
+  routing does not send more cards too low (3 of 108 held-out factory cards, not 5). The other thresholds stay as they are.
+- The outcome calibrator keeps temperatures apart: `d1a.learning.feedback` fits, promotes (`"question@T"` in its report) and
+  serves each temperature's entries from the decisions read at it only. A calibrator file written before keeps working at
+  the checkpoint's own temperature and is never applied to answers read at a use case's.
 
 ### Fixed
 

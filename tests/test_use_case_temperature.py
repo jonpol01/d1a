@@ -302,12 +302,12 @@ def test_models_lists_the_map_and_the_decision_log_records_the_use_case_and_temp
         with TestClient(serve.app) as client:
             cards = client.get("/v1/models").json()["models"]
             assert all(c["use_case_temperatures"] == {"routing": ROUTING_T} and c["temperature"] == CHECKPOINT_T for c in cards)
-            for use_case in ("routing", None, "triage"):
+            for use_case in ("routing", None, "triage", " routing "):
                 body = {**golden[0]["request"], **({"use_case": use_case} if use_case else {})}
                 assert client.post("/v1/systemone", json=body).status_code == 200
             assert client.post("/v1/systemone", json={**golden[0]["request"], "use_case": "x" * 65}).status_code == 422
         logged = [e for e in serve.LEARNING.log.events() if e["kind"] == "decision"]
-        assert [(e.get("use_case"), e["temperature"]) for e in logged] == [("routing", ROUTING_T), (None, CHECKPOINT_T), ("triage", CHECKPOINT_T)]
+        assert [(e.get("use_case"), e["temperature"]) for e in logged] == [("routing", ROUTING_T), (None, CHECKPOINT_T), ("triage", CHECKPOINT_T), ("routing", ROUTING_T)]
         assert "use_case" not in logged[1]
     finally:
         s.close()
@@ -327,23 +327,80 @@ def test_presets_lib_mcp_and_the_python_client_send_the_use_case(models, golden,
     assert USE_CASES == {kind: "routing" for kind in PRESETS}
     ck, tok, model = models["mapped"]
     m = D1A(ck, tok, model, "cpu")
+    assert m.temperatures == {"temperature": CHECKPOINT_T, "use_case_temperatures": {"routing": ROUTING_T}}
+    monkeypatch.setattr(mcp_server, "RUN", "run"); monkeypatch.setattr(mcp_server, "_local", m)
+    assert mcp_server.temperatures() == m.temperatures
     request = golden[0]["request"]
     enc, _, meta = encoded(tok, model, request)
     for use_case, T in (("routing", ROUTING_T), (None, CHECKPOINT_T)):
         assert m.decide(request["state"], request["questions"], use_case=use_case) == to_answers([p.tolist() for p in at(models["raw"][2], enc, T)], meta)
     sent = []
 
-    class Response:
-        def __init__(self, req): sent.append(json.loads(req.data))
+    class Response:   # the server: POST /v1/systemone, and GET /v1/models (a str) listing the routing temperature
+        def __init__(self, req):
+            self.models = isinstance(req, str) and req.endswith("/v1/models")
+            if not self.models: sent.append(json.loads(req.data))
         def __enter__(self): return self
         def __exit__(self, *a): return False
-        def read(self): return b'{"answers": {"route": {"probabilities": {"small": 0.8, "medium": 0.1, "large": 0.1}}}}'
+        def read(self):
+            if self.models: return json.dumps({"models": [{"name": "d1a-latest", **m.temperatures}]}).encode()
+            return b'{"answers": {"route": {"probabilities": {"small": 0.8, "medium": 0.1, "large": 0.1}}}}'
     monkeypatch.setattr("urllib.request.urlopen", lambda req, timeout=None: Response(req))
     monkeypatch.setattr(mcp_server, "RUN", None)
-    mcp_server.d1a_route("hi")
+    assert mcp_server.d1a_route("hi")["advice"] == {"tier": "medium"}   # 0.8 < 0.7 carried to T 0.85 (0.845): read at it, not sure enough
     mcp_server.d1a_decide("hi", {"q": {"type": "noul", "instructions": "?"}})
     client = d1a_client.Client("http://x")
     client.decide("s", {"q": {"type": "noul"}}, use_case="routing")
     client.decide("s", {"q": {"type": "noul"}})
     assert [b.get("use_case") for b in sent] == ["routing", None, "routing", None]
     assert "use_case" not in sent[1] and "use_case" not in sent[3]
+
+
+def test_fail_up_follows_the_temperature_the_answers_were_read_at():
+    """fail_up's small threshold (0.7) is set for answers read at the checkpoint's temperature. An answer read at a use
+    case's temperature is carried through the ratio, sigmoid(logit(0.7) * T_checkpoint / T_applied): 0.855 for v0.5's 1.7818
+    -> 0.85. Without a use case, with one the checkpoint has no temperature for, or without the temperatures, nothing moves;
+    medium (0.5) and the gate's and judge's thresholds never do."""
+    from d1a.agents.presets import advise, carried, fail_up, temperature_ratio
+    v05 = {"temperature": 1.7818, "use_case_temperatures": {"routing": 0.85}}
+    assert abs(carried(0.7, temperature_ratio(v05, "routing")) - 0.855) < 1e-3 and carried(0.5, temperature_ratio(v05, "routing")) == 0.5
+    tier = lambda small, medium: {"tier": {"probabilities": {"small": small, "medium": medium, "large": 1 - small - medium}}}
+    for temperatures, use_case in ((None, None), (None, "routing"), (v05, None), (v05, "triage"), ({"temperature": 1.7818}, "routing")):
+        assert advise("tier", tier(0.8, 0.1), temperatures=temperatures, use_case=use_case) == {"tier": "small"}, (temperatures, use_case)
+        assert advise("tier", tier(0.69, 0.2), temperatures=temperatures, use_case=use_case) == {"tier": "medium"}, (temperatures, use_case)
+    for use_case in ("routing", " routing "):
+        assert advise("tier", tier(0.8, 0.1), temperatures=v05, use_case=use_case) == {"tier": "medium"}, use_case
+        assert advise("tier", tier(0.86, 0.1), temperatures=v05, use_case=use_case) == {"tier": "small"}
+    assert advise("route", {"route": tier(0.8, 0.1)["tier"]}, temperatures=v05, use_case="routing") == {"tier": "medium"}
+    intake = {"consult": {"noul": 0.1}, "has_target": {"noul": 0.9}, "clear_done": {"noul": 0.9}, "worker": {"choice": "developer"}, **tier(0.8, 0.1)}
+    assert advise("intake", intake)["tier"] == "small" and advise("intake", intake, temperatures=v05, use_case="routing")["tier"] == "medium"
+    assert fail_up({"small": 0.3, "medium": 0.21, "large": 0.49}, ratio=temperature_ratio(v05, "routing")) == "medium"
+    gate = {"decision": {"probabilities": {"allow": 0.81, "ask": 0.1, "deny": 0.09}}}
+    judge = {"next": {"choice": "complete"}, "done": {"noul": 0.81}, "human": {"noul": 0.5}, "blocked": {"noul": 0.49}}
+    for temperatures, use_case in ((None, None), (v05, "routing")):
+        assert advise("gate", gate, temperatures=temperatures, use_case=use_case) == {"decision": "allow"}
+        assert advise("judge", judge, temperatures=temperatures, use_case=use_case) == {"next": "complete", "human": True, "blocked": False}
+
+
+def test_a_requests_use_case_is_stripped_and_a_map_name_is_bounded(models, golden, tmp_path):
+    """A request's " routing " is the routing use case (as the map's names are stripped): the request, D1A.decide and the
+    server read it at the routing temperature and log it as "routing". A map name longer than a request's use_case may be
+    could never be selected, so a checkpoint carrying one is refused, and calibrate --use-case refuses to write one."""
+    from d1a.serving.lib import D1A
+    request = golden[0]["request"]
+    assert SystemOneRequest(**request, use_case=" routing ").use_case == "routing"
+    assert SystemOneRequest(**request, use_case=" " * 3 + "x" * 64 + " ").use_case == "x" * 64
+    ck, tok, model = models["mapped"]
+    m = D1A(ck, tok, model, "cpu")
+    assert m.decide(request["state"], request["questions"], use_case=" routing ") == m.decide(request["state"], request["questions"], use_case="routing")
+    enc, _, meta = encoded(tok, model, request)
+    assert m.decide(request["state"], request["questions"], use_case=" routing ") == to_answers([p.tolist() for p in at(models["raw"][2], enc, ROUTING_T)], meta)
+    write_meta(tmp_path, Meta(base="b", extra={"use_case_temperatures": {"x" * 64: 1.0}}))
+    assert read_meta(tmp_path).use_case_temperatures == {"x" * 64: 1.0}
+    write_meta(tmp_path, Meta(base="b", extra={"use_case_temperatures": {"x" * 65: 1.0}}))
+    with pytest.raises(ValueError, match="at most 64"):
+        Checkpoint(tmp_path)
+    write_meta(tmp_path, Meta(base="b"))
+    with pytest.raises(SystemExit):
+        calibrate.main(["--run", str(tmp_path), "--use-case", "x" * 65, "--temperature", "1", "--reason", "x"])
+    assert read_meta(tmp_path).use_case_temperatures == {}
