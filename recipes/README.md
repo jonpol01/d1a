@@ -65,3 +65,39 @@ is the full size:
   against the reference, ECE at each checkpoint's fitted temperature, and the bar.
 
     git push && ./skills/launch_hf_job.sh skills-v1 8h      # from the B0 skills checkpoint; INIT=JohnP1/d1a-e4b@v0.4 for v0.4
+
+## The plan-driven mix builder (`mix/`, #202)
+
+`mix/build_mix.py` builds a fine-tune's mix from a JSON plan; it built D2's and D2-skills' (`mix/plans/d2.json`,
+`mix/plans/d2-skills.json`). Per training source, the plan sets how many records to draw and how:
+- stratified over a label or `_meta` field, at given weights or at the pool's natural shares;
+- by label quotas, filled greedily;
+- only records no earlier run trained on (`only_unseen`; needs the exposure index);
+- with a length cap or a cap on templated PR titles.
+
+Draws come from the pinned suites only, after the leak screens:
+- the exact normalised state of any eval partition or eval-only kit (the labeler replay, the demo requests, the owner's
+  hand-labelled PRs);
+- the PR id of a pr-labels eval partition;
+- near-duplicates: word 5-shingle Jaccard ≥ 0.8 against the source's own family, the same prefix with Jaccard ≥ 0.5,
+  or a PR with the same title and body Jaccard ≥ 0.9;
+- repeated states inside a source, and the Japanese twins of English PRs dropped as eval-like.
+
+A plan that leaves out a `train_sources()` entry or decision-v7 is refused unless it names each in
+`allow_missing_sources` with a `reason`, the same rule as the other mix tools and the trainer. The same plan, seed,
+suites and exposure index give the same bytes.
+
+    HF_HUB_OFFLINE=1 uv run python recipes/mix/build_mix.py recipes/mix/plans/d2-skills.json --out /data/train.jsonl \
+        --exposure <exposure_index.jsonl> --replay runs/labeler-replay --human <owner labels>
+    HF_HUB_OFFLINE=1 uv run python recipes/mix/verify_mix.py /data/train.jsonl --replay runs/labeler-replay --human <owner labels>
+
+- **Outputs:** the mix and, beside it:
+  - `<out>.index.jsonl`: each record's source, row and state sha256;
+  - `<out>.json`: records by source (the sidecar `d1a.training.train` reads), label shares, the screens, the suites'
+    manifest sha256 and the mix's sha256;
+  - `<out>.smoke.jsonl`: the 40 longest states.
+- **The verifier** checks every line, byte for byte, against the source row it names. It reruns the eval overlap and
+  shingle screens on the whole mix, runs decision-v7's records through `validate_training`, and checks the sidecar
+  against the trainer's source check. It exits 1 on any failure.
+- **Private inputs:** the mixes hold private PR text. Build them outside git, and never commit them. The exposure index
+  and the eval-only kits are private too.

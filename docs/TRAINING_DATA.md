@@ -54,3 +54,15 @@ What the runs taught about the mix:
   also drifted, by −2.1.
 - So every source must be present, at deliberately chosen shares: close to the real ones for labels, and enough
   decision-v7 to hold the suites with no training data.
+
+## Building a mix
+
+- **Three tools** write a mix and the sidecar `d1a.training.train` reads (`<mix>.json`, records by source):
+  - `recipes/skills/mix.py`: the skills stage;
+  - `recipes/pr-labeler/mix.py`: the PR labeler;
+  - `recipes/mix/build_mix.py`, the plan-driven builder (#202). It built D2-skills from `recipes/mix/plans/d2-skills.json`.
+- **What the builder adds:** each source's count, stratification, weights, label quotas and "only unseen" filter are set
+  in a plan. Every eval partition and eval-only kit is screened out, by exact state, PR id and near-duplicate.
+  `recipes/mix/verify_mix.py` checks the result.
+- **All three refuse a mix that leaves out a source above**, unless it names the source and says why.
+- See `recipes/README.md` for the commands.
