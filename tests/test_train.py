@@ -280,6 +280,22 @@ RESUMED_RUNS = {
 }
 
 
+def test_a_resume_point_from_before_the_source_check_resumes(hybrid_base, tmp_path):
+    """A resume point written before #211 records no --allow_missing_sources or --reason among its arguments; --resume 1
+    continues it (the source check runs again at every start)."""
+    arguments = ["--base", str(hybrid_base / "base"), "--data", str(hybrid_base / "data.jsonl"), "--device", "cpu", "--lora", "4",
+                 "--batch", "2", "--accum", "2", "--lr", "1e-3", "--epochs", "2"]
+    out = tmp_path / "run"
+    run_module([*arguments, "--save_every_steps", "3", "--stop_after", "3"], out)
+    latest = out / "resume" / "latest.json"
+    position = read_json(latest)
+    for key in ("allow_missing_sources", "reason"):
+        position["args"].pop(key, None)
+    latest.write_text(json.dumps(position), encoding="utf-8")
+    assert "resumed from" in run_module([*arguments, "--resume", "1"], out)
+    assert (out / "adapter_model.safetensors").exists()
+
+
 @pytest.mark.parametrize("name", RESUMED_RUNS)
 def test_a_run_stopped_and_resumed_ends_with_the_same_bits(hybrid_base, tmp_path, name):
     """A LoRA run stopped after step 3 of two epochs and continued with --resume 1 in a new process ends with the uninterrupted

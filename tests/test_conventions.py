@@ -34,7 +34,7 @@ HOMES = [
          {"d1a/backends/checkpoint.py", "d1a/backends/mlx.py", "tests/test_mlx.py"}),
     Home("a question's option keys are d1a.core.api.question_keys",
          r"\[\s*\"false\"\s*,\s*\"true\"\s*\]|\[str\(i\) for i in range\(len\(",
-         {"d1a/core/api.py", "tests/test_system_one.py", "tests/test_tiny_checkpoint.py"}),   # these tests pin the contract (the second re-derives it on purpose)
+         {"d1a/core/api.py", "tests/test_api.py", "tests/test_system_one.py", "tests/test_tiny_checkpoint.py"}),   # these tests pin the contract (test_api and test_tiny_checkpoint re-derive it on purpose)
     Home("the training context lives in d1a.core.encoding (MAX_STATE, MAX_BRANCH, MAX_PACKED), raised only by "
          "its training_context (d1a.eval.suite.CONTEXT in manifests) and checked by its fits",
          r"(?<![\w.])(>|<=|>=|<)\s*2048\b|\b2048\s*(<|>)|max_(branch|state|packed)\"?\s*[=:]\s*\d{3,}",

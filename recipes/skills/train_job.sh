@@ -48,7 +48,8 @@ COMMON="--base google/gemma-4-E4B --base_revision 411aa17b749aa952df1359d2dcea73
  --device cuda --lora 16 --lora_targets all --batch $BATCH --accum $ACCUM --lr $LR --dtype bf16 --weights_dtype bf16 --checkpointing 1 \
  --max_state $MAX_STATE --epochs 1 --seed 0"
 echo "== smoke: 5 steps + checkpoint on the 40 longest states"
-uv run --frozen python -m d1a.training.train $COMMON --data /data/smoke.jsonl --max_steps 5 --out /runs/smoke 2>&1 | grep -E "training requests|dropped|saved|Error|out of memory" | tail -6
+uv run --frozen python -m d1a.training.train $COMMON --data /data/smoke.jsonl --max_steps 5 --out /runs/smoke \
+  --allow_missing_sources all --reason "smoke: 5 steps on the mix's 40 longest states, a memory check" 2>&1 | grep -E "training requests|dropped|saved|Error|out of memory" | tail -6
 [ -f /runs/smoke/head.safetensors ] || { echo "FAILED smoke wrote no checkpoint"; exit 1; }
 uv run --frozen python -c "import json; m = json.load(open('/runs/smoke/training_metrics.json')); print('smoke peak GB', round(m['peak_device_bytes'] / 1e9, 1), 's/step', m['step_seconds'])"
 echo "== train"

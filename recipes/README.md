@@ -6,14 +6,21 @@ README.
 
 ## Fine-tunes keep the skills (#167)
 
-A fine-tune is any run that starts from a trained checkpoint (`--init_from`, or a recipe stage after the first). Two rules,
-from #167: D1A-E4B's PR-labeler fine-tunes cost up to 4 points on hard-v1, devtools-v1 and documents-v1, because their
-mixes replayed none of them.
+A fine-tune is any run that starts from a trained checkpoint (`--init_from`, or a recipe stage after the first). Three
+rules. The first two come from #167: D1A-E4B's PR-labeler fine-tunes cost up to 4 points on hard-v1, devtools-v1 and
+documents-v1, because their mixes replayed none of them.
 
 1. **Replay every skill.** The fine-tune's mix trains on or replays every training source, beside decision-v7 (which
    the trainer replays): the train partitions of `evals/hard-v1`, `evals/devtools-v1` and `evals/documents-v1`, and every
    D1A train partition: PR labels (train, train-ja, train-blast), routing (factory-train, generic-train) and JGLUE.
-   `d1a.eval.suites.train_sources()` lists them, and both mix tools refuse a new mix that leaves one out.
+   `d1a.eval.suites.train_sources()` lists them, and both mix tools refuse or replay a source a new mix
+   leaves out.
+   - **The trainer enforces it too (#211).** With `--init_from`, `d1a.training.train` reads the `--data` mix's sidecar
+     (`<data>.json`, as both mix tools and the D2 builder write it), adds `--suite` with `--replay` and `--extra_suites`, and
+     refuses the run before any weights load if a training source or decision-v7 is missing, naming each. A hand-built mix
+     needs a sidecar with its records by source; without one a fine-tune is refused. A source left out on purpose is named:
+     `--allow_missing_sources <source,...|all> --reason "<why>"`, and both are recorded in the run's `training_config.json`
+     (`sources`), beside what it covered.
    - `recipes/pr-labeler/mix.py` replays JGLUE 500, routing 300 and each skills suite 500 by default, and takes the
      train-ja and train-blast PRs; `--replay-skills 0` only rebuilds the v0.3 and v0.4 mixes.
    - `recipes/skills/mix.py` adds 300 records of each source its plan leaves out (`--replay-rest`); `--recorded` only
@@ -39,6 +46,12 @@ mixes replayed none of them.
      - **NOT BETTER** covers the rest. A near miss (pooled Δ > 0, 2 wins, no loss) earns one rerun with a new seed.
      - V2, a person reading the safety demos' flips, comes before any deploy. Every significant loss becomes a follow-up.
 
+3. **Judge the refit against the init's temperature (#207).** Training writes every run at temperature 1.0, so a
+   fine-tune's refit would otherwise be judged against an uncalibrated model. With `--judge`, `d1a.training.calibrate`
+   judges a fine-tune not yet calibrated against the temperature its `--init_from` checkpoint serves (v0.5: 1.78), says
+   so, and records it in `temperature_fit.rule.incumbent`; `--incumbent <run|T>` names another. If the refit fails, nothing
+   is written and the run still serves 1.0: write the incumbent's value with `--temperature <T> --reason "<why>"`.
+
 ## The skills stage (`skills/`, #175)
 
 D1A-E4B never had a full skills stage: its first run mixed hard-v1, devtools-v1, documents-v1 and dates into about 1,400
@@ -59,3 +72,43 @@ is the full size:
   against the reference, ECE at each checkpoint's fitted temperature, and the bar.
 
     git push && ./skills/launch_hf_job.sh skills-v1 8h      # from the B0 skills checkpoint; INIT=JohnP1/d1a-e4b@v0.4 for v0.4
+
+## The plan-driven mix builder (`mix/`, #202)
+
+`mix/build_mix.py` builds a fine-tune's mix from a JSON plan; it built D2's and D2-skills' (`mix/plans/d2.json`,
+`mix/plans/d2-skills.json`). Their recorded bytes come from its first version (142168e0), whose shingle screen
+checked only the 5 eval states sharing the most shingles. The exact screen also drops 2 decision-v7 records
+(Jaccard 0.80 against a night2 state), which reshuffles decision-v7's draw. The recorded mixes hold neither record and
+pass the exact verifier. Per training source, the plan sets how many records to draw and how:
+- stratified over a label or `_meta` field, at given weights or at the pool's natural shares;
+- by label quotas, filled greedily;
+- only records no earlier run trained on (`only_unseen`; needs the exposure index);
+- with a length cap or a cap on templated PR titles.
+
+Draws come from the pinned suites only, after the leak screens:
+- the exact normalised state of any eval partition or eval-only kit (the labeler replay, the demo requests, the owner's
+  hand-labelled PRs);
+- the PR id of a pr-labels eval partition or of a hand-labelled PR;
+- near-duplicates: word 5-shingle Jaccard ≥ 0.8 against the nearest eval state of the source's own family (every
+  candidate the inverted index finds), the same prefix with Jaccard ≥ 0.5,
+  or a PR with the same title and body Jaccard ≥ 0.9;
+- repeated states inside a source, and the Japanese twins of English PRs dropped as eval-like.
+
+A plan that leaves out a `train_sources()` entry or decision-v7 is refused unless it names each in
+`allow_missing_sources` with a `reason`, the same rule as the other mix tools and the trainer. The same plan, seed,
+suites and exposure index give the same bytes.
+
+    HF_HUB_OFFLINE=1 uv run python recipes/mix/build_mix.py recipes/mix/plans/d2-skills.json --out /data/train.jsonl \
+        --exposure <exposure_index.jsonl> --replay runs/labeler-replay --human <owner labels>
+    HF_HUB_OFFLINE=1 uv run python recipes/mix/verify_mix.py /data/train.jsonl --replay runs/labeler-replay --human <owner labels>
+
+- **Outputs:** the mix and, beside it:
+  - `<out>.index.jsonl`: each record's source, row and state sha256;
+  - `<out>.json`: records by source (the sidecar `d1a.training.train` reads), label shares, the screens, the suites'
+    manifest sha256 and the mix's sha256;
+  - `<out>.smoke.jsonl`: the 40 longest states.
+- **The verifier** checks every line, byte for byte, against the source row it names. It reruns the eval overlap and
+  shingle screens on the whole mix, runs decision-v7's records through `validate_training`, and checks the sidecar
+  against the trainer's source check. It exits 1 on any failure.
+- **Private inputs:** the mixes hold private PR text. Build them outside git, and never commit them. The exposure index
+  and the eval-only kits are private too.

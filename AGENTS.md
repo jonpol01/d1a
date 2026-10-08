@@ -51,7 +51,9 @@ stripped off, and new features come with their tests.
   - for a change to the model, loading or serving code, and before a playground pin move: **`scripts/quality_gate.py`**
     (required; its table and PASS line go in the PR). It runs base and head on real weights, interleaved: every demo
     example (`--playground <d1a-playground checkout>`) and the labeler replay (`runs/labeler-replay`, private, never
-    committed), with flips, max |dp| and latency against a base/base floor, plus frozen suites with `--suites`. For a
+    committed), with flips, max |dp| and latency against a base/base floor, plus frozen suites with `--suites`. A change
+    to how a request field is served also runs with the field sent: `--use-case routing` for the use-case temperature
+    path (the routing requests carry `"use_case"`, both servers get the same requests). For a
     torch-only path, also `scripts/equivalence/real_weights.py --interleave`;
   - **the `quality-gate` check: off by default (John, 2026-10-06), turned on on demand,** for a pull request whose
     severity calls for it, and only when the local machine is free to run the gate (no training, scoring or other GPU
@@ -72,7 +74,10 @@ stripped off, and new features come with their tests.
 - **Fine-tunes keep every skill** (#167; `recipes/README.md`; John, 2026-10-07): a run that starts from a trained
   checkpoint trains on or replays every training source, as `d1a.eval.suites.train_sources()` lists them: hard-v1,
   devtools-v1, documents-v1 and every D1A train partition (PR labels incl. blast and Japanese, routing, JGLUE), plus
-  decision-v7 through the trainer. Both mix tools refuse a new mix that leaves one out. Its gate adds `--all-suites` (below).
+  decision-v7 through the trainer. Both mix tools refuse a new mix that leaves one out, and so does `d1a.training.train`
+  with `--init_from` (#211): it reads the mix's sidecar `<data>.json` before any weights load. A source left out on
+  purpose takes `--allow_missing_sources <source,...|all> --reason "<why>"`, recorded in `training_config.json`. Its gate
+  adds `--all-suites` (below).
 - **Every model is judged on every suite** (John, 2026-10-07). A new or changed checkpoint runs
   `scripts/quality_gate.py --head-run <new> --all-suites`. That scores, against the checkpoint it replaces:
   - the five card suites;

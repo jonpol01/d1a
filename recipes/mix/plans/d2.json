@@ -1,0 +1,144 @@
+{
+ "name": "d1a-e4b phase D2 (natural PR shares, fresh decision-v7, shingle screen)",
+ "seed": 0,
+ "dv7_replay": 0,
+ "sources": [
+  {
+   "source": "pr-labels:train",
+   "templated_cap": 30,
+   "n": 1350,
+   "stratify": "q:sev",
+   "weights": "natural",
+   "order": "shuffle"
+  },
+  {
+   "source": "pr-labels:train-ja",
+   "n": 120,
+   "stratify": "q:sev",
+   "weights": "natural",
+   "order": "shuffle"
+  },
+  {
+   "source": "pr-labels:train-blast",
+   "n": 105,
+   "stratify": "q:blast",
+   "weights": "natural",
+   "order": "shuffle"
+  },
+  {
+   "source": "hard-v1:train",
+   "n": 1000,
+   "stratify": "_meta.family",
+   "weights": {
+    "temporal_numeric": 2,
+    "probability": 2,
+    "tradeoff": 1.5
+   }
+  },
+  {
+   "source": "devtools-v1:train",
+   "n": 1000,
+   "stratify": "_meta.source"
+  },
+  {
+   "source": "documents-v1:train",
+   "only_unseen": true,
+   "max_json_chars": 18000,
+   "quotas": [
+    {
+     "match": {
+      "q:product": "bank_account",
+      "q:issue": "*"
+     },
+     "n": 75
+    },
+    {
+     "match": {
+      "q:product": "credit_reporting",
+      "q:issue": "*"
+     },
+     "n": 75
+    },
+    {
+     "match": {
+      "q:product": "mortgage"
+     },
+     "n": 42
+    },
+    {
+     "match": {
+      "q:product": "student_loan"
+     },
+     "n": 43
+    },
+    {
+     "match": {
+      "q:product": "vehicle_loan"
+     },
+     "n": 43
+    },
+    {
+     "match": {
+      "q:product": "card"
+     },
+     "n": 43
+    },
+    {
+     "match": {
+      "q:product": "money_transfer"
+     },
+     "n": 43
+    },
+    {
+     "match": {
+      "q:product": "personal_loan"
+     },
+     "n": 43
+    },
+    {
+     "match": {
+      "q:product": "debt_collection"
+     },
+     "n": 43
+    }
+   ]
+  },
+  {
+   "source": "ja-jglue:train",
+   "n": 300
+  },
+  {
+   "source": "routing:factory-train",
+   "quotas": [
+    {
+     "match": {
+      "qset": "decision"
+     },
+     "n": 306
+    },
+    {
+     "match": {
+      "qset": "clear_done+consult+has_spec+has_target+tier+worker"
+     },
+     "n": 306
+    },
+    {
+     "match": {
+      "qset": "blocked+done+human+next"
+     },
+     "n": 38
+    }
+   ]
+  },
+  {
+   "source": "routing:generic-train",
+   "n": 150
+  },
+  {
+   "source": "decision-v7:train",
+   "n": 1000,
+   "stratify": "qset",
+   "weights": "natural"
+  }
+ ]
+}

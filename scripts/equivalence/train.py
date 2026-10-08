@@ -24,6 +24,7 @@ import d1a.training.train as new  # noqa: E402
 
 GEMMA = ROOT / "tests/golden/tiny-gemma4/base"
 TIMINGS = ("wall_seconds", "step_seconds", "optimizer_seconds", "resume_seconds", "resume_write_seconds", "backbone_save_seconds", "peak_rss_bytes", "peak_device_bytes")
+SOURCE_CHECK = ("allow_missing_sources", "reason")   # #211's options, recorded in the args; a --ref before it has neither
 WORDS = "the customer is charged twice which team billing shipping refund angry how bad no yes order late lost box arrived wrong size".split()
 
 
@@ -37,6 +38,8 @@ def data_file(root, rng, n=16):
             "how": {"type": "score", "instructions": "how bad", "criteria": ["no", "bad", "twice bad"], "label": rng.randrange(3)}}})
     path = root / "data.jsonl"
     path.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+    # the sidecar a mix writes, naming every training source, so the init_from case passes the source check (#211); --ref ignores it
+    Path(f"{path}.json").write_text(json.dumps({"counts": {s: n for s in new.required_sources()}}), encoding="utf-8")
     return path
 
 
@@ -85,11 +88,17 @@ def results(out_dir):
         meta = read_meta(out_dir).to_dict()
         out["head"] = {k: v.tolist() for k, v in meta.pop("head").items()}
         out["meta"] = json.loads(json.dumps(meta, default=str).replace(str(out_dir), "OUT"))
+        for key in SOURCE_CHECK:
+            out["meta"].get("args", {}).pop(key, None)
     for name in ("training_config.json", "training_metrics.json"):
         if (out_dir / name).exists():
             value = json.loads((out_dir / name).read_text(encoding="utf-8").replace(str(out_dir), "OUT"))
             for key in TIMINGS:
                 value.pop(key, None)
+            if name == "training_config.json":   # #211's record of the sources, None for a run from the base model
+                value.pop("sources", None)
+                for key in SOURCE_CHECK:
+                    value.get("args", {}).pop(key, None)
             out[name] = value
     out["files"] = sorted(p.name for p in out_dir.iterdir()) if out_dir.exists() else []
     return out

@@ -4,7 +4,9 @@
   checkpoint carries a temperature for it, that request's probabilities are read at it, on torch and MLX alike, each
   request of a batch at its own. Without `use_case`, or with a name the checkpoint has none for, answers are exactly as
   before. The top answer never moves. `python -m d1a.training.calibrate --use-case routing` fits or writes the temperature
-  into the checkpoint's `use_case_temperatures`, leaving its own temperature alone. `GET /v1/models` lists the map, and
+  into the checkpoint's `use_case_temperatures`, leaving its own temperature alone. With `--judge`, a use-case refit is judged
+  against the incumbent's temperature for that use case (its entry, else its temperature): `--incumbent`'s, a not yet
+  calibrated fine-tune's `--init_from`, or the run's own. `GET /v1/models` lists the map, and
   the decision log records each request's use case and temperature. The agent presets (`USE_CASES`), the MCP tools,
   `D1A.decide(..., use_case=...)` and both clients send it. `use_case` is at most 64 characters (longer is a 422), and a
   use-case name in the map or in `--use-case` is stored without surrounding whitespace and refused beyond 64 characters; a
