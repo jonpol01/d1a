@@ -183,3 +183,59 @@ def test_each_checkout_runs_its_own_module_paths(tmp_path):
     assert (gate.module(old, "serve"), gate.module(old, "benchmark")) == ("d1a.serve", "d1a.benchmark")
     assert (gate.module(new, "serve"), gate.module(new, "benchmark")) == ("d1a.serving.serve", "d1a.eval.benchmark")
     assert gate.module(ROOT, "serve") == "d1a.serving.serve"
+
+
+def gate_requests(tmp_path, monkeypatch, *flags):
+    """The requests main() hands the two servers, from a demo file and a replay kit, with no checkout and no server."""
+    import sys
+    from contextlib import contextmanager
+    route = gate.presets()[-1]                                   # {"route": ROUTE}, as the playground's routing demo asks it
+    demos = [{"demo": "routing", "name": "en: Quick fact", "path": "/v1/systemone", "body": {"model": "d1a-latest", "state": "hi", "questions": route}},
+             {"demo": "routing", "name": "ja: 簡単な事実", "path": "/v1/systemone", "body": {"state": "こんにちは", "questions": {"route": {"type": "choice", "criteria": {"small": "易しい", "large": "難しい"}}}}},
+             {"demo": "agents", "name": "intake", "path": "/v1/systemone", "body": {"state": "fix the login bug", "questions": gate.presets()[0]}},
+             {"demo": "tool-gate", "name": "en: rm -rf", "path": "/v1/systemone", "body": {"state": "rm -rf /", "questions": {"decision": {"type": "choice", "criteria": {"allow": "a", "deny": "d"}}}}},
+             {"demo": "photo", "name": "cat", "path": "/v1/systemone/media", "body": {"model": "d1a-latest", "questions": route, "media": {"type": "image", "data": "AA=="}}}]
+    (tmp_path / "demo.json").write_text(json.dumps(demos, ensure_ascii=False), encoding="utf-8")
+    (tmp_path / "kit").mkdir()
+    (tmp_path / "kit/questions.json").write_text(json.dumps({"type": {"type": "choice", "criteria": {"fix": None, "feat": None}}}), encoding="utf-8")
+    (tmp_path / "kit/labeler-calls.jsonl").write_text(json.dumps({"event": "d1a_call", "state": "pr 1"}), encoding="utf-8")
+
+    @contextmanager
+    def here(ref):
+        yield ROOT
+
+    sent = []
+
+    class Sent(Exception):
+        pass
+
+    def run_pair(base_dir, head_dir, reqs, *a, **kw):
+        sent.append(reqs); raise Sent
+
+    monkeypatch.setattr(gate, "checkout", here)
+    monkeypatch.setattr(gate, "unmet", lambda reqs: [])
+    monkeypatch.setattr(gate, "commit_of", lambda d: ("c" * 40, True))
+    monkeypatch.setattr(gate, "run_pair", run_pair)
+    monkeypatch.setattr(sys, "argv", ["quality_gate.py", "--base", "main", "--demo-requests", str(tmp_path / "demo.json"),
+                                      "--replay", str(tmp_path / "kit"), "--out", str(tmp_path / "out"), *flags])
+    try:
+        gate.main()
+    except Sent:
+        pass
+    return demos, sent[0]
+
+
+def test_without_use_case_every_request_goes_out_as_before(tmp_path, monkeypatch):
+    demos, sent = gate_requests(tmp_path, monkeypatch)
+    assert [json.dumps(b, ensure_ascii=False) for _, _, _, b in sent[:len(demos)]] == [json.dumps(d["body"], ensure_ascii=False) for d in demos]
+    assert all("use_case" not in b for _, _, _, b in sent) and len(sent) == len(demos) + 1
+
+
+def test_use_case_goes_only_with_the_routing_requests(tmp_path, monkeypatch):
+    """--use-case routing: the routing demo (English: the route preset's question; Japanese: its translation, by group),
+    and a request asking any preset's questions, carry it; the other demos and the labeler replay do not."""
+    demos, sent = gate_requests(tmp_path, monkeypatch, "--use-case", "routing")
+    carry = [(g, n) for g, n, _, b in sent if "use_case" in b]
+    assert carry == [("demo:routing", "en: Quick fact"), ("demo:routing", "ja: 簡単な事実"), ("demo:agents", "intake"), ("demo:photo", "cat")]
+    assert all(b["use_case"] == "routing" for _, _, _, b in sent if "use_case" in b)
+    assert [{k: v for k, v in b.items() if k != "use_case"} for _, _, _, b in sent[:len(demos)]] == [d["body"] for d in demos]

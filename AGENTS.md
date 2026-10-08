@@ -51,7 +51,9 @@ stripped off, and new features come with their tests.
   - for a change to the model, loading or serving code, and before a playground pin move: **`scripts/quality_gate.py`**
     (required; its table and PASS line go in the PR). It runs base and head on real weights, interleaved: every demo
     example (`--playground <d1a-playground checkout>`) and the labeler replay (`runs/labeler-replay`, private, never
-    committed), with flips, max |dp| and latency against a base/base floor, plus frozen suites with `--suites`. For a
+    committed), with flips, max |dp| and latency against a base/base floor, plus frozen suites with `--suites`. A change
+    to how a request field is served also runs with the field sent: `--use-case routing` for the use-case temperature
+    path (the routing requests carry `"use_case"`, both servers get the same requests). For a
     torch-only path, also `scripts/equivalence/real_weights.py --interleave`;
   - **the `quality-gate` check: off by default (John, 2026-10-06), turned on on demand,** for a pull request whose
     severity calls for it, and only when the local machine is free to run the gate (no training, scoring or other GPU

@@ -16,6 +16,8 @@ accuracy drops or whose calibration (ECE, NLL) gets worse. Exit 0 PASS, 1 FAIL, 
     python scripts/quality_gate.py --base origin/main --head origin/main --run JohnP1/d1a-e4b-mlx-q8@v0.5 \
         --head-run <new checkpoint> --card-suites --playground ../d1a-playground    # a new checkpoint against the served one
     python scripts/quality_gate.py --base <old pin> --head <new pin> --playground . --post-status jonpol01/d1a-playground@<pr head>
+    python scripts/quality_gate.py --base origin/main --head <pr branch> --playground ../d1a-playground --use-case routing
+        # the routing requests also carry "use_case": "routing", as d1a.agents.presets' clients send them
 
 --post-status sets the required `quality-gate` commit status (CI leaves it pending on a pull request that needs the gate,
 .github/workflows/quality-gate.yml) to the verdict, on the exact commit tested: the head checkout's commit, which must
@@ -23,6 +25,7 @@ have no uncommitted changes; or, for a playground pull request that moves the D1
 mini.sh must pin the head commit.
 """
 import argparse
+import importlib.util
 import json
 import os
 import re
@@ -164,6 +167,28 @@ def replay_requests(kit):
             seen.add(r["state"])
             out.append(("labeler-replay", f"state {len(seen)}", "/v1/systemone", {"state": r["state"], "model": "d1a-latest", "questions": questions}))
     return out
+
+
+ROUTING_GROUPS = ("demo:routing",)   # the playground's routing demo: the route preset's question, in English and in Japanese
+
+
+def presets(root=ROOT):
+    """d1a.agents.presets' question sets, read from this checkout's file (the gate imports no d1a: each server runs its own)."""
+    spec = importlib.util.spec_from_file_location("d1a_presets", Path(root) / "d1a/agents/presets.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return list(mod.PRESETS.values())
+
+
+def with_use_case(reqs, use_case, routing=None):
+    """--use-case: `"use_case": use_case` added to the routing requests, the ones a client sends with a preset's use case
+    (d1a.agents.presets maps every preset to the routing use case): a request whose questions are a preset's, or one in
+    ROUTING_GROUPS. Every other request is left as it is; without a use case, all of them are."""
+    if not use_case:
+        return reqs
+    routing = presets() if routing is None else routing
+    return [(g, n, path, {**body, "use_case": use_case} if g in ROUTING_GROUPS or body.get("questions") in routing else body)
+            for g, n, path, body in reqs]
 
 
 # --- versions and servers -----------------------------------------------------------------------------------------------
@@ -406,6 +431,9 @@ def main():
     ap.add_argument("--suite-run", help="weights for --suites (default: --run)")
     ap.add_argument("--head-run", help="a new checkpoint: the head server and head suites load these weights, base keeps --run. Changed "
                     "answers are then reported, not failed; suites (no lower accuracy, no worse calibration) and latency still gate it")
+    ap.add_argument("--use-case", metavar="NAME", help="send `\"use_case\": NAME` with the routing requests (the routing demo and any "
+                    "request asking a d1a.agents.presets question set), to both servers; not with --suites. Gates a serving change "
+                    "to the use-case temperature path (#214); absent, every request goes out as before")
     ap.add_argument("--tol", type=float, default=1e-6, help="largest probability move allowed (default 1e-6)")
     ap.add_argument("--ports", default="8101,8102")
     ap.add_argument("--out", default=str(ROOT / "runs/quality-gate"))
@@ -418,9 +446,14 @@ def main():
     print(f"requests: {len(demos)} demo ({a.playground or a.demo_requests}), {len(replay)} labeler replay ({a.replay})"
           + ("" if demos and replay else "; a missing source is not checked"), flush=True)
     reqs = demos + replay
+    if a.use_case:
+        reqs = with_use_case(reqs, a.use_case)
+        print(f"use_case {a.use_case!r} on {sum('use_case' in r[3] for r in reqs)} routing requests", flush=True)
     if not reqs:
         raise SystemExit("no requests: give --playground or --demo-requests, and/or --replay")
     report, failures = {"base": a.base, "head": a.head, "run": a.run, "requests": len(reqs)}, []
+    if a.use_case:
+        report["use_case"] = a.use_case
     changes = None
     with ExitStack() as stack:
         base_dir, head_dir = stack.enter_context(checkout(a.base)), stack.enter_context(checkout(a.head))
