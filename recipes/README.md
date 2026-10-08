@@ -24,6 +24,20 @@ mixes replayed none of them.
    --run <the served checkpoint> --head-run <the new one> --card-suites` scores decision-v7, transfer-v4, hard-v1,
    devtools-v1 and documents-v1 on both, runs every demo example and the labeler replay on both (changed answers are listed
    for review: a new checkpoint is meant to change some), and the PR shows the table. A drop beyond run-to-run noise on any of them blocks it, like any other downgrade (AGENTS.md, Quality bar).
+   - With `--all-suites` (the rule for any checkpoint), `scripts/decide.py` turns the gate into one verdict (#202):
+     `python scripts/decide.py --gate <gate> --labeler <dump> --base-name v0.5 --head-name <new> --human <owner labels>`.
+     - **INCOMPLETE** comes first. It means a suite, a demo group, the replay, the latency or a labeler side is missing or
+       cannot be scored. Rerun the gate; it is never a pass.
+     - **VETO** comes next:
+       - V1: any card suite with Δ < −2 points or its CI lower bound < −4;
+       - V3: latency above the floor + 0.015;
+       - V4: any suite of 150 or more questions down 5 points or more, with its CI below 0.
+     - **BETTER** needs a pooled Δ ≥ 0 over every suite and the two live labeler lines, and either:
+       - a pooled lower bound above 0;
+       - or 3 significant wins on distinct sources and no significant loss. A `-ja` twin and `pr-labels_test:sev+offsets`
+         count as their original's source.
+     - **NOT BETTER** covers the rest. A near miss (pooled Δ > 0, 2 wins, no loss) earns one rerun with a new seed.
+     - V2, a person reading the safety demos' flips, comes before any deploy. Every significant loss becomes a follow-up.
 
 ## The skills stage (`skills/`, #175)
 

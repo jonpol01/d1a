@@ -80,6 +80,14 @@ stripped off, and new features come with their tests.
   - every demo and the labeler replay.
   The decision is made on that one scorecard, across every use case, never on one of them. Name each regression in the
   PR, and fix it in a follow-up rather than hiding it.
+  `scripts/decide.py --gate <the gate's --out> --labeler <live labeler dump> --human <owner labels>` computes it (#202):
+  - INCOMPLETE when any part of the gate is missing (never a pass);
+  - VETO: V1, a card suite with Δ < −2 or CI lower < −4; V3, latency above the floor + 0.015; V4, a suite of n ≥ 150 with
+    Δ ≤ −5 and its CI below 0;
+  - BETTER needs no veto, a pooled Δ ≥ 0, and either a pooled lower bound > 0 or ≥ 3 significant wins on distinct sources
+    with no significant loss;
+  - V2 is a person reading the safety demos' flips before any deploy.
+  Every significant loss is a follow-up issue.
 
 ## Project board (mandatory)
 Every piece of D1A work is tracked on GitHub Project #14 "D1A" (https://github.com/users/jonpol01/projects/14), and its card
