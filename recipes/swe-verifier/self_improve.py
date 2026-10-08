@@ -130,7 +130,9 @@ def main():
         cmd = [sys.executable, "-m", "d1a.training.train", "--base", "google/gemma-4-E4B", "--base_revision", "411aa17b749aa952df1359d2dcea73917a544d9a",
                "--init_from", incumbent, "--data", str(data), "--max_state", "5600", "--device", "mps", "--lora", "16", "--batch", "1",
                "--accum", "8", "--lr", str(a.lr), "--weights_dtype", "bf16", "--checkpointing", "1", "--seed", str(a.seed + rnd),
-               "--epochs", "1", "--max_steps", str(a.steps_per_round), "--out", cand]
+               "--epochs", "1", "--max_steps", str(a.steps_per_round), "--out", cand,
+               # the verifier is one task's model, trained on its outcomes alone, not a D1A checkpoint that keeps every skill (#211)
+               "--allow_missing_sources", "all", "--reason", "swe-verifier self-improvement: the verifier's own outcome records only"]
         score.free()   # free the scorer's model before training on the same machine
         if a.dry_run:
             Path(cand).mkdir(parents=True, exist_ok=True); Path(cand, "head.pt").touch(); rc = 0
