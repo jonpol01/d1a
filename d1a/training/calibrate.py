@@ -14,11 +14,12 @@ development rows gave ECE 0.059 elsewhere; a pool of held-out datasets gave 0.00
 file (a) comes from a suite the checkpoint trained on, (b) pools a source it trained on, or (c) reads the calibration or
 development partition of a training corpus, and when a rows file's suite or the checkpoint's training cannot be placed.
 A D1A suite partition (rows d1a.eval.benchmark scored with --data evals/d1a/<suite>:<partition>) is placed by its file's
-sha256 and its role in the suite's manifest: the fit is refused on a partition the checkpoint trained on, and allowed on an
-eval partition (development, test) of a suite whose train partitions it trained on, with a SAME CORPUS note printed and
-recorded in temperature_fit.same_corpus. What it trained on is read from its training_config.json (else its metadata):
---suite, --extra_suites, --data (a D1A partition, or a mix whose sidecar <data>.json lists its sources, as
-d1a.training.train's source coverage reads it) and the sources it recorded covering.
+sha256 and its role in the suite's manifest: the fit is refused on a partition the checkpoint trained on, and on an eval
+partition (development, test) of a suite whose train partitions it trained on (SAME CORPUS, as (c) refuses a training
+corpus's held-out partitions; with --allow-in-distribution also recorded in temperature_fit.same_corpus). What it
+trained on is read from its training_config.json (else its metadata): --suite, --extra_suites, --data (a D1A partition,
+or a mix whose sidecar <data>.json lists its sources, as d1a.training.train's source coverage reads it) and the sources it
+recorded covering.
 --allow-in-distribution fits anyway, warns, and records every reason in the checkpoint's temperature_fit.in_distribution.
 A fit on an end of the grid (0.25 or 4) is a bound, not a fit: it is warned (GRID EDGE) and recorded in temperature_fit.grid_edge.
 
@@ -259,9 +260,10 @@ def allowlist_typos(reads):
 
 
 def in_distribution(fitted, training, run):
-    """(every reason the fit set is not held out from the checkpoint's training (empty = held out), notes on held-out rows
-    of a corpus it trained on). A D1A partition is placed by partition: the run's own training partitions are refused, an
-    eval partition of a suite it trained is held out and noted."""
+    """(every reason the fit set is not held out from the checkpoint's training (empty = held out), the SAME CORPUS ones
+    among them). A D1A partition is placed by partition: a partition the run trained on is refused, and so is an eval
+    partition of a suite whose train partitions it trained on (same corpus, as the frozen rule refuses a training corpus's
+    held-out partitions)."""
     notes = []
     out = [f"{f['rows']}: cannot tell which suite these rows were scored on (no d1a.eval.benchmark report.json with a suite of this checkout beside them)"
            for f in fitted if f["suite"] is None]
@@ -277,7 +279,8 @@ def in_distribution(fitted, training, run):
             pooled = set(f.get("sources") or {r["source"] for r in read_json(f["rows"])})
             if part in training.partitions: out.append(f"{f['rows']}: {part} is training data of the checkpoint")
             elif role == "eval" and (trained := sorted(p for p in training.partitions if p.startswith(f"{d}:"))):
-                notes.append(f"{f['rows']}: {part} is an eval partition of {d}, held out from the checkpoint's training, which read {trained}")
+                notes.append(f"{f['rows']}: SAME CORPUS: {part} is an eval partition of {d}, whose train partitions {trained} the checkpoint trained on")
+                out.append(notes[-1])
             if shared := sorted(pooled & training.sources): out.append(f"{f['rows']}: it pools {len(shared)} training source(s) {shared[:8]}" + (" ..." if len(shared) > 8 else ""))
             continue
         if d in training.suites: out.append(f"{f['rows']}: {d} is training data of the checkpoint")
@@ -359,7 +362,6 @@ def calibrate(run, rows, exclude=(), transfer=None, allow_in_distribution=False,
         raise SystemExit("refusing to fit a temperature on rows that are not held out from the checkpoint's training:\n  " + "\n  ".join(problems)
                          + "\nFit on held-out datasets, or pass --allow-in-distribution to fit anyway (recorded in the checkpoint).")
     for line in problems: print(f"!!! IN DISTRIBUTION (--allow-in-distribution): {line}", flush=True)
-    for line in notes: print(f"!!! SAME CORPUS (held out, allowed): {line}", flush=True)
     if judged:
         against = incumbent_of(run, read_meta(run), incumbent)
         print(f"incumbent    T={against['temperature']:.4f}: " + {"incumbent": f"--incumbent {against['name']}",
@@ -430,7 +432,7 @@ def main(argv=None):
     ap.add_argument("--temperature", type=float, help="write this value without fitting or judging it; needs --reason")
     ap.add_argument("--reason", help="with --temperature: where the value comes from (recorded in the checkpoint)")
     ap.add_argument("--allow-in-distribution", action="store_true", help="fit even on rows that share data with the checkpoint's training (a suite, source or D1A partition it"
-                    " trained on, or training that cannot be placed); warned and recorded")
+                    " trained on, an eval partition of a D1A suite it trained on, or training that cannot be placed); warned and recorded")
     ap.add_argument("--judge", action="append", default=[], help="rows the new temperature must beat the current one on: pooled, Brier"
                     " (95%% upper bound below 0) and ECE lower; each one's ECE may rise by at most 0.005; path or path:source,...; repeatable")
     ap.add_argument("--guard", action="append", default=[], help="with --judge: rows whose ECE may rise by at most 0.005; path or path:source,...,"

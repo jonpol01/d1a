@@ -8,7 +8,7 @@ from d1a.backends.checkpoint import Meta, read_meta, write_meta
 from d1a.eval.suite import digest
 from d1a.training import calibrate
 
-PR_LABELS = calibrate.ROOT / "evals/d1a/pr-labels/manifest.json"
+D1A = calibrate.ROOT / "evals/d1a"
 
 
 def scored(directory, report, n=40, correct=0.73):
@@ -22,9 +22,9 @@ def scored(directory, report, n=40, correct=0.73):
     return str(directory / "rows.json")
 
 
-def partition(name):
-    """The report.json of rows benchmark scored with --data evals/d1a/pr-labels:<name> (the partition file's sha256, split custom)."""
-    return {"suite_sha256": json.loads(PR_LABELS.read_text(encoding="utf-8"))["partitions"][name]["sha256"], "split": "custom"}
+def partition(name, suite="pr-labels"):
+    """The report.json of rows benchmark scored with --data evals/d1a/<suite>:<name> (the partition file's sha256, split custom)."""
+    return {"suite_sha256": json.loads((D1A / suite / "manifest.json").read_text(encoding="utf-8"))["partitions"][name]["sha256"], "split": "custom"}
 
 
 # how a fine-tune's training is recorded: a skills mix sidecar (counts), a D2 builder sidecar (sources), --data a D1A partition
@@ -49,13 +49,25 @@ def quick(monkeypatch):   # the guard is under test, not the fit
 
 
 @pytest.mark.parametrize("how", ["counts", "sources", "data"])
-def test_a_d1a_eval_partition_of_a_trained_suite_fits_with_a_note(tmp_path, capsys, quick, how):
+def test_a_d1a_eval_partition_of_a_suite_the_run_never_trained_on_fits(tmp_path, quick, how):
+    run = trained(tmp_path, how)   # trained on pr-labels:train only among the D1A suites
+    assert calibrate.main(["--run", str(run), "--rows", scored(tmp_path / "routing", partition("factory-development", "routing"))]) == 1.5
+    fit = read_meta(run).extra["temperature_fit"]   # no --allow-in-distribution needed, and nothing to record
+    assert "in_distribution" not in fit and "same_corpus" not in fit and "evals/d1a/pr-labels:train" in fit["training_partitions"]
+    assert fit["fit_rows"][0]["suite"] == "evals/d1a/routing" and fit["fit_rows"][0]["split"] == "factory-development"
+
+
+@pytest.mark.parametrize("how", ["counts", "sources", "data"])
+def test_a_d1a_eval_partition_of_a_trained_suite_needs_the_flag_and_is_recorded(tmp_path, capsys, quick, how):
     run = trained(tmp_path, how)
-    assert calibrate.main(["--run", str(run), "--rows", scored(tmp_path / "dev", partition("development"))]) == 1.5   # no --allow-in-distribution
+    same_corpus = scored(tmp_path / "dev", partition("development"))
+    with pytest.raises(SystemExit, match="SAME CORPUS: evals/d1a/pr-labels:development is an eval partition of evals/d1a/pr-labels"):
+        calibrate.main(["--run", str(run), "--rows", same_corpus])
+    assert read_meta(run).temperature == 1.0 and "temperature_fit" not in read_meta(run).extra   # nothing written
+    assert calibrate.main(["--run", str(run), "--rows", same_corpus, "--allow-in-distribution"]) == 1.5
     fit = read_meta(run).extra["temperature_fit"]
-    assert "in_distribution" not in fit and "evals/d1a/pr-labels:train" in fit["training_partitions"]
-    assert fit["fit_rows"][0]["suite"] == "evals/d1a/pr-labels" and fit["fit_rows"][0]["split"] == "development"
     assert "SAME CORPUS" in capsys.readouterr().out and "eval partition of evals/d1a/pr-labels" in fit["same_corpus"][0]
+    assert fit["same_corpus"][0] in fit["in_distribution"]["problems"]
 
 
 @pytest.mark.parametrize("how", ["counts", "sources", "data"])
