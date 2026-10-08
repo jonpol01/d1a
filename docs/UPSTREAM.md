@@ -113,6 +113,8 @@ the Apache License 2.0. This file records where D1A's code came from and what D1
   - `d1a/training/composition.py`: the same shapes, splits, held-out keys and structure keys; checked by
     `scripts/equivalence/composition.py`.
   - `d1a/training/train.py`: the same training, bit for bit on the CPU, resumes included; its tests are `tests/test_train.py`.
+  - `tests/test_api.py`: the same HTTP API checks and more (tighter sums, the confidence and expected-score formulas, 422s
+    at both option limits, isolation for every question in any order); it now serves the tiny checkpoint in process.
 - **Rewritten**: `README.md`, `AGENTS.md`, `NOTICE`, `.gitignore`.
 - **Kept as is**: the frozen suites in `evals/` (large partitions still download from Kev's Hub dataset
   `jaredpalmer/kev-suites`), the suite builders in `scripts/`.
@@ -132,7 +134,6 @@ d1a/serving/serve.py
 d1a/training/temperature_gate.py
 pyproject.toml
 scripts/mlx_parity.py
-tests/test_api.py
 tests/test_conventions.py
 tests/test_mlx.py
 tests/test_model.py

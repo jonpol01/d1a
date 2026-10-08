@@ -68,7 +68,7 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = ["server: needs a running d1a.serving.serve instance (D1A_BASE_URL)"]
+markers = ["server: the HTTP API tests (tests/test_api.py); they serve the tiny checkpoint in process, or check D1A_BASE_URL when it is set"]
 
 [tool.setuptools]
 packages = ["d1a", "d1a.agents", "d1a.backends", "d1a.core", "d1a.eval", "d1a.learning", "d1a.serving", "d1a.training"]
