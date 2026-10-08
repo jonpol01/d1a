@@ -13,7 +13,14 @@ own training data is in distribution and comes out overconfident on anything els
 development rows gave ECE 0.059 elsewhere; a pool of held-out datasets gave 0.0085). So the fit is refused when a rows
 file (a) comes from a suite the checkpoint trained on, (b) pools a source it trained on, or (c) reads the calibration or
 development partition of a training corpus, and when a rows file's suite or the checkpoint's training cannot be placed.
+A D1A suite partition (rows d1a.eval.benchmark scored with --data evals/d1a/<suite>:<partition>) is placed by its file's
+sha256 and its role in the suite's manifest: the fit is refused on a partition the checkpoint trained on, and allowed on an
+eval partition (development, test) of a suite whose train partitions it trained on, with a SAME CORPUS note printed and
+recorded in temperature_fit.same_corpus. What it trained on is read from its training_config.json (else its metadata):
+--suite, --extra_suites, --data (a D1A partition, or a mix whose sidecar <data>.json lists its sources, as
+d1a.training.train's source coverage reads it) and the sources it recorded covering.
 --allow-in-distribution fits anyway, warns, and records every reason in the checkpoint's temperature_fit.in_distribution.
+A fit on an end of the grid (0.25 or 4) is a bound, not a fit: it is warned (GRID EDGE) and recorded in temperature_fit.grid_edge.
 
 Every fit also records the 90% bootstrap interval of its temperature (report only). With --judge rows, the fitted temperature
 replaces the checkpoint's current one only when it passes Kev's round 28 rule on them and the --guard rows, and then that
@@ -32,8 +39,8 @@ so reordering a rows file never moves a verdict.
 
     python -m d1a.training.calibrate --run runs/new --rows runs/pool/rows.json --judge runs/served/rows.json --guard runs/hard/rows.json --confirm runs/test/rows.json --locked runs/locked/rows.json
 
-What the checkpoint trained on comes from its metadata (d1a.training.train records the suite's manifest hash, its args and --data) or a
-provenance.json beside it; where rows came from, from the report.json d1a.eval.benchmark writes beside them.
+What the checkpoint trained on comes from its training_config.json or metadata (d1a.training.train records the suite's manifest
+hash, its args, --data and the sources it covered), the sidecar of its --data mix, or a provenance.json beside it; where rows came from, from the report.json d1a.eval.benchmark writes beside them.
 """
 import argparse
 import functools
@@ -44,7 +51,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from d1a.backends.checkpoint import Checkpoint, read_meta, write_meta
-from d1a.eval.metrics import TEMPERATURE_FIT, TEMPERATURE_FIT_METHOD, cross_validated_temperature, fit_temperature, metrics, raw_row, recorded, scored_rows
+from d1a.eval import suites as d1a_suites
+from d1a.eval.metrics import TEMPERATURE_FIT, TEMPERATURE_FIT_METHOD, TEMPERATURE_GRID, cross_validated_temperature, fit_temperature, metrics, raw_row, recorded, scored_rows
 from d1a.eval.suite import digest, read_json, read_manifest, suite_key
 from d1a.training.temperature_gate import confirmation, interval, keyed, rule
 
@@ -61,6 +69,18 @@ def _suites():
         by_digest[digest(m)] = d
         by_name.setdefault(m.parent.name, []).append(d)
     return by_digest, by_name
+
+
+@functools.cache
+def _d1a_partitions():
+    """{partition sha256: (suite dir, partition)} of every D1A suite partition in this checkout (evals/d1a, d1a.eval.suites)."""
+    return {p["sha256"]: (str(m.parent.relative_to(ROOT)), name) for m in sorted((ROOT / "evals/d1a").glob(f"*/{d1a_suites.MANIFEST}"))
+            for name, p in read_json(m)["partitions"].items()}
+
+
+def is_d1a(m):
+    """Whether a manifest is a D1A suite's (partitions with roles, no sources table)."""
+    return bool(m) and m.get("format") == d1a_suites.FORMAT
 
 
 def manifest(suite):
@@ -82,19 +102,60 @@ def trainable(m):
 @dataclass(frozen=True)
 class Training:
     """What a checkpoint trained on, as far as this checkout can tell."""
-    suites: frozenset     # its training suite, the components that suite names, its --data file's suite
+    suites: frozenset     # its frozen suites: --suite, --extra_suites, the mix's, the components they name, a --data file's
     sources: frozenset    # the sources those suites train
     unplaced: tuple       # training data whose sources this checkout cannot list
+    partitions: frozenset = frozenset()   # the D1A suite partitions it trained on (evals/d1a/<suite>:<partition>)
 
 
-def training_of(suite_sha256=None, suite=None, data=None):
-    """Training from what a trainer recorded, or None when no suite of this checkout matches. A --data file counts
-    through its directory's suite; one outside evals/ cannot be checked, so it is unplaced, never dropped."""
+def place(name):
+    """A training source as --data, a mix's sidecar or training_config.json names it -> (frozen suite dirs, D1A partitions),
+    or None when this checkout has no such suite or partition. A D1A partition is evals/d1a/<suite>:<partition> or the D2
+    builder's <suite>:<partition>; a frozen suite is evals/<suite>, <suite>, or either with :train."""
+    head, sep, part = Path(str(name).strip()).as_posix().rpartition(":")
+    if sep:
+        d = suite_key(head) or f"evals/d1a/{head}"
+        if is_d1a(m := manifest(d)): return ((), (f"{d}:{part}",)) if part in m["partitions"] else None
+        if part != "train": return None
+    named = head if sep else part
+    key = suite_key(named)
+    dirs = [d for d in ([key] if key and manifest(key) else _suites()[1].get(named, [])) if not is_d1a(manifest(d))]
+    return (tuple(dirs), ()) if dirs else None
+
+
+def mix_sources(data):
+    """(names of the sources a --data mix holds records of, why it cannot say) from its sidecar <data>.json, read as
+    d1a.training.train's source_coverage reads it; (None, None) for a file without one."""
+    sidecar = Path(f"{data}.json")
+    if not sidecar.is_file() and not sidecar.is_absolute(): sidecar = ROOT / sidecar
+    if not sidecar.is_file(): return None, None
+    from d1a.training.train import sidecar_counts   # loads the trainer only for a run trained on a mix
+    try:
+        counts = sidecar_counts(read_json(sidecar))
+    except (ValueError, KeyError, AttributeError, TypeError) as e:
+        return None, f"--data {data}: its sidecar {sidecar.name} does not say which sources the mix holds ({e})"
+    return [n for n, records in counts.items() if not (type(records) is int and records == 0)], None
+
+
+def training_of(suite_sha256=None, suite=None, data=None, extra_suites="", covered=()):
+    """Training from what a trainer recorded, or None when none of it is a suite or partition of this checkout. --data is
+    a D1A partition, a mix whose sidecar names its sources, or a file counted through its directory's suite; one this
+    checkout cannot place (outside evals/, no sidecar, a mix source it lacks) is unplaced, never dropped. `covered`: the
+    sources training_config.json records the run covering (d1a.training.train's source_coverage)."""
     start = _suites()[0].get(suite_sha256) or (suite_key(suite) if suite and manifest(suite_key(suite)) else None)
-    if start is None: return None
-    data_suite = suite_key(Path(data).parent) if data else None
-    seen, found, unplaced = set(), set(), [] if data_suite or not data else [f"--data {data} (outside evals/)"]
-    todo = [d for d in (start, data_suite) if d]
+    todo, partitions, unplaced = [start] if start else [], set(), []
+    if (suite_sha256 or suite) and not start: unplaced.append(f"--suite {suite or suite_sha256} (no suite of this checkout)")
+    named = [*filter(None, str(extra_suites or "").split(",")), *covered]
+    if data:
+        if (placed := place(data)) and placed[1]: partitions.update(placed[1])
+        elif (mixed := mix_sources(data)) != (None, None): named += mixed[0] or []; unplaced += [mixed[1]] if mixed[1] else []
+        elif data_suite := suite_key(Path(data).parent): todo.append(data_suite)
+        else: unplaced.append(f"--data {data} (outside evals/, no sidecar {Path(data).name}.json naming its sources)")
+    for name in named:
+        if placed := place(name): todo += placed[0]; partitions.update(placed[1])
+        else: unplaced.append(f"training source {name} (no suite or partition of this checkout)")
+    if not todo and not partitions: return None
+    seen, found = set(), set()
     while todo:
         d = todo.pop(0)
         if d in seen: continue
@@ -108,14 +169,17 @@ def training_of(suite_sha256=None, suite=None, data=None):
             dirs = _suites()[1].get(component.removesuffix("-train").removesuffix("-extra"))
             if dirs: todo += dirs
             else: unplaced.append(f"{d} component {component}")
-    return Training(frozenset(seen), frozenset(found), tuple(unplaced))
+    return Training(frozenset(seen), frozenset(found), tuple(unplaced), frozenset(partitions))
 
 
 def checkpoint_training(run):
-    """Training of a checkpoint: what d1a.training.train recorded in its metadata, else the provenance.json beside it."""
-    extra = read_meta(run).extra
-    args = extra.get("args") or {}
-    training = training_of(extra.get("suite_sha256"), args.get("suite"), args.get("data"))
+    """Training of a checkpoint: what d1a.training.train recorded in its training_config.json (else its metadata), with the
+    sidecar of its --data mix, else the provenance.json beside it."""
+    config = Path(run) / "training_config.json"
+    trained = read_json(config) if config.exists() else read_meta(run).extra
+    args = trained.get("args") or {}
+    training = training_of(trained.get("suite_sha256"), args.get("suite"), args.get("data"), args.get("extra_suites"),
+                           (trained.get("sources") or {}).get("covered") or ())
     provenance = Path(run).parent / "provenance.json"
     if training is None and provenance.exists():
         p = read_json(provenance)
@@ -125,9 +189,11 @@ def checkpoint_training(run):
 
 def rows_origin(path):
     """(suite dir, partition) a rows.json was scored on, from the d1a.eval.benchmark report.json beside it; (None, None) for
-    rows it does not place (custom --data rows, a suite this checkout lacks)."""
+    rows it does not place (custom --data rows, a suite this checkout lacks). A D1A partition (benchmark --data
+    evals/d1a/<suite>:<partition>) is placed by the sha256 of its file, which its manifest pins."""
     report = Path(path).parent / "report.json"
     if report.exists() and "suite_sha256" in (r := read_json(report)):
+        if r["suite_sha256"] in _d1a_partitions(): return _d1a_partitions()[r["suite_sha256"]]
         return _suites()[0].get(r["suite_sha256"]), r.get("split", "development")
     return None, None
 
@@ -187,27 +253,39 @@ def allowlist_typos(reads):
     for path, srcs in reads:
         if not srcs: continue
         suite = rows_origin(path)[0]
-        known = sources(manifest(suite)) if suite else {r["source"] for r in read_json(path)}
+        known = sources(m) if suite and not is_d1a(m := manifest(suite)) else {r["source"] for r in read_json(path)}   # a D1A manifest lists no sources
         if missing := sorted(set(srcs) - known): out.append(f"{path}: {missing} not among the sources of {suite or 'these rows'} {sorted(known)[:10]}")
     return out
 
 
 def in_distribution(fitted, training, run):
-    """Every reason the fit set is not held out from the checkpoint's training (empty = held out)."""
+    """(every reason the fit set is not held out from the checkpoint's training (empty = held out), notes on held-out rows
+    of a corpus it trained on). A D1A partition is placed by partition: the run's own training partitions are refused, an
+    eval partition of a suite it trained is held out and noted."""
+    notes = []
     out = [f"{f['rows']}: cannot tell which suite these rows were scored on (no d1a.eval.benchmark report.json with a suite of this checkout beside them)"
            for f in fitted if f["suite"] is None]
     if training is None:
-        return out + [f"{run}: cannot tell what this checkpoint was trained on (its metadata names no suite of this checkout, no provenance.json beside it)"]
+        return out + [f"{run}: cannot tell what this checkpoint was trained on (its metadata names no suite of this checkout, no provenance.json beside it)"], notes
     for f in fitted:
         if f["suite"] is None: continue
         d, m = f["suite"], manifest(f["suite"])
         if m is None: out.append(f"{f['rows']}: its suite {d} has no manifest in this checkout"); continue
+        if is_d1a(m):
+            if f["split"] not in m["partitions"]: out.append(f"{f['rows']}: {d} has no partition {f['split']!r}"); continue
+            part, role = f"{d}:{f['split']}", m["partitions"][f["split"]]["role"]
+            pooled = set(f.get("sources") or {r["source"] for r in read_json(f["rows"])})
+            if part in training.partitions: out.append(f"{f['rows']}: {part} is training data of the checkpoint")
+            elif role == "eval" and (trained := sorted(p for p in training.partitions if p.startswith(f"{d}:"))):
+                notes.append(f"{f['rows']}: {part} is an eval partition of {d}, held out from the checkpoint's training, which read {trained}")
+            if shared := sorted(pooled & training.sources): out.append(f"{f['rows']}: it pools {len(shared)} training source(s) {shared[:8]}" + (" ..." if len(shared) > 8 else ""))
+            continue
         if d in training.suites: out.append(f"{f['rows']}: {d} is training data of the checkpoint")
         pooled = set(f.get("sources") or sources(m))
         if not pooled: out.append(f"{f['rows']}: {d} lists no sources; give the rows a source allowlist")
         if shared := sorted(pooled & training.sources): out.append(f"{f['rows']}: it pools {len(shared)} training source(s) {shared[:8]}" + (" ..." if len(shared) > 8 else ""))
         if f["split"] in HELD_OUT_SPLITS and trainable(m): out.append(f"{f['rows']}: it reads the {f['split']} partition of {d}, a training corpus")
-    return out + [f"cannot list the sources of {d}, training data of {run}" for d in training.unplaced]
+    return out + [f"cannot list the sources of {d}, training data of {run}" for d in training.unplaced], notes
 
 
 def init_of(run, meta):
@@ -245,6 +323,14 @@ def incumbent_of(run, meta, given=None):
     return {"temperature": meta.temperature, "source": "run", "name": str(run)}
 
 
+def grid_edge(T):
+    """A warning when T is an end of the fit's grid (TEMPERATURE_GRID), where the least NLL may lie beyond it; else None."""
+    if edge := next((e for e in TEMPERATURE_GRID if math.isclose(T, e, rel_tol=1e-9)), None):
+        return (f"T={T:.4f} is the {'lower' if edge == TEMPERATURE_GRID[0] else 'upper'} end of the fit's grid {TEMPERATURE_GRID[0]}..{TEMPERATURE_GRID[1]}:"
+                " the best temperature may lie beyond it, so this one is a bound, not a fit")
+    return None
+
+
 def report_line(name, rows, T):
     raw, cal = metrics(rows), metrics(rows, T)
     return (f"{name:12} T={T:.2f}  acc {raw['acc']:.3f} -> {cal['acc']:.3f} | brier {raw['brier']:.3f} -> {cal['brier']:.3f} | ece {raw['ece']:.3f} -> {cal['ece']:.3f}"
@@ -268,11 +354,12 @@ def calibrate(run, rows, exclude=(), transfer=None, allow_in_distribution=False,
         fitted.append({"rows": path, "suite": suite, "split": split, **({"sources": srcs} if srcs else {}),
                        "questions": len(scored_rows(select([(path, srcs)], exclude)))})
     training = checkpoint_training(run)
-    problems = in_distribution(fitted, training, run)
+    problems, notes = in_distribution(fitted, training, run)
     if problems and not allow_in_distribution:
         raise SystemExit("refusing to fit a temperature on rows that are not held out from the checkpoint's training:\n  " + "\n  ".join(problems)
                          + "\nFit on held-out datasets, or pass --allow-in-distribution to fit anyway (recorded in the checkpoint).")
     for line in problems: print(f"!!! IN DISTRIBUTION (--allow-in-distribution): {line}", flush=True)
+    for line in notes: print(f"!!! SAME CORPUS (held out, allowed): {line}", flush=True)
     if judged:
         against = incumbent_of(run, read_meta(run), incumbent)
         print(f"incumbent    T={against['temperature']:.4f}: " + {"incumbent": f"--incumbent {against['name']}",
@@ -281,6 +368,7 @@ def calibrate(run, rows, exclude=(), transfer=None, allow_in_distribution=False,
     fit = [raw_row(recorded(r)) for r in select(reads, exclude) if r["variant"] == "clean"]
     T = fit_temperature(fit, **TEMPERATURE_FIT)
     print(report_line("fit rows", fit, T))
+    if edge := grid_edge(T): print(f"!!! GRID EDGE: {edge}", flush=True)
     if transfer: print(report_line("transfer", [r for r in read_json(transfer) if r["variant"] == "clean"], T))
     units = [r for path, srcs in reads for r in panel(path, srcs, exclude)]
     cv = cross_validated_temperature(units, folds=folds, seed=seed, **TEMPERATURE_FIT)
@@ -315,6 +403,9 @@ def calibrate(run, rows, exclude=(), transfer=None, allow_in_distribution=False,
                                      "n": len(fit), "method": TEMPERATURE_FIT_METHOD, "cross_validation": cv,
                                      "interval": spread, **({"rule": verdict} if verdict else {}),
                                      "fit_rows": fitted, "training_suites": sorted(training.suites) if training else None,
+                                     "training_partitions": sorted(training.partitions) if training else None,
+                                     **({"grid_edge": {"temperature": T, "warning": edge}} if edge else {}),
+                                     **({"same_corpus": notes} if notes else {}),
                                      **({"in_distribution": {"allowed": True, "problems": problems}} if problems else {})}
     write_meta(run, meta)
     print(f"wrote temperature {T:.2f} to {run}/d1a_config.json")
@@ -338,7 +429,8 @@ def main(argv=None):
     ap.add_argument("--transfer", help="out-of-domain rows.json, reported before and after (never fitted)")
     ap.add_argument("--temperature", type=float, help="write this value without fitting or judging it; needs --reason")
     ap.add_argument("--reason", help="with --temperature: where the value comes from (recorded in the checkpoint)")
-    ap.add_argument("--allow-in-distribution", action="store_true", help="fit even on rows that share data with the checkpoint's training; warned and recorded")
+    ap.add_argument("--allow-in-distribution", action="store_true", help="fit even on rows that share data with the checkpoint's training (a suite, source or D1A partition it"
+                    " trained on, or training that cannot be placed); warned and recorded")
     ap.add_argument("--judge", action="append", default=[], help="rows the new temperature must beat the current one on: pooled, Brier"
                     " (95%% upper bound below 0) and ECE lower; each one's ECE may rise by at most 0.005; path or path:source,...; repeatable")
     ap.add_argument("--guard", action="append", default=[], help="with --judge: rows whose ECE may rise by at most 0.005; path or path:source,...,"
