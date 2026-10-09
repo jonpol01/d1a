@@ -150,11 +150,14 @@ def main():
     ap.add_argument("--source", choices=["swe-agent", "openhands"], default="swe-agent",
                     help="openhands: nebius/SWE-rebench-openhands-trajectories through from_openhands.py (its 12 shards are issue buckets)")
     ap.add_argument("--issues", type=int, default=0, help="with --per-issue: keep only this many of the drawn issues, picked with --seed")
+    ap.add_argument("--keep-issue-md", action="store_true",
+                    help="with --source openhands: keep the harness's root issue.md diff in the patch (a shortcut; to measure it)")
     ap.add_argument("--revision", help="the dataset revision (default: the source's pinned commit; for swe-agent, the one the released dev and test rows came from)")
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
     if a.swegemma and a.source != "swe-agent": ap.error("--swegemma reads its own runs; leave --source out")
     if a.issues and not a.per_issue: ap.error("--issues needs --per-issue")
+    if a.keep_issue_md and a.source != "openhands": ap.error("--keep-issue-md needs --source openhands")
     oh = a.source == "openhands"
     if oh: import from_openhands
     revision = a.revision or (from_openhands.REVISION if oh else REVISION)
@@ -172,7 +175,7 @@ def main():
     if a.issues:
         keep = set(rng.sample(sorted({r["instance_id"] for r in rows}), min(a.issues, len({r["instance_id"] for r in rows}))))
         rows = [r for r in rows if r["instance_id"] in keep]
-    if oh: rows = from_openhands.hydrate(rows, revision)
+    if oh: rows = from_openhands.hydrate(rows, revision, a.keep_issue_md)
     for r in rows: r["run_key"] = run_key(r)
     if a.cut_step:
         rows = [c for c in (cut(r, a.cut_step) for r in rows) if c is not None]
@@ -186,6 +189,7 @@ def main():
     out = []
     for i, r in enumerate(rows):
         rec = {"run_key": r["run_key"], "instance_id": r["instance_id"], "repo": r.get("repo") or r["instance_id"].rsplit("-", 1)[0], "model": r["model_name"], "y": bool(r["target"]), **heuristics(r)}
+        rec.update({k: r[k] for k in ("trajectory_id", "issue_md") if k in r})   # openhands: the run's id, and whether its patch carried issue.md
         if model:
             t0 = time.time(); ans = model.decide(state_of(r, a.issue_chars, a.patch_chars, a.tail_chars), question)["resolved"]
             rec["p_d1a"] = float(ans["noul"]); rec["run"] = a.run; rec["seconds"] = round(time.time() - t0, 2)

@@ -63,3 +63,40 @@ def test_draw_on_the_index_reads_back_the_drawn_runs(tmp_path, monkeypatch):
     assert [r["trajectory_id"] for r in full] == [rows[r["_row"]]["trajectory_id"] for r in drawn]
     assert all(f["target"] == bool(by_tid[f["trajectory_id"]]["resolved"]) == d["target"] for f, d in zip(full, drawn))
     assert drawn and all({r["target"] for r in full if r["instance_id"] == i} == {True, False} for i in {r["instance_id"] for r in full})
+
+
+def _parquet(tmp_path, monkeypatch):
+    """36 synthetic runs of 9 issues (3 repositories); the issues with an even number carry the issue.md diff."""
+    rows = [row(f"org__repo{i % 3}-{i}", int(random.Random(j * 31 + i).random() < 0.5), patch=(ISSUE_MD if i % 2 == 0 else "") + FIX, tid=f"{i}.{j}")
+            for i in range(9) for j in range(4)]
+    pq.write_table(pa.Table.from_pylist(rows), tmp_path / "t.parquet", row_group_size=5)
+    monkeypatch.setattr(oh, "path", lambda revision=oh.REVISION: str(tmp_path / "t.parquet"))
+    return rows
+
+
+def test_shortcut_counts_for_the_rows_read(tmp_path, monkeypatch, capsys):
+    rows = _parquet(tmp_path, monkeypatch)
+    full = oh.hydrate(oh.index())
+    assert [r["issue_md"] for r in full] == [int(r["instance_id"].rsplit("-", 1)[1]) % 2 == 0 for r in full]
+    w = [r["resolved"] for r in rows if r["model_patch"].startswith(ISSUE_MD)]; wo = [r["resolved"] for r in rows if not r["model_patch"].startswith(ISSUE_MD)]
+    want = {"runs": 36, "issue_md": 20, "issues_with_issue_md": 5, "resolved_with": round(sum(w) / 20, 3), "resolved_without": round(sum(wo) / 16, 3)}
+    assert oh.shortcut_counts(full) == want
+    assert f"issue.md diff stripped; {json.dumps(want)}" in capsys.readouterr().out
+
+
+def test_keep_issue_md_scores_the_same_runs_with_the_diff(tmp_path, monkeypatch):
+    _parquet(tmp_path, monkeypatch)
+    monkeypatch.setitem(__import__("sys").modules, "from_openhands", oh)   # zero_shot.main imports the adapter by name
+    out = {}
+    for name, extra in (("stripped", []), ("kept", ["--keep-issue-md"])):
+        monkeypatch.setattr("sys.argv", ["zero_shot.py", "--source", "openhands", "--shards", "12", "--per-issue", "2", "--mixed-only", "--no-d1a",
+                                         "--out", str(tmp_path / f"{name}.jsonl"), *extra])
+        zero_shot.main()
+        out[name] = [json.loads(l) for l in (tmp_path / f"{name}.jsonl").read_text(encoding="utf-8").splitlines()]
+    s, k = out["stripped"], out["kept"]
+    assert s and [r["trajectory_id"] for r in s] == [r["trajectory_id"] for r in k]   # the same draw
+    assert [r["issue_md"] for r in s] == [r["issue_md"] for r in k] and any(r["issue_md"] for r in s) and not all(r["issue_md"] for r in s)
+    assert all((b["patch_lines"] - a["patch_lines"], a["run_key"] != b["run_key"]) == ((1, True) if a["issue_md"] else (0, False)) for a, b in zip(s, k))
+    monkeypatch.setattr("sys.argv", ["zero_shot.py", "--keep-issue-md", "--no-d1a", "--out", str(tmp_path / "x.jsonl")])
+    try: zero_shot.main(); raise AssertionError("--keep-issue-md without --source openhands was accepted")
+    except SystemExit as e: assert e.code == 2

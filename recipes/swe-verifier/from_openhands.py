@@ -12,7 +12,9 @@ come from test runs too, so they are never read. The row becomes zero_shot.py's:
   SWE-agent's data; otherwise the error's class ("RuntimeError" for the iteration limit, "AgentStuckInLoopError", ...);
 - generated_patch = model_patch without a root `issue.md`: in a fifth of the runs the task workspace held the issue as an
   untracked issue.md, and the diff picked it up. It is per issue (all of an issue's runs or none), is the issue text the
-  state already shows, and comes with a 77% resolved rate against 40%, so leaving it would hand the scorer a shortcut;
+  state already shows, and comes with a 77% resolved rate against 40%, so leaving it would hand the scorer a shortcut.
+  Each row says whether its patch carried it (issue_md), hydrate() prints the counts for the rows it reads, and
+  keep_issue_md=True (zero_shot.py --keep-issue-md) leaves the diff in, to measure the shortcut;
 - trajectory: the system prompt, the issue (as "ISSUE: ... INSTRUCTIONS:", which zero_shot.issue_of reads), each assistant
   turn ("ai": its text and tool calls, as name({arguments})), each tool result and later user nudge ("user").
 
@@ -80,11 +82,19 @@ def exit_status(status, patch):
     return (status or "unknown").split(":")[0]
 
 
-def to_row(r):
-    patch = strip_issue_md(r["model_patch"])
+def to_row(r, keep_issue_md=False):
+    stripped = strip_issue_md(r["model_patch"]); patch = (r["model_patch"] or "") if keep_issue_md else stripped
     return {"instance_id": r["instance_id"], "repo": r["instance_id"].rsplit("-", 1)[0], "trajectory_id": r["trajectory_id"],
             "model_name": MODEL, "target": bool(r["resolved"]), "exit_status": exit_status(r["exit_status"], patch),
-            "generated_patch": patch, "trajectory": trajectory(r["trajectory"])}
+            "generated_patch": patch, "issue_md": stripped != (r["model_patch"] or ""), "trajectory": trajectory(r["trajectory"])}
+
+
+def shortcut_counts(rows):
+    """How many of to_row's rows carried the issue.md diff, and the resolved rate with and without it."""
+    w = [r["target"] for r in rows if r["issue_md"]]; wo = [r["target"] for r in rows if not r["issue_md"]]
+    rate = lambda v: round(sum(v) / len(v), 3) if v else None
+    return {"runs": len(rows), "issue_md": len(w), "issues_with_issue_md": len({r["instance_id"] for r in rows if r["issue_md"]}),
+            "resolved_with": rate(w), "resolved_without": rate(wo)}
 
 
 def index(revision=REVISION):
@@ -94,8 +104,9 @@ def index(revision=REVISION):
             for k, (i, y) in enumerate(zip(t["instance_id"].to_pylist(), t["resolved"].to_pylist()))]
 
 
-def hydrate(light, revision=REVISION):
-    """The full rows (to_row) of index() rows, in the order given, reading only the row groups that hold them."""
+def hydrate(light, revision=REVISION, keep_issue_md=False):
+    """The full rows (to_row) of index() rows, in the order given, reading only the row groups that hold them; prints
+    shortcut_counts() for them."""
     f = pq.ParquetFile(path(revision)); starts, n = [], 0
     for g in range(f.metadata.num_row_groups): starts.append(n); n += f.metadata.row_group(g).num_rows
     want = sorted({r["_row"] for r in light}); got = {}
@@ -103,10 +114,11 @@ def hydrate(light, revision=REVISION):
         local = [k - s for k in want if s <= k < s + f.metadata.row_group(g).num_rows]
         if not local: continue
         for k, r in zip(local, f.read_row_group(g, columns=COLS).take(pa.array(local)).to_pylist()):
-            got[s + k] = to_row(r)
+            got[s + k] = to_row(r, keep_issue_md)
     out = []
     for r in light:
         row = got[r["_row"]]
         assert row["instance_id"] == r["instance_id"], (r, row["instance_id"])
         out.append(row)
+    print(f"from_openhands: issue.md diff {'kept' if keep_issue_md else 'stripped'}; {json.dumps(shortcut_counts(out))}", flush=True)
     return out
