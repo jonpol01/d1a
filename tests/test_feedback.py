@@ -1,5 +1,6 @@
 import json
 import numpy as np
+import pytest
 
 from d1a.training.data import materialize
 from d1a.learning.feedback import FeedbackLog, OutcomeCalibrator, choice_log_loss, choice_pairs, gate, gate_choice, held_out, log_loss, main, pairs, promote, records, split
@@ -261,3 +262,44 @@ def test_the_outcome_calibrator_keeps_answers_read_at_different_temperatures_apa
     OutcomeCalibrator({"resolved": [1.0, -2.0, 50]}).save(path)   # a calibrator written before decisions logged their temperature
     os.utime(path, (path.stat().st_mtime + 5,) * 2)
     assert answer(None) == round(OutcomeCalibrator({"resolved": [1.0, -2.0, 50]}).p("resolved", 0.8), 4) < 0.8 and answer("routing") == 0.8
+
+
+def test_a_recalibrated_choice_answer_carries_its_own_confidence_and_a_score_answer_is_left_alone():
+    """#195: the served answer must not contradict itself. A choice answer's confidence is read off the recalibrated
+    probabilities; a score answer, which also carries probabilities by level, is never rescaled as a choice."""
+    from d1a.core.api import answer, choice_confidence
+    cal = OutcomeCalibrator({"blast": {"s": 0.5, "n": 100}, "effort": {"s": 0.5, "n": 100}})
+    choice = answer([0.7, 0.2, 0.1], {"type": "choice", "keys": ["contained", "moderate", "massive"]})
+    score = answer([0.1, 0.2, 0.7], {"type": "score", "legend": "0-2"})
+    out = cal.apply({"blast": choice, "effort": score})
+    assert out["blast"]["choice"] == "contained" and out["blast"]["probabilities"]["contained"] < choice["probabilities"]["contained"]
+    # read off the unrounded probabilities, as the server reads it: equal to the shown ones' up to their rounding
+    assert out["blast"]["confidence"] == pytest.approx(choice_confidence(list(out["blast"]["probabilities"].values())), abs=2e-4)
+    assert out["blast"]["confidence"] < choice["confidence"]
+    assert out["effort"] == score
+
+
+def test_promote_drops_a_choice_calibration_a_score_question_carried_from_before():
+    """A calibrator fitted before #195 may hold choice-type params for a score question. apply() leaves score answers
+    alone now, so promote drops the entry: what the file lists is what is applied."""
+    from d1a.core.api import answer
+    stale = OutcomeCalibrator({"effort": {"s": 0.5, "n": 100}, "resolved": [1.0, 0.0, 50]})
+    decisions = [{"id": f"d{i}", "answers": {"effort": answer([0.2, 0.5, 0.3], {"type": "score", "legend": "0-2"})}, "labels": {"effort": "1"}} for i in range(4)]
+    served, report = promote(decisions, stale)
+    assert "effort" not in served.params and served.params["resolved"] == [1.0, 0.0, 50]
+    assert report["effort"]["promote"] is False and "never applied" in report["effort"]["dropped"]
+
+
+def test_the_promote_command_writes_a_drop_even_when_nothing_is_promoted(tmp_path, capsys):
+    """hermes-prbot on #204: promote() dropped a stale score entry in memory, but the CLI wrote the file only when a
+    question was promoted, so a drop alone never reached the server."""
+    from d1a.core.api import answer
+    path = tmp_path / "served.json"; OutcomeCalibrator({"effort": {"s": 0.5, "n": 100}, "resolved": [1.0, 0.0, 50]}).save(path)
+    log = FeedbackLog(tmp_path / "f.jsonl")
+    for i in range(4):
+        did = log.decision(f"s {i}", {"effort": {"type": "score", "criteria": ["low", "mid", "high"]}},
+                           {"effort": answer([0.2, 0.5, 0.3], {"type": "score", "legend": "0-2"})}, run="r@v0.5")
+        log.outcome(did, {"effort": "1"}, {"src": "reviewer", "group": f"g{i}"})
+    main(["promote", str(tmp_path / "f.jsonl"), "--calibrator", str(path)])
+    assert json.loads(capsys.readouterr().out)["promoted"] == []
+    assert OutcomeCalibrator.load(path).params == {"resolved": [1.0, 0.0, 50]}
