@@ -15,6 +15,10 @@
 #   anytime scoring and the restart-budget replay                      analyze.py, budget_sim.py -> analyze-cut10-*.txt, budget-*.txt
 #   split leakage                                                      leakage.py's metrics on its released out-of-fold predictions
 #   feedback rounds                                                    self-improve/curve.jsonl, as self_improve.py wrote it
+#   the self-improvement texts (decision log, training records)        rebuild_texts.py -> self-improve/feedback.jsonl, train-r*.jsonl
+# The dataset does not re-host nebius/SWE-agent-trajectories text: those files ship as ids, labels and scores
+# (*.ids.jsonl), and rebuild_texts.py puts each verifier input back from nebius at the pinned revision (zero_shot.REVISION;
+# CC-BY-4.0, Nebius; it downloads shards 3-5, about 280 MB), checked against MANIFEST.json's "rebuilt" sha256.
 # Split leakage is recomputed from leakage/predictions.npz; refitting its folds needs the full source dataset (leakage.py).
 # Needs the `hf` CLI (logged in while the repos are private) and a Python with numpy, scipy, scikit-learn, pyarrow and
 # huggingface_hub (PYTHON, default python3; `uv sync` provides them).
@@ -46,6 +50,9 @@ if bad or present != set(listed):
     sys.exit(f"MANIFEST.json mismatch: changed {bad}, unlisted {sorted(present - set(listed))}, missing {sorted(set(listed) - present)}")
 print(f"dataset: {len(listed)} files match MANIFEST.json")
 EOF
+
+# The nebius text of the self-improvement files, rebuilt from the pinned revision (versions before the slim ship it).
+[ ! -f "$D/self-improve/feedback.ids.jsonl" ] || "$PYTHON" "$HERE/rebuild_texts.py" "$D"
 
 # The same commands and flags the study ran, on the released rows.
 "$PYTHON" "$HERE/evaluate.py" --train-heuristics "$E/heuristics-train.jsonl" \
@@ -110,6 +117,15 @@ done
 grep -v '^shard ' "$D/leakage/run.log" > "$O/leakage-released.txt"
 check "leakage/run.log" "$O/leakage.txt" "$O/leakage-released.txt"
 check "leakage/result.json" "$O/leakage-result.json" "$D/leakage/result.json"
+"$PYTHON" -I - "$D" <<'EOF' || status=1
+import hashlib, json, sys
+from pathlib import Path
+root = Path(sys.argv[1]); bad = 0
+for f in json.loads((root / "MANIFEST.json").read_text()).get("rebuilt", []):
+    ok = (root / f["path"]).is_file() and hashlib.sha256((root / f["path"]).read_bytes()).hexdigest() == f["sha256"]
+    print(f"  {'match  ' if ok else 'DIFFERS'}  {f['path']} (rebuilt from nebius)"); bad += not ok
+sys.exit(bad > 0)
+EOF
 echo; cat "$O/rounds.txt"
 echo; echo "outputs: $O"
 exit $status
