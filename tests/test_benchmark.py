@@ -222,7 +222,7 @@ def test_data_is_scored_under_the_chosen_context_and_skips_are_announced(tmp_pat
 
     class Local:
         temperature = 1.0
-        def __init__(self, run, device, opts, context): seen["context"] = context
+        def __init__(self, run, device, opts, context, queries=False): seen["context"] = context
         def __call__(self, r):
             if r["_meta"]["id"].endswith("1") and seen["context"] is CONTEXT: raise ContextOverflow("state exceeds 384 tokens")
             return answer((1 / 3, 1 / 3, 1 / 3))
@@ -239,7 +239,8 @@ def test_data_is_scored_under_the_chosen_context_and_skips_are_announced(tmp_pat
 
 
 @pytest.mark.parametrize("args", [[], ["--run", "x", "--remote", "http://h", "--suite", "s"], ["--run", "x"], ["--run", "x", "--suite", "s", "--data", "d"],
-                                  ["--run", "x", "--suite", "s", "--rotations", "0"], ["--remote", "http://h", "--suite", "s", "--remote-concurrency", "0"]])
+                                  ["--run", "x", "--suite", "s", "--rotations", "0"], ["--remote", "http://h", "--suite", "s", "--remote-concurrency", "0"],
+                                  ["--remote", "http://h", "--suite", "s", "--queries"], ["--run", "x", "--suite", "s", "--rotations", "2", "--queries"]])
 def test_command_line_refuses_contradictory_arguments(args, monkeypatch, tmp_path):
     monkeypatch.setattr(sys, "argv", ["benchmark", "--out", str(tmp_path / "out"), *args])
     with pytest.raises(SystemExit) as stop:

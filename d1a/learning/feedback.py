@@ -30,6 +30,7 @@ replayed. An outcome may name its source in meta["src"] (e.g. "human" for a pers
 model's judgment); each question keeps the label from the most trusted source (PREFER), then the latest.
 """
 import argparse
+import base64
 import hashlib
 import json
 import math
@@ -343,6 +344,59 @@ def _promote(resolved, current, share, min_outcomes, **gate_kw):
         if ok: out.params[qid] = params
         report[qid] = {"promote": ok, "fit": len(fit), "held_out": len(rows), **({k: g[k] for k in ("delta_log_loss", "ci", "reasons")} if g else {"reasons": ["no held-out outcomes"]})}
     return out.params, report
+
+
+def encode_vector(v):
+    """A 1-d float32 array as base64 text (little-endian), for JSON files: the outcome memory's query vectors."""
+    return base64.b64encode(np.asarray(v, "<f4").tobytes()).decode()
+
+
+def decode_vector(s):
+    return np.frombuffer(base64.b64decode(s), "<f4").astype(np.float32)
+
+
+# --- outcome memory (#149; from #158, which also serves it) -------------------------------------------------------------
+# A choice question's answer blended with what happened to the most similar earlier decisions: (1-lam) * P + lam * M, M
+# the outcomes of the k nearest stored queries q(h_decide) by cosine (centered), weighted by softmax(similarity / tau). It
+# can change the chosen option, unlike a temperature. d1a.eval.benchmark --queries stores the queries for an offline test.
+
+MEMORY_GRID = {"k": (3, 5, 10, 20), "tau": (0.02, 0.05, 0.1), "lam": (0.0, 0.2, 0.4, 0.6, 0.8)}
+
+
+def _unit(v, center):
+    x = np.asarray(v, np.float64) - center
+    n = np.linalg.norm(x)
+    return x / n if n > 0 else x
+
+
+def memory_probs(keys, x, bank_x, bank_labels, k, tau):
+    """M: {option: weight} over the k most similar stored queries (rows of bank_x, unit vectors) to x, or None without any."""
+    if len(bank_labels) == 0: return None
+    sims = bank_x @ x
+    top = np.argsort(-sims, kind="stable")[:k]
+    w = np.exp((sims[top] - sims[top].max()) / tau); w /= w.sum()
+    m = dict.fromkeys(keys, 0.0)
+    for i, wi in zip(top, w):
+        if bank_labels[i] in m: m[bank_labels[i]] += float(wi)
+    return m
+
+
+def blend(probs, memory, lam):
+    """(1 - lam) * P + lam * M, in P's option order; P itself without a memory."""
+    return dict(probs) if memory is None else {o: (1 - lam) * p + lam * memory[o] for o, p in probs.items()}
+
+
+def prequential(rows, bank, center, k, tau, lam):
+    """What the served policy answers for each row ({ts, q, probs}): its memory holds only the bank's outcomes ({q, label,
+    outcome_ts}) known before the row was decided."""
+    bx = np.array([_unit(b["q"], center) for b in bank]) if bank else np.zeros((0, 0))
+    known = np.array([b["outcome_ts"] for b in bank])
+    out = []
+    for r in rows:
+        mask = known < r["ts"] if len(bank) else np.zeros(0, bool)
+        m = memory_probs(list(r["probs"]), _unit(r["q"], center), bx[mask], [b["label"] for b, ok in zip(bank, mask) if ok], k, tau) if mask.any() else None
+        out.append(blend(r["probs"], m, lam))
+    return out
 
 
 def _gate(d, groups, suite_deltas, tolerance, n, seed):

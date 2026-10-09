@@ -5,7 +5,8 @@
 
 Each prediction becomes one row per question (prediction_rows), d1a.eval.metrics scores the rows (summarize), and
 evaluate_records writes three files to --out: predictions.jsonl (each record's request hash, prediction and rows, written
-as it is scored), rows.json and report.json. The predictors are in d1a.eval.predictors.
+as it is scored), rows.json and report.json. The predictors are in d1a.eval.predictors. --queries adds each question's
+pointer-head query q(h_decide) to its row, the key of d1a.learning.feedback's outcome memory (#149).
 """
 import argparse
 import functools
@@ -77,6 +78,8 @@ def prediction_rows(record, prediction):
             row["inference_temperature"] = prediction["inference_temperature"]
         if "kernels" in prediction:
             row["kernels"] = prediction["kernels"]   # a long row scored off the fp32-exact kernels (d1a.eval.predictors.LocalPredictor)
+        if "queries" in prediction:
+            row["query"] = prediction["queries"][qid]   # q(h_decide), base64 fp32 (--queries; None when no head call matched)
         rows.append(row)
     return rows
 
@@ -319,8 +322,11 @@ def parse_args(argv=None):
     ap.add_argument("--rotations", type=int, default=1, help="average every Choice question over this many cyclic option rotations (d1a.eval.predictors.RotationAveraged); 1 = one order")
     ap.add_argument("--identical-options", type=int, default=100, help="identical-option controls scored after the suite (position bias, #38): "
                     "the first N clean choice questions asked with every option the same text; 0 for none")
+    ap.add_argument("--queries", action="store_true", help="store each question's pointer-head query q(h_decide) in its row (\"query\", base64 fp32): "
+                    "the keys of d1a.learning.feedback's outcome memory (#149), for an offline test of it; --run only, one rotation")
     a = ap.parse_args(argv)
     if bool(a.run) == bool(a.remote): ap.error("give exactly one of --run or --remote")
+    if a.queries and (a.remote or a.rotations > 1): ap.error("--queries needs --run and one rotation")
     if a.rotations < 1: ap.error("--rotations must be >= 1")
     if a.remote_concurrency < 1: ap.error("--remote-concurrency must be >= 1")
     if bool(a.suite) == bool(a.data): ap.error("give exactly one of --suite or --data")
@@ -348,10 +354,10 @@ def main():
     if a.remote:
         predictor = RemotePredictor(a.remote, a.remote_model, os.environ.get("D1A_REMOTE_API_KEY", "local"), concurrency=a.remote_concurrency)
     else:
-        predictor = LocalPredictor(a.run, a.device, LoadOptions.from_env(), context=context)
+        predictor = LocalPredictor(a.run, a.device, LoadOptions.from_env(), context=context, queries=a.queries)
     scorer = RotationAveraged(predictor, a.rotations) if a.rotations > 1 else predictor
     report, _ = evaluate_records(records, scorer, a.out, heldout_sources=tuple(heldout), skip_overlong=skip_overlong, identical=a.identical_options)
-    report.update(suite_sha256=source_hash, data=a.data, date_facts=a.date_facts, rotations=a.rotations, run=a.run or a.remote, split=split,
+    report.update(suite_sha256=source_hash, data=a.data, date_facts=a.date_facts, rotations=a.rotations, run=a.run or a.remote, split=split, queries=a.queries,
                   calibration_applied=None if a.remote else predictor.temperature != 1.0,
                   remote={"base_url": a.remote, "requested_model": a.remote_model, "served_model": predictor.served_model,
                           "concurrency": a.remote_concurrency} if a.remote else None)
