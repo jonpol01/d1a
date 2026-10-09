@@ -113,6 +113,7 @@ class MediaModel:
         self.head = PointerHead(full.config.get_text_config().hidden_size, dp=meta.head_dim).to(device).eval()
         self.head.load_state_dict(meta.head)
         self.head.temperature = meta.temperature
+        self.head.use_case_temperatures = meta.use_case_temperatures
         self.lock = threading.Lock()   # one forward at a time on the device
 
     def media_inputs(self, media: Media):
@@ -125,9 +126,10 @@ class MediaModel:
         return ids, types, extra
 
     @torch.no_grad()
-    def probs(self, rec, media: Media | None = None):
+    def probs(self, rec, media: Media | None = None, use_case=None):
         """-> (probabilities per question, input token count) for one record whose state sits after the media, or a plain
-        text record (media None) on the same weights, so one loaded model answers both."""
+        text record (media None) on the same weights, so one loaded model answers both. use_case: the request's (its
+        temperature, PointerHead.temperature_for)."""
         media_ids, media_types, extra = self.media_inputs(media) if media is not None else ([], [], {})
         state_ids, _, rows = rows_of(encode(self.tok, rec))
         n_head = len(layout(self.tok)[0]) + 1                  # leading ids + <state>
@@ -140,14 +142,14 @@ class MediaModel:
             for row in rows:
                 h = self.model(input_ids=torch.tensor([row["ids"]], device=self.device), past_key_values=copy.deepcopy(out.past_key_values),
                                use_cache=True).last_hidden_state[0].float()
-                z = self.head(h[row["decide"]], h[torch.tensor(row["opts"], device=self.device)])
+                z = self.head(h[row["decide"]], h[torch.tensor(row["opts"], device=self.device)], self.head.temperature_for(use_case))
                 ps.append(torch.softmax(z, -1).tolist())   # the head applies the temperature in eval mode
         return ps, len(prefix) + sum(len(r["ids"]) for r in rows)
 
     def answer(self, req: MediaRequest):
         t0 = time.perf_counter()
         rec, meta = to_record(req)
-        ps, n_in = self.probs(rec, req.media)
+        ps, n_in = self.probs(rec, req.media, req.use_case)
         answers = to_answers(ps, meta)
         return {"model": req.model, "answers": answers, "usage": {"input_tokens": n_in, "output_tokens": output_tokens(self.tok, answers)},
                 "latency_ms": round((time.perf_counter() - t0) * 1000, 1)}
@@ -312,7 +314,7 @@ def systemone_media(req: MediaRequest):
 def models():
     od = app.state.models; meta = app.state.checkpoint.meta   # reports without loading the model
     return {"models": [{"name": "d1a-media", "run": app.state.checkpoint.requested, "base": meta.base, "device": od.device, "backend": "torch",
-                        "dtype": "bfloat16", "temperature": meta.temperature, "calibrated": meta.temperature != 1.0, "media": ["image", "audio"],
+                        "dtype": "bfloat16", "temperature": meta.temperature, "calibrated": meta.temperature != 1.0, "use_case_temperatures": meta.use_case_temperatures, "media": ["image", "audio"],
                         "loaded": od.model is not None, "idle_unload_s": od.idle_s}]}
 
 

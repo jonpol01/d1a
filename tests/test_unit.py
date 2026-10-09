@@ -97,10 +97,11 @@ def test_mcp_server_tools(monkeypatch):
     from d1a.agents import mcp_server
     from d1a.agents.presets import PRESETS
     sent = []
-    def fake_ask(state, questions):
+    def fake_ask(state, questions, use_case=None):
         sent.append((state, questions))
         return {"answers": {"decision": {"choice": "allow", "probabilities": {"allow": 0.95, "ask": 0.03, "deny": 0.02}}}, "latency_ms": 1.0}
     monkeypatch.setattr(mcp_server, "ask", fake_ask)
+    monkeypatch.setattr(mcp_server, "temperatures", lambda: {"temperature": 1.0, "use_case_temperatures": {}})
     names = {t.name for t in asyncio.run(mcp_server.server().list_tools())}
     assert names == {"d1a_intake", "d1a_judge", "d1a_tier", "d1a_gate", "d1a_route", "d1a_decide"}
     out = mcp_server.d1a_gate("developer", "fix the CI", "gh run view 1 --log-failed")

@@ -18,4 +18,6 @@ answer = client.decide("Shoes arrived late and I was charged twice.",
 print(answer["answers"]["team"]["probabilities"])
 ```
 
+`client.decide(state, questions, use_case="routing")` names the request's use case: a D1A checkpoint with a temperature for it (its `use_case_temperatures` in `GET /v1/models`) reads the answers at that temperature; otherwise the checkpoint's own applies. Without `use_case` the request is sent exactly as before.
+
 Apache-2.0.

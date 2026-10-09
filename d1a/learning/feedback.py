@@ -22,6 +22,9 @@ The loop has three steps, cheapest first:
    `python -m d1a.learning.feedback promote <log> --calibrator <file>` runs this for the calibrator on a live log: it fits on
    part of the outcomes (split by meta["group"], e.g. a pull request), gates each question on the rest, and rewrites
    the file d1a.serving.serve reads only for the questions that pass.
+Every calibrator entry belongs to the temperature its decisions were read at (the log records it; a request's use case
+can select another, #209): fit, promote and serving keep the temperatures apart, so answers read at one are never corrected
+by outcomes of answers read at another.
 The log is append-only JSONL (one "decision" or "outcome" event per line), so it can be written by several processes and
 replayed. An outcome may name its source in meta["src"] (e.g. "human" for a person's correction, "reviewer" for another
 model's judgment); each question keeps the label from the most trusted source (PREFER), then the latest.
@@ -68,11 +71,14 @@ class FeedbackLog:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with open(self.path, "a", encoding="utf-8") as f: f.write(json.dumps(event) + "\n")
 
-    def decision(self, state, questions, answers, run, meta=None):
-        """Record a decision as it was made: the request, the answers and the model `run` (repo@tag). -> its id."""
+    def decision(self, state, questions, answers, run, meta=None, use_case=None, temperature=None):
+        """Record a decision as it was made: the request, the answers and the model `run` (repo@tag), and, when known, the
+        request's use case and the temperature its probabilities were read at (a checkpoint's use-case temperature moves
+        them without changing `run`, #209). -> its id."""
         did = uuid.uuid4().hex
         self._append({"kind": "decision", "id": did, "ts": time.time(), "run": run, "state": state, "questions": questions,
-                      "answers": answers, "meta": meta or {}})
+                      "answers": answers, "meta": meta or {}, **({"use_case": use_case} if use_case is not None else {}),
+                      **({"temperature": temperature} if temperature is not None else {})})
         return did
 
     def outcome(self, did, labels, meta=None):
@@ -149,14 +155,42 @@ def _rescale(probs, s):
     return {k: math.exp(v - top) / z for k, v in lp.items()}
 
 
+def _by_temperature(resolved):
+    """{the temperature the decisions were read at (None: not logged, before #209): its decisions}."""
+    out = {}
+    for d in resolved: out.setdefault(None if d.get("temperature") is None else float(d["temperature"]), []).append(d)
+    return out
+
+
 class OutcomeCalibrator:
     """Per yes/no question: P' = sigmoid(a * logit(P) + b), fitted to outcomes by maximum likelihood (Platt scaling). Per
-    choice question: P'(option) proportional to P(option) ** s, the inverse temperature s fitted the same way."""
+    choice question: P'(option) proportional to P(option) ** s, the inverse temperature s fitted the same way.
 
-    def __init__(self, params=None):
+    One set of entries per temperature the decisions were read at: `params` for decisions logged without one (before #209,
+    when every answer was read at the checkpoint's own temperature), `temperatures` {T: OutcomeCalibrator} for the rest.
+    fit() fills each from its own decisions only; at(T) is what answers read at T go through."""
+
+    def __init__(self, params=None, temperatures=None):
         self.params = dict(params or {})   # {yes/no question id: [a, b, n], choice question id: {"s": s, "n": n}}
+        self.temperatures = {float(t): c if isinstance(c, OutcomeCalibrator) else OutcomeCalibrator(c) for t, c in (temperatures or {}).items()}
+
+    def at(self, temperature, own=None):
+        """The entries for answers read at `temperature`: those fitted on decisions read at it, never at another. The entries
+        of decisions logged without a temperature also apply at the checkpoint's own temperature `own` (where those decisions
+        were read) for a question that has none of its own there, and alone when `temperature` is None."""
+        if temperature is None: return OutcomeCalibrator(self.params)
+        fitted = self.temperatures.get(float(temperature))
+        params = dict(self.params) if own is not None and float(temperature) == float(own) else {}
+        return OutcomeCalibrator({**params, **(fitted.params if fitted else {})})
 
     def fit(self, resolved, min_outcomes=20, l2=1e-3):
+        """Fit each temperature's entries on the decisions read at it (_by_temperature), never across two."""
+        for t, rows in _by_temperature(resolved).items():
+            (self if t is None else self.temperatures.setdefault(t, OutcomeCalibrator()))._fit(rows, min_outcomes, l2)
+        return self
+
+    def _fit(self, resolved, min_outcomes=20, l2=1e-3):
+        """fit() on decisions all read at one temperature (or none logged), into `params`."""
         for qid in {q for d in resolved for q in d["labels"]}:
             probs, labels = choice_pairs(resolved, qid)
             if probs:
@@ -220,10 +254,14 @@ class OutcomeCalibrator:
             out[qid] = ans
         return out
 
-    def save(self, path): Path(path).write_text(json.dumps({"kind": "d1a-outcome-calibrator", "params": self.params}, indent=1) + "\n", encoding="utf-8")
+    def save(self, path):
+        at = {repr(t): c.params for t, c in sorted(self.temperatures.items()) if c.params}   # repr: the float read back exactly
+        Path(path).write_text(json.dumps({"kind": "d1a-outcome-calibrator", "params": self.params, **({"temperatures": at} if at else {})}, indent=1) + "\n", encoding="utf-8")
 
     @classmethod
-    def load(cls, path): return cls(json.loads(Path(path).read_text(encoding="utf-8"))["params"])
+    def load(cls, path):
+        d = json.loads(Path(path).read_text(encoding="utf-8"))
+        return cls(d["params"], d.get("temperatures"))
 
 
 def log_loss(y, p):
@@ -263,13 +301,29 @@ def split(resolved, share=0.3):
 
 
 def promote(resolved, current=None, share=0.3, min_outcomes=20, **gate_kw):
-    """The promotion gate run on a live log. Each decision's group (its outcome's meta["group"], else the decision itself)
-    goes to the fit or the held-out side by held_out(); a calibrator fitted on the fit side replaces the current one for a
-    question only if it passes gate()/gate_choice() on the held-out side against the current calibrator (or the raw answers).
-    -> (the calibrator to serve, {question: report}); questions that fail keep the current parameters."""
+    """The promotion gate run on a live log, separately for each temperature the decisions were read at (fitted across
+    two, a calibrator would correct answers read at one by the errors of answers read at the other). Each decision's group
+    (its outcome's meta["group"], else the decision itself) goes to the fit or the held-out side by held_out(); a
+    calibrator fitted on the fit side replaces the current one for a question only if it passes gate()/gate_choice() on
+    the held-out side against the current calibrator at that temperature (or the raw answers).
+    -> (the calibrator to serve, {question: report}, a question at a logged temperature T reported as "question@T");
+    questions that fail keep the current parameters."""
     current = current or OutcomeCalibrator()
+    out = OutcomeCalibrator(current.params, {t: OutcomeCalibrator(c.params) for t, c in current.temperatures.items()})
+    report = {}
+    for t, rows in sorted(_by_temperature(resolved).items(), key=lambda kv: (kv[0] is not None, kv[0] or 0)):
+        now = current if t is None else current.temperatures.get(t, OutcomeCalibrator())
+        params, rep = _promote(rows, OutcomeCalibrator(now.params), share, min_outcomes, **gate_kw)
+        if t is None: out.params = params
+        else: out.temperatures[t] = OutcomeCalibrator(params)
+        report.update({qid if t is None else f"{qid}@{t!r}": r for qid, r in rep.items()})
+    return out, report
+
+
+def _promote(resolved, current, share, min_outcomes, **gate_kw):
+    """promote() on decisions all read at one temperature. -> (the parameters to serve, {question: report})."""
     fit, test = split(resolved, share)
-    cand = OutcomeCalibrator().fit(fit, min_outcomes)
+    cand = OutcomeCalibrator()._fit(fit, min_outcomes)
     # a choice calibration of a score question, fitted before #195, is inert in apply(): drop it, so the calibrator file
     # and /v1/feedback's calibrated_questions list only what is applied
     scores = {qid for d in resolved for qid, a in d["answers"].items() if isinstance(a, dict) and a.get("type") == "score"}
@@ -288,7 +342,7 @@ def promote(resolved, current=None, share=0.3, min_outcomes=20, **gate_kw):
         ok = bool(g and g["promote"])
         if ok: out.params[qid] = params
         report[qid] = {"promote": ok, "fit": len(fit), "held_out": len(rows), **({k: g[k] for k in ("delta_log_loss", "ci", "reasons")} if g else {"reasons": ["no held-out outcomes"]})}
-    return out, report
+    return out.params, report
 
 
 def _gate(d, groups, suite_deltas, tolerance, n, seed):
@@ -335,8 +389,9 @@ def main(argv=None):
         print(json.dumps({"promoted": sorted(q for q, r in report.items() if r["promote"]), "report": report}))
     else:
         cal = OutcomeCalibrator().fit(res, a.min_outcomes); cal.save(a.out)
+        entries = [(q, v) for q, v in cal.params.items()] + [(f"{q}@{t!r}", v) for t, c in sorted(cal.temperatures.items()) for q, v in c.params.items()]
         print(f"wrote {a.out}: " + ", ".join(f"{q} s={v['s']:.3f} (n={v['n']})" if isinstance(v, dict) else f"{q} a={v[0]:.3f} b={v[1]:+.3f} (n={v[2]})"
-                                             for q, v in cal.params.items()))
+                                             for q, v in entries))
 
 
 if __name__ == "__main__":

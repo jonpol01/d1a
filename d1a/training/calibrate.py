@@ -40,6 +40,21 @@ so reordering a rows file never moves a verdict.
 
     python -m d1a.training.calibrate --run runs/new --rows runs/pool/rows.json --judge runs/served/rows.json --guard runs/hard/rows.json --confirm runs/test/rows.json --locked runs/locked/rows.json
 
+--use-case NAME fits (or with --temperature, writes) the temperature of one use case instead: the requests that name it
+(SystemOneRequest.use_case) are served at it, every other request keeps the checkpoint's temperature, which this never
+touches. It goes into the checkpoint's use_case_temperatures map (d1a_config.json's extra, carried by MLX exports), its
+record into use_case_temperature_fits[NAME], with the same fit, report and refusals; --judge compares it with the
+incumbent's temperature for that use case (its entry, else the checkpoint's): --incumbent's, or for a fine-tune with no
+entry of its own its --init_from checkpoint's (even when its main temperature is fitted: that fit says nothing about this
+use case), else the run's own. --incumbent T is used as given.
+
+    python -m d1a.training.calibrate --run runs/v0.5 --use-case routing --rows <generic-development + handlabelled-45 rows>.json --transfer <factory-development rows>.json --allow-in-distribution
+    python -m d1a.training.calibrate --run runs/v0.5 --use-case routing --temperature 0.85 --reason "fitted on ..., report ..."
+
+The only held-out rows a routing checkpoint has are its own suite's development partitions (evals/d1a/routing), which the
+held-out check refuses as the same corpus: the checkpoint trained on that suite's train partitions (#196). Fit on them with --allow-in-distribution (recorded), and judge the result out
+of sample: by the cross-fit line (OOF) below, and by fitting on some partitions and scoring another with --transfer.
+
 What the checkpoint trained on comes from its training_config.json or metadata (d1a.training.train records the suite's manifest
 hash, its args, --data and the sources it covered), the sidecar of its --data mix, or a provenance.json beside it; where rows came from, from the report.json d1a.eval.benchmark writes beside them.
 """
@@ -51,7 +66,8 @@ import math
 from dataclasses import dataclass
 from pathlib import Path
 
-from d1a.backends.checkpoint import Checkpoint, read_meta, write_meta
+from d1a.core.api import USE_CASE_MAX_LENGTH
+from d1a.backends.checkpoint import USE_CASE_FITS, USE_CASE_TEMPERATURES, Checkpoint, checked_use_case_temperatures, read_meta, write_meta
 from d1a.eval import suites as d1a_suites
 from d1a.eval.metrics import TEMPERATURE_FIT, TEMPERATURE_FIT_METHOD, TEMPERATURE_GRID, cross_validated_temperature, fit_temperature, metrics, raw_row, recorded, scored_rows
 from d1a.eval.suite import digest, read_json, read_manifest, suite_key
@@ -303,15 +319,16 @@ def init_of(run, meta):
     return (resolved if resolved and Path(resolved).is_dir() else named), named
 
 
-def served_temperature(checkpoint, flag):
+def served_temperature(checkpoint, flag, use_case=None):
     try:
-        return Checkpoint(checkpoint).meta.temperature
+        return serving(Checkpoint(checkpoint).meta, use_case)
     except Exception as e:
         raise SystemExit(f"{flag}: cannot read the temperature {checkpoint} serves ({type(e).__name__}: {e}); pass --incumbent <run|T>") from e
 
 
-def incumbent_of(run, meta, given=None):
-    """{temperature, source, name}: what the rule judges a refit against (see the module docstring)."""
+def incumbent_of(run, meta, given=None, use_case=None):
+    """{temperature, source, name}: what the rule judges a refit against, with `use_case` that use case's temperature on the
+    incumbent checkpoint (see the module docstring)."""
     if given is not None:
         if not Path(given).is_dir():
             try: T = float(given)
@@ -319,11 +336,14 @@ def incumbent_of(run, meta, given=None):
             if T is not None:
                 if not (math.isfinite(T) and T > 0): raise SystemExit(f"--incumbent {given}: a temperature is a positive number")
                 return {"temperature": T, "source": "incumbent", "name": given}
-        return {"temperature": served_temperature(given, f"--incumbent {given}"), "source": "incumbent", "name": given}
+        return {"temperature": served_temperature(given, f"--incumbent {given}", use_case), "source": "incumbent", "name": given}
     init = init_of(run, meta)
-    if init and "temperature_fit" not in meta.extra:   # still training's 1.0: the init's temperature is the one it would replace
-        return {"temperature": served_temperature(init[0], f"--init_from {init[1]}"), "source": "init_from", "name": init[1]}
-    return {"temperature": meta.temperature, "source": "run", "name": str(run)}
+    own = use_case in meta.use_case_temperatures if use_case else False   # an entry is only ever written by calibrate
+    # still training's 1.0, or (with a use case) no entry of its own: the init's temperature is the one it would replace; a
+    # main fit says nothing about one use case's requests
+    if init and (not own if use_case else "temperature_fit" not in meta.extra):
+        return {"temperature": served_temperature(init[0], f"--init_from {init[1]}", use_case), "source": "init_from", "name": init[1]}
+    return {"temperature": serving(meta, use_case), "source": "run", "name": str(run)}
 
 
 def grid_edge(T):
@@ -340,8 +360,27 @@ def report_line(name, rows, T):
             f" | conf-err {raw['confident_error_rate']:.3f} -> {cal['confident_error_rate']:.3f} | cov@5% {raw['coverage_at_5pct_error']:.2f} -> {cal['coverage_at_5pct_error']:.2f}")
 
 
-def calibrate(run, rows, exclude=(), transfer=None, allow_in_distribution=False, folds=5, seed=0, judge=(), guard=(), confirm=(), locked=(), incumbent=None):
-    """Fit, report and write the temperature of `run` (see the module docstring). -> the temperature it now serves."""
+def serving(meta, use_case):
+    """The temperature requests of `use_case` (None: every request without one) are served at now."""
+    return meta.use_case_temperatures.get(use_case, meta.temperature) if use_case else meta.temperature
+
+
+def write(run, meta, T, fit, use_case):
+    """Write T and its fit record: the checkpoint's temperature, or with `use_case` only that use case's entry (the
+    checkpoint's temperature and temperature_fit stay as they are)."""
+    if use_case:
+        meta.extra[USE_CASE_TEMPERATURES] = checked_use_case_temperatures({**meta.use_case_temperatures, use_case: T})
+        meta.extra[USE_CASE_FITS] = {**meta.extra.get(USE_CASE_FITS, {}), use_case: fit}
+    else:
+        meta.temperature = T
+        meta.extra["temperature_fit"] = fit
+    write_meta(run, meta)
+    print(f"wrote temperature {T:.2f}" + (f" for use case {use_case!r}" if use_case else "") + f" to {run}/d1a_config.json")
+
+
+def calibrate(run, rows, exclude=(), transfer=None, allow_in_distribution=False, folds=5, seed=0, judge=(), guard=(), confirm=(), locked=(), incumbent=None, use_case=None):
+    """Fit, report and write the temperature of `run`, or with `use_case` that use case's (see the module docstring).
+    -> the temperature it (that use case) now serves."""
     reads, judged, guarded, tests, held = (parse_rows(v) for v in (rows, judge, guard, confirm, locked))
     if problem := roles_problem(reads, judged, guarded, tests, held, exclude):
         raise SystemExit(problem)
@@ -363,8 +402,8 @@ def calibrate(run, rows, exclude=(), transfer=None, allow_in_distribution=False,
                          + "\nFit on held-out datasets, or pass --allow-in-distribution to fit anyway (recorded in the checkpoint).")
     for line in problems: print(f"!!! IN DISTRIBUTION (--allow-in-distribution): {line}", flush=True)
     if judged:
-        against = incumbent_of(run, read_meta(run), incumbent)
-        print(f"incumbent    T={against['temperature']:.4f}: " + {"incumbent": f"--incumbent {against['name']}",
+        against = incumbent_of(run, read_meta(run), incumbent, use_case)
+        print(f"incumbent    T={against['temperature']:.4f}" + (f" for use case {use_case!r}" if use_case else "") + ": " + {"incumbent": f"--incumbent {against['name']}",
               "init_from": f"the temperature --init_from {against['name']} serves (this fine-tune is not calibrated since training)",
               "run": f"{run}'s own"}[against["source"]], flush=True)
     fit = [raw_row(recorded(r)) for r in select(reads, exclude) if r["variant"] == "clean"]
@@ -380,6 +419,7 @@ def calibrate(run, rows, exclude=(), transfer=None, allow_in_distribution=False,
     spread = interval(units)
     print(f"fit rows     T={T:.4f} 90% interval [{spread['lower']:.4f}, {spread['upper']:.4f}] over {spread['samples']} cluster resamples")
     meta = read_meta(run)
+    current = serving(meta, use_case)
     verdict = None
     if judged:
         shipped = against["temperature"]
@@ -396,31 +436,25 @@ def calibrate(run, rows, exclude=(), transfer=None, allow_in_distribution=False,
         elif tests or held:
             print("confirmation rows not scored: the rule failed")
         if failed := verdict["failed"] + verdict.get("confirmation", {}).get("failed", []):
-            print(f"kept temperature {meta.temperature:.4f} in {run}: nothing written\n  " + "\n  ".join(failed))
-            if shipped != meta.temperature:
-                print(f"  to serve the incumbent: --temperature {shipped} --reason \"refit failed the rule against {against['name']}\"")
-            return meta.temperature
-    meta.temperature = T
-    meta.extra["temperature_fit"] = {"rows": rows[0] if len(rows) == 1 else list(rows), **({"exclude_rows": list(exclude)} if exclude else {}),
-                                     "n": len(fit), "method": TEMPERATURE_FIT_METHOD, "cross_validation": cv,
-                                     "interval": spread, **({"rule": verdict} if verdict else {}),
-                                     "fit_rows": fitted, "training_suites": sorted(training.suites) if training else None,
-                                     "training_partitions": sorted(training.partitions) if training else None,
-                                     **({"grid_edge": {"temperature": T, "warning": edge}} if edge else {}),
-                                     **({"same_corpus": notes} if notes else {}),
-                                     **({"in_distribution": {"allowed": True, "problems": problems}} if problems else {})}
-    write_meta(run, meta)
-    print(f"wrote temperature {T:.2f} to {run}/d1a_config.json")
+            print(f"kept temperature {current:.4f}" + (f" for use case {use_case!r}" if use_case else "") + f" in {run}: nothing written\n  " + "\n  ".join(failed))
+            if shipped != current:
+                print(f"  to serve the incumbent: --temperature {shipped}" + (f" --use-case {use_case!r}" if use_case else "")
+                      + f" --reason \"refit failed the rule against {against['name']}\"")
+            return current
+    write(run, meta, T, {"rows": rows[0] if len(rows) == 1 else list(rows), **({"exclude_rows": list(exclude)} if exclude else {}),
+                         "n": len(fit), "method": TEMPERATURE_FIT_METHOD, "cross_validation": cv,
+                         "interval": spread, **({"rule": verdict} if verdict else {}),
+                         "fit_rows": fitted, "training_suites": sorted(training.suites) if training else None,
+                         "training_partitions": sorted(training.partitions) if training else None,
+                         **({"grid_edge": {"temperature": T, "warning": edge}} if edge else {}),
+                         **({"same_corpus": notes} if notes else {}),
+                         **({"in_distribution": {"allowed": True, "problems": problems}} if problems else {})}, use_case)
     return T
 
 
-def write_manual(run, temperature, reason):
-    """Write a temperature without fitting, recording where it comes from."""
-    meta = read_meta(run)
-    meta.temperature = temperature
-    meta.extra["temperature_fit"] = {"method": "manual", "reason": reason.strip()}
-    write_meta(run, meta)
-    print(f"wrote temperature {temperature:.2f} to {run}/d1a_config.json")
+def write_manual(run, temperature, reason, use_case=None):
+    """Write a temperature without fitting, recording where it comes from (with `use_case`, that use case's only)."""
+    write(run, read_meta(run), temperature, {"method": "manual", "reason": reason.strip()}, use_case)
 
 
 def main(argv=None):
@@ -432,29 +466,41 @@ def main(argv=None):
     ap.add_argument("--temperature", type=float, help="write this value without fitting or judging it; needs --reason")
     ap.add_argument("--reason", help="with --temperature: where the value comes from (recorded in the checkpoint)")
     ap.add_argument("--allow-in-distribution", action="store_true", help="fit even on rows that share data with the checkpoint's training (a suite, source or D1A partition it"
-                    " trained on, an eval partition of a D1A suite it trained on, or training that cannot be placed); warned and recorded")
+                    " trained on, an eval partition of a D1A suite it trained on, or training that cannot be placed); warned and recorded."
+                    " A routing --use-case fit on evals/d1a/routing's development partitions needs it (the corpus the checkpoint"
+                    " trained on); judge it by the OOF line and --transfer")
+    ap.add_argument("--use-case", help="fit or write the temperature of this use case only (requests with \"use_case\": NAME), into the"
+                    " checkpoint's use_case_temperatures; the checkpoint's own temperature is left as it is; --judge compares"
+                    " it with the incumbent's temperature for this use case (see --incumbent)")
     ap.add_argument("--judge", action="append", default=[], help="rows the new temperature must beat the current one on: pooled, Brier"
                     " (95%% upper bound below 0) and ECE lower; each one's ECE may rise by at most 0.005; path or path:source,...; repeatable")
     ap.add_argument("--guard", action="append", default=[], help="with --judge: rows whose ECE may rise by at most 0.005; path or path:source,...,"
                     " each selection its own panel; repeatable")
     ap.add_argument("--incumbent", help="with --judge: the checkpoint (local run or Hub id) whose served temperature, or the"
                     " temperature T, the refit must beat; default: for a fine-tune not calibrated since training, the temperature"
-                    " its --init_from checkpoint serves, else the run's own; recorded in temperature_fit.rule.incumbent")
+                    " its --init_from checkpoint serves, else the run's own; with --use-case, the checkpoint's temperature for that use case,"
+                    " and the init stays the incumbent until the fine-tune has an entry for it;"
+                    " recorded in temperature_fit.rule.incumbent (use_case_temperature_fits[NAME] with --use-case)")
     ap.add_argument("--confirm", action="append", default=[], help="with --judge, scored once the rule passes: rows whose ECE must fall (Kev round 28's tests stage); repeatable")
     ap.add_argument("--locked", action="append", default=[], help="with --judge, scored once the rule passes: locked test rows whose Brier may rise by at most 0.005,"
                     " accuracy unchanged (round 28's locked stage); repeatable")
     ap.add_argument("--folds", type=int, default=5)
     ap.add_argument("--seed", type=int, default=0, help="the cross-validation's folds and bootstrap; the rule's bootstrap and the interval are always seed 0 (Kev's registered read)")
     a = ap.parse_args(argv)
+    if a.use_case is not None:
+        if not a.use_case.strip(): ap.error("--use-case needs a name")
+        if len(a.use_case.strip()) > USE_CASE_MAX_LENGTH: ap.error(f"--use-case: at most {USE_CASE_MAX_LENGTH} characters, as a request's use_case")
+        a.use_case = a.use_case.strip()   # stored as the map stores it, so the fit and serving() find the same entry
     if a.incumbent is not None and not a.judge:
         ap.error("--incumbent needs --judge (without the rule there is nothing to judge against it)")
     if a.temperature is not None:
         if not (a.reason or "").strip(): ap.error("--temperature needs --reason: where the value comes from (recorded in the checkpoint)")
         if a.judge or a.guard or a.confirm or a.locked:
             ap.error("--temperature writes its value unjudged: --judge, --guard, --confirm and --locked would be ignored")
-        return write_manual(a.run, a.temperature, a.reason)
+        if a.use_case and not (math.isfinite(a.temperature) and a.temperature > 0): ap.error("--temperature must be finite and positive")
+        return write_manual(a.run, a.temperature, a.reason, a.use_case)
     if not a.rows: ap.error("--rows is required unless --temperature is given")
-    return calibrate(a.run, a.rows, a.exclude_rows, a.transfer, a.allow_in_distribution, a.folds, a.seed, a.judge, a.guard, a.confirm, a.locked, a.incumbent)
+    return calibrate(a.run, a.rows, a.exclude_rows, a.transfer, a.allow_in_distribution, a.folds, a.seed, a.judge, a.guard, a.confirm, a.locked, a.incumbent, a.use_case)
 
 
 if __name__ == "__main__":

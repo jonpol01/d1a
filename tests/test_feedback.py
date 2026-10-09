@@ -214,6 +214,56 @@ def test_serve_logs_decisions_accepts_outcomes_and_applies_a_reloaded_calibrator
         assert client.post("/v1/feedback", json={"decision_id": "x", "labels": {"resolved": True}}).status_code == 404
 
 
+def test_the_outcome_calibrator_keeps_answers_read_at_different_temperatures_apart(tmp_path, capsys, monkeypatch):
+    """A checkpoint's use-case temperature (#209) reads one request's probabilities at another temperature than the next
+    one's, and the log records which. Here answers read at the checkpoint's T 1.78 are far too sure (P ~0.8 when 20% are
+    true) and routing answers read at T 0.85 are calibrated. Fit and promote each temperature on its own decisions, so only
+    the 1.78 correction is promoted; the server applies an entry only to answers read at its temperature; and a file from
+    before (entries without a temperature, fitted when every answer was read at the checkpoint's own) applies at the
+    checkpoint's temperature only, never to routing answers."""
+    import os
+    from types import SimpleNamespace
+    from d1a.serving import serve
+    from d1a.core.api import SystemOneRequest, to_record
+    OWN, ROUTING = 1.7818, 0.85
+    log = FeedbackLog(tmp_path / "f.jsonl"); rng = np.random.default_rng(7)
+    for i in range(1200):
+        if i % 2:
+            y = rng.random() < 0.2; p = 1 / (1 + np.exp(-(1.4 + (0.9 if y else 0.0) + rng.normal(0, 0.6))))
+            did = log.decision(f"s {i}", Q, {"resolved": {"type": "noul", "noul": float(p)}}, run="r@v0.5", temperature=OWN)
+        else:
+            p = rng.uniform(0.05, 0.95); y = rng.random() < p
+            did = log.decision(f"s {i}", Q, {"resolved": {"type": "noul", "noul": float(p)}}, run="r@v0.5", use_case="routing", temperature=ROUTING)
+        log.outcome(did, {"resolved": bool(y)}, {"group": f"g{i // 2}"})
+    res = log.resolved()
+    cal = OutcomeCalibrator().fit(res)
+    assert cal.params == {} and sorted(cal.temperatures) == [ROUTING, OWN]
+    for T in (OWN, ROUTING):
+        rows = [d for d in res if d["temperature"] == T]
+        p, y = pairs(rows, "resolved")
+        assert abs(np.mean([cal.at(T).p("resolved", x) for x in p]) - y.mean()) < 0.03, T
+    path = tmp_path / "served.json"
+    main(["promote", str(tmp_path / "f.jsonl"), "--calibrator", str(path)])
+    assert json.loads(capsys.readouterr().out)["promoted"] == [f"resolved@{OWN!r}"]
+    served = OutcomeCalibrator.load(path)
+    assert served.params == {} and list(served.temperatures) == [OWN]
+    p, y = pairs([d for d in res if d["temperature"] == OWN], "resolved")
+    assert abs(np.mean([served.at(OWN).p("resolved", x) for x in p]) - y.mean()) < 0.03
+
+    req = {use_case: SystemOneRequest(state="s", questions=Q, use_case=use_case) for use_case in (None, "routing")}
+    _, meta = to_record(req[None])
+    head = SimpleNamespace(temperature=OWN, temperature_for=lambda use_case: ROUTING if use_case == "routing" else OWN)
+    fake = SimpleNamespace(checkpoint=SimpleNamespace(requested="r@v0.5"), tok=None, model=SimpleNamespace(head=head))
+    monkeypatch.setattr(serve, "output_tokens", lambda tok, answers: 0)
+    answer = lambda use_case: serve.Server._body(fake, req[use_case], meta, [[0.2, 0.8]], {"tokens": 10, "latency_ms": 1.0})["answers"]["resolved"]["noul"]
+    monkeypatch.setattr(serve, "LEARNING", serve.Learning(tmp_path / "log.jsonl", path))
+    assert answer(None) == round(served.at(OWN).p("resolved", 0.8), 4) < 0.5 and answer("routing") == 0.8
+    assert serve.LEARNING.card()["calibrated_at"] == {repr(OWN): ["resolved"]}
+    OutcomeCalibrator({"resolved": [1.0, -2.0, 50]}).save(path)   # a calibrator written before decisions logged their temperature
+    os.utime(path, (path.stat().st_mtime + 5,) * 2)
+    assert answer(None) == round(OutcomeCalibrator({"resolved": [1.0, -2.0, 50]}).p("resolved", 0.8), 4) < 0.8 and answer("routing") == 0.8
+
+
 def test_a_recalibrated_choice_answer_carries_its_own_confidence_and_a_score_answer_is_left_alone():
     """#195: the served answer must not contradict itself. A choice answer's confidence is read off the recalibrated
     probabilities; a score answer, which also carries probabilities by level, is never rescaled as a choice."""

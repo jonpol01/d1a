@@ -10,30 +10,39 @@ questions). Each returns D1A's answers with their probabilities and `advice`: th
 """
 import json, os, time, urllib.request
 
-from d1a.agents.presets import PRESETS, advise, gate_state, judge_state
+from d1a.agents.presets import PRESETS, USE_CASES, advise, gate_state, judge_state
 
 URL = os.environ.get("D1A_URL", "http://127.0.0.1:8009").rstrip("/")
 RUN = os.environ.get("D1A_RUN")
 _local = None
 
 
-def ask(state, questions):
-    """-> the /v1/systemone response for `state` and `questions`: from D1A_RUN in-process, else the server at D1A_URL."""
+def ask(state, questions, use_case=None):
+    """-> the /v1/systemone response for `state` and `questions` (and the request's `use_case`, when given): from D1A_RUN
+    in-process, else the server at D1A_URL."""
     global _local
     if RUN:
         if _local is None:
             from d1a.serving.lib import D1A
             _local = D1A.load(RUN)
-        t = time.perf_counter(); answers = _local.decide(state, questions)
+        t = time.perf_counter(); answers = _local.decide(state, questions, use_case=use_case)
         return {"answers": answers, "latency_ms": round((time.perf_counter() - t) * 1000, 1)}
-    body = json.dumps({"model": "d1a-latest", "state": state, "questions": questions}).encode()
+    body = json.dumps({"model": "d1a-latest", "state": state, "questions": questions, **({"use_case": use_case} if use_case else {})}).encode()
     req = urllib.request.Request(f"{URL}/v1/systemone", data=body, headers={"content-type": "application/json"})
     return json.load(urllib.request.urlopen(req, timeout=60))
 
 
+def temperatures():
+    """The checkpoint's temperature and use-case temperatures (D1A.temperatures, or the server's /v1/models entry), read on
+    every call: a server reloaded with a new map is followed at once."""
+    if RUN: return _local.temperatures
+    with urllib.request.urlopen(f"{URL}/v1/models", timeout=60) as r: return json.load(r)["models"][0]
+
+
 def preset(kind, state):
-    r = ask(state, PRESETS[kind])
-    return {"answers": r["answers"], "advice": advise(kind, r["answers"]), "latency_ms": r.get("latency_ms")}
+    r = ask(state, PRESETS[kind], USE_CASES[kind])
+    advice = advise(kind, r["answers"], temperatures=temperatures(), use_case=USE_CASES[kind])   # fail_up follows the temperature read at
+    return {"answers": r["answers"], "advice": advice, "latency_ms": r.get("latency_ms")}
 
 
 def d1a_intake(request: str) -> dict:

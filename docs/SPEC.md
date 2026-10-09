@@ -11,7 +11,8 @@ backends) is free, as long as the answers are the same.
 ## 1. Requests
 
 A request is TypeSafe's System One request (`POST /v1/systemone`): a `state` (any JSON value), a `model` name, and
-`questions`, an object of question id → question. A question is one of:
+`questions`, an object of question id → question, plus D1A's optional `use_case` (a string of at most 64 characters; §6), which is never model input.
+A question is one of:
 
 | type | fields | options, in this order | reported under the keys |
 |---|---|---|---|
@@ -88,7 +89,7 @@ z_i = (k_i · q) / sqrt(256) / T
 p = softmax(z)                  over the question's K options
 ```
 
-`T` is the checkpoint's temperature (§6). The head runs in fp32 whatever the backbone's dtype. The argmax does not depend
+`T` is the checkpoint's temperature, or the request's use-case temperature (§6). The head runs in fp32 whatever the backbone's dtype. The argmax does not depend
 on `T`.
 
 ## 5. Answers
@@ -111,9 +112,17 @@ serialised answers) and `latency_ms`. Other endpoints of `d1a.serving.serve` (`/
 ## 6. Calibration
 
 A checkpoint carries one temperature `T` (§4), fitted on held-out rows by `d1a.training.calibrate`; 1.0 means uncalibrated.
-`D1A_TEMPERATURE` overrides it at load. Learning from outcomes (`d1a.learning.feedback`: the outcome calibrator, and the outcome
-memory) is an optional serving layer on top of these answers, off unless configured; a port that implements only §1 to
-§5 gives D1A's answers.
+`D1A_TEMPERATURE` overrides it at load.
+
+A checkpoint may also carry use-case temperatures, `extra.use_case_temperatures` (use case → finite positive `T`, written by
+`d1a.training.calibrate --use-case`, with each fit in `extra.use_case_temperature_fits`); a name is read with surrounding
+whitespace stripped and at most 64 characters long, and two entries that strip to one name are refused; a request's
+`use_case` is read stripped too. A request whose `use_case` has an entry is read at that `T` in §4; a request without `use_case`, or whose use case has no entry, at the checkpoint's `T`, and an
+unknown use case is not an error. Each request of a batch is read at its own `T`. `D1A_TEMPERATURE` serves every request at
+its value, use cases included. A port without use cases gives D1A's answers for every request that names none. Learning from outcomes (`d1a.learning.feedback`: the outcome calibrator, and the outcome
+memory) is an optional serving layer on top of these answers, off unless configured; the outcome calibrator corrects an
+answer only with what it learned from answers read at the same temperature. A port that implements only §1 to §5 gives
+D1A's answers.
 
 ## 7. Checkpoints
 
@@ -144,7 +153,9 @@ the head, or loading stops. D1A 0.5 stops writing it; reading it stays.
 (`config.json`, `model*.safetensors`, perhaps quantized), `head.safetensors` (fp32), the tokenizer files, and a
 `d1a_config.json` with `format`, `format_version`, `base`, `base_revision`, `source`, `source_revision`,
 `adapter_sha256`, `lora`, `head_dim`, `hidden_size`, `temperature`, `leading_ids`, `bos_id`, `delimiter_ids`, `pad_id`,
-`dtype`, `quantization` and `head`. The token layout it records is checked against its tokenizer at load.
+`dtype`, `quantization` and `head`, and from D1A 0.6 `temperature_fit`, `use_case_temperatures` and `use_case_temperature_fits`
+(the calibration records of §6; an export without them has no use-case temperatures). The token layout it records is checked
+against its tokenizer at load.
 
 ## 8. Conformance
 

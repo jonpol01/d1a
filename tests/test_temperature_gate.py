@@ -275,3 +275,25 @@ def test_the_init_is_the_incumbent_until_the_fine_tune_is_calibrated_and_a_base_
     write_json(base / "training_config.json", {"args": {"init_from": ""}, "init_source": None})
     assert calibrate.main(["--run", str(base), "--rows", fit, "--judge", judge, "--allow-in-distribution"]) > 1.5
     assert read_meta(base).extra["temperature_fit"]["rule"]["incumbent"] == {"temperature": 1.0, "source": "run", "name": str(base)}
+
+
+def test_a_use_case_refit_of_a_fine_tune_is_judged_against_the_inits_temperature_for_that_use_case(tmp_path, capsys):
+    # the init serves routing at 0.85 and everything else at 1.8: a routing refit near 0.85 beats 1.8 (and training's 1.0)
+    # but not 0.85, so it is kept out; judged against the init's own temperature it would be written
+    run = fine_tune(tmp_path, 1.8)
+    init = tmp_path / "init"; write_meta(init, Meta(base="b", temperature=1.8, extra={"use_case_temperatures": {"routing": 0.85}}))
+    fit, judge = write(tmp_path / "pool", generated(0.85, seed=1)), write(tmp_path / "served", generated(0.85, n=800, seed=2))
+    calibrate.main(["--run", str(run), "--use-case", "routing", "--rows", fit, "--judge", judge, "--allow-in-distribution"])
+    out = capsys.readouterr().out
+    assert "vs incumbent 0.8500" in out and "kept temperature" in out and read_meta(run).use_case_temperatures == {}
+    # its main temperature calibrated since, still no routing entry: a main fit says nothing about routing, so the init's
+    # routing temperature stays the bar
+    write_meta(run, Meta(base="b", temperature=1.8, extra={"temperature_fit": {"method": "manual"}}))
+    calibrate.main(["--run", str(run), "--use-case", "routing", "--rows", fit, "--judge", judge, "--allow-in-distribution"])
+    out = capsys.readouterr().out
+    assert "vs incumbent 0.8500" in out and "kept temperature" in out and read_meta(run).use_case_temperatures == {}
+    # an explicit --incumbent checkpoint is read for the use case too: its routing entry, not its 1.8
+    write_meta(run, Meta(base="b", temperature=1.0))
+    calibrate.main(["--run", str(run), "--use-case", "routing", "--rows", fit, "--judge", judge, "--allow-in-distribution", "--incumbent", str(init)])
+    out = capsys.readouterr().out
+    assert "vs incumbent 0.8500" in out and f"--incumbent {init}" in out and read_meta(run).use_case_temperatures == {}

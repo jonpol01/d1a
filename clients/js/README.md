@@ -18,4 +18,6 @@ const answer = await client.decide("Shoes arrived late and I was charged twice."
 console.log(answer.answers.team.probabilities);
 ```
 
+`client.decide(state, questions, { useCase: "routing" })` names the request's use case (sent as `use_case`): a D1A checkpoint with a temperature for it (its `use_case_temperatures` in `GET /v1/models`) reads the answers at that temperature; otherwise the checkpoint's own applies. Without it the request is sent exactly as before.
+
 Apache-2.0.

@@ -37,9 +37,19 @@ class D1A:
         tok, model = ck.load(dev, opts)
         return cls(ck, tok, model, dev)
 
-    def decide(self, state, questions):
-        """state: the document; questions: {id: question} as in a /v1/systemone request. -> {id: answer}."""
-        rec, meta = to_record(SystemOneRequest(model="d1a-latest", state=state, questions=questions))
+    def decide(self, state, questions, use_case=None):
+        """state: the document; questions: {id: question} as in a /v1/systemone request; use_case: as its `use_case` (the
+        checkpoint's temperature for it, if it has one). -> {id: answer}."""
+        req = SystemOneRequest(model="d1a-latest", state=state, questions=questions, use_case=use_case)
+        rec, meta = to_record(req)
         enc = self.model.encode(self.tok, rec, max_state=SERVE_MAX_STATE, max_branch=SERVE_MAX_BRANCH)
+        if req.use_case is not None: enc["use_case"] = req.use_case   # as validated: stripped, as the server reads it
         (ps,), _ = self.model.probs_batch([enc], [None], [False])
         return to_answers([p.tolist() for p in ps], meta)
+
+    @property
+    def temperatures(self):
+        """{"temperature", "use_case_temperatures"}: the checkpoint's temperature and the ones a use case selects, as the
+        server's /v1/models lists them (d1a.agents.presets.advise reads them to tell which temperature an answer was read at)."""
+        head = self.model.head
+        return {"temperature": head.temperature, "use_case_temperatures": dict(head.use_case_temperatures)}

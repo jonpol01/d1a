@@ -78,6 +78,12 @@ LORA_TARGETS = {"all": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up
                 "attn": ["q_proj", "k_proj", "v_proj", "o_proj"], "qv": ["q_proj", "v_proj"]}
 
 
+def temperature_of(model, enc):
+    """The temperature `enc`'s probabilities are read at: the head's for the use case d1a.serving.serve put on it
+    (enc["use_case"], PointerHead.temperature_for), the checkpoint's when it names none. Shared by both backends."""
+    return model.head.temperature_for(enc.get("use_case"))
+
+
 def probs_one(model, enc, prefix, keep):
     """-> (probabilities, the prefix to keep) for one request on any backend: on a cache hit the question rows on the
     cached prefix; otherwise one pass that also returns the prefix when it is to be kept, else the plain pass."""
@@ -180,7 +186,8 @@ class DecisionModel(nn.Module):
         return self.backbone.new_cache()
 
     def _readout(self, h, enc):
-        return [self.head(h[d], h[torch.tensor(oi, device=self.device)]) for d, oi in zip(enc["decide_idx"], enc["opt_idx"])]
+        t = temperature_of(self, enc)
+        return [self.head(h[d], h[torch.tensor(oi, device=self.device)], t) for d, oi in zip(enc["decide_idx"], enc["opt_idx"])]
 
     def rows_form(self, encs):
         """Whether these records run as causal rows: always on a hybrid backbone (its recurrent layers cannot honour the
@@ -232,8 +239,8 @@ class DecisionModel(nn.Module):
         if shared_prefix:
             from d1a.backends.shared_prefix import branch_hidden   # here, not at the top: the Space vendors model.py alone
             splits = [rows_of(e) for e in encs]
-            return [[self.head(h[r["decide"]], h[torch.tensor(r["opts"], device=self.device)]) for h, r in zip(hs, rows)]
-                    for hs, (_, _, rows) in zip(branch_hidden(self.lm, splits, self.pad_id, self.device), splits)]
+            return [[self.head(h[r["decide"]], h[torch.tensor(r["opts"], device=self.device)], temperature_of(self, e)) for h, r in zip(hs, rows)]
+                    for e, hs, (_, _, rows) in zip(encs, branch_hidden(self.lm, splits, self.pad_id, self.device), splits)]
         rows, readouts = [], []   # one causal row per question; readouts[i] = (record, <decide> offset, option offsets)
         for b, e in enumerate(encs):
             state, state_pos, branches = rows_of(e)
@@ -242,7 +249,7 @@ class DecisionModel(nn.Module):
                 readouts.append((b, len(state) + r["decide"], [len(state) + o for o in r["opts"]]))
         out = [[] for _ in encs]
         for h, (b, d, oi) in zip(self._rows_hidden(rows), readouts):
-            out[b].append(self.head(h[d], h[torch.tensor(oi, device=self.device)]))
+            out[b].append(self.head(h[d], h[torch.tensor(oi, device=self.device)], temperature_of(self, encs[b])))
         return out
 
     def forward(self, enc):
@@ -260,7 +267,7 @@ class DecisionModel(nn.Module):
         picks = torch.tensor([p + [0] * (width - len(p)) for p in picked], device=self.device)
         hs = self.hidden_batch(encs, picks)
         slot = [{i: j for j, i in enumerate(p)} for p in picked]
-        return [[self.head(hs[b, slot[b][d]], hs[b, torch.tensor([slot[b][i] for i in oi], device=self.device)])
+        return [[self.head(hs[b, slot[b][d]], hs[b, torch.tensor([slot[b][i] for i in oi], device=self.device)], temperature_of(self, e))
                  for d, oi in zip(e["decide_idx"], e["opt_idx"])] for b, e in enumerate(encs)]
 
     @torch.no_grad()
@@ -280,7 +287,8 @@ class DecisionModel(nn.Module):
         """The branches as causal rows continuing the cached state (forward_rows_batch's layout without the state)."""
         state, _, rows = rows_of(enc)
         hs = self._rows_hidden([(r["ids"], r["pos"]) for r in rows], cache=cache, prefix_len=len(state))
-        ps = [F.softmax(self.head(h[r["decide"]], h[torch.tensor(r["opts"], device=self.device)]), -1) for h, r in zip(hs, rows)]
+        t = temperature_of(self, enc)
+        ps = [F.softmax(self.head(h[r["decide"]], h[torch.tensor(r["opts"], device=self.device)], t), -1) for h, r in zip(hs, rows)]
         return list(torch.cat(ps).cpu().split([len(p) for p in ps]))   # one device sync per request, not per question
 
     @torch.no_grad()
@@ -360,15 +368,18 @@ class DecisionModel(nn.Module):
             X, caches = self.graphs.run([Request(splits[i][0], splits[i][1], [(r["ids"], r["pos"]) for r in splits[i][2]],
                                                  None if pre[i] is None else pre[i][1], keep[i], [[r["decide"], *r["opts"]] for r in splits[i][2]])
                                          for i in run])   # each question's picks: its <decide> position, then its options
-            ps = iter(self._readout_many(X, [len(r["opts"]) for i in run for r in splits[i][2]]))
+            ps = iter(self._readout_many(X, [len(r["opts"]) for i in run for r in splits[i][2]],
+                                         [temperature_of(self, encs[i]) for i in run for _ in splits[i][2]]))
             for i, cache in zip(run, caches):
                 made = pre[i] if i in long else None if cache is None else (len(splits[i][0]), cache, None)
                 out[i] = [next(ps) for _ in splits[i][2]], prefixes[i] or (made if keep[i] else None)
         return [out[i][0] for i in range(len(encs))], [out[i][1] for i in range(len(encs))]
 
-    def _readout_many(self, X, ks):
+    def _readout_many(self, X, ks, temperatures=None):
         """Many questions' probabilities from their picked hidden states X, laid out per question as its <decide> then its
-        ks[q] options, in a fixed number of kernels and one device sync. -> one tensor per question."""
+        ks[q] options, in a fixed number of kernels and one device sync. temperatures: each question's (its request's,
+        temperature_of); when they all equal the head's own, the batch is read exactly as one without use cases.
+        -> one tensor per question."""
         owner = [q for q, k in enumerate(ks) for _ in range(k)]
         slot = [j for k in ks for j in range(k)]
         starts = [0]
@@ -376,6 +387,10 @@ class DecisionModel(nn.Module):
             starts.append(starts[-1] + 1 + k)
         dec = torch.tensor(starts[:-1]).to(self.device, non_blocking=True)
         opt, own, sl = torch.tensor([[starts[q] + 1 + j for q, j in zip(owner, slot)], owner, slot]).to(self.device, non_blocking=True)
-        z = self.head.many(X[dec], X[opt], own)
+        t = None
+        if temperatures is not None and any(x != self.head.temperature for x in temperatures):   # a use case's temperature (#209)
+            # one shared value stays a Python scalar: only a batch genuinely mixing temperatures divides by a device tensor
+            t = temperatures[0] if len(set(temperatures)) == 1 else torch.tensor([temperatures[q] for q in owner], dtype=torch.float32).to(self.device, non_blocking=True)
+        z = self.head.many(X[dec], X[opt], own, t)
         Z = torch.full((len(ks), max(ks)), float("-inf"), device=self.device).index_put_((own, sl), z)
         return torch.softmax(Z, -1)[own, sl].cpu().split(ks)
