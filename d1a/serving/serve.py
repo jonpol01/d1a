@@ -1,5 +1,5 @@
 # Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); serves d1a-latest and keeps kev-latest and jev-latest as compatibility names; model cards name D1A; serves MLX export folders; --device with a GPU usability probe; a startup self-check of the readout and a warning when serving an uncalibrated checkpoint; recent batch latency in /v1/models; a 75 s keep-alive for proxies in front of it; --idle-unload; photos and voice clips through the same model (POST /v1/systemone/media); prefix cache keyed by state ids only (option isolation removed); self-learning hooks (decision log, POST /v1/feedback, outcome calibrator); GET /metrics; PrefixCache.make_room ported from later upstream Kev (1d77363); per-use-case temperatures (the request's use_case, the map in /v1/models and the decision log, #209).
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); serves d1a-latest and keeps kev-latest and jev-latest as compatibility names; model cards name D1A; serves MLX export folders; --device with a GPU usability probe; a startup self-check of the readout and a warning when serving an uncalibrated checkpoint; recent batch latency in /v1/models; a 75 s keep-alive for proxies in front of it; --idle-unload; photos and voice clips through the same model (POST /v1/systemone/media); prefix cache keyed by state ids only (option isolation removed); self-learning hooks (decision log, POST /v1/feedback, outcome calibrator, the x-d1a-decision-log: off request header); GET /metrics; PrefixCache.make_room ported from later upstream Kev (1d77363).
 """FastAPI sidecar for the playground: loads one checkpoint, exposes prefill-only decisions.
 
 Run: uv run --extra serve python -m d1a.serving.serve --run runs/d1a --port 8008
@@ -7,7 +7,8 @@ Run: uv run --extra serve python -m d1a.serving.serve --run runs/d1a --port 8008
 TypeSafe-compatible: POST /v1/systemone, GET /v1/models, the `x-typesafe-request-id` response header, and bearer auth
 when D1A_API_KEY is set (unset = open server, the local default). Demo extras: POST /v1/systemone/permute (one Choice
 under several option orders) and POST /v1/systemone/separate (each question in its own pass, for the packed-vs-separate
-comparison), self-learning (D1A_FEEDBACK_LOG=<path>: every answer gets a decision_id and is logged, POST /v1/feedback
+comparison), self-learning (D1A_FEEDBACK_LOG=<path>: every answer gets a decision_id and is logged, unless its request sends
+`x-d1a-decision-log: off` (demo and test traffic, which no outcome will ever follow), POST /v1/feedback
 {decision_id, labels} records what actually happened; D1A_OUTCOME_CALIBRATOR=<file>: yes/no and choice answers recalibrated by d1a.learning.feedback's
 calibrator, re-read when the file changes), POST /v1/systemone/media (a /v1/systemone request plus a photo, voice clip or video, d1a.serving.media.MediaRequest,
 answered by the same model: an MLX export with its media/ folder, scripts/export_mlx.py --media).
@@ -30,7 +31,7 @@ from collections import deque
 from concurrent.futures import Future
 import torch
 from dataclasses import dataclass, field, replace
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel, Field
@@ -220,16 +221,16 @@ class Server:
         while graphs is not None and graphs.capture_due(idle=True): time.sleep(0.01)
         with self.lock: pass                                   # a capture in progress finishes
 
-    def answer(self, req):
-        """The /v1/systemone response body for one request."""
+    def answer(self, req, log=True):
+        """The /v1/systemone response body for one request. log=False: the decision is not written to the decision log."""
         rec, meta = to_record(prepare(req))
-        return self._body(req, meta, *self.probs(rec, req.use_case))
+        return self._body(req, meta, *self.probs(rec, req.use_case), log=log)
 
-    async def answer_async(self, req):
+    async def answer_async(self, req, log=True):
         """answer() for the event loop: a request waiting on the model thread holds no worker thread, so a container takes
         as many concurrent requests as its batches can absorb (FastAPI runs sync endpoints on a 40-thread pool)."""
         rec, meta = to_record(prepare(req))
-        return self._body(req, meta, *await asyncio.wrap_future(self.submit(rec, use_case=req.use_case)))
+        return self._body(req, meta, *await asyncio.wrap_future(self.submit(rec, use_case=req.use_case)), log=log)
 
     def media_encoder(self):
         """Gemma 4's vision and audio encoders for this model, loaded on the first photo or voice request: the export's
@@ -248,18 +249,18 @@ class Server:
                 self.media = MediaEncoder(str(folder), self.device)
             return self.media
 
-    async def answer_media_async(self, req):
+    async def answer_media_async(self, req, log=True):
         """answer_async() for a request with a photo or a voice clip: the encoders run on this request's thread, the
         language model on the model thread as for any request."""
         rec, meta = to_record(prepare(req))
         try: media = await asyncio.to_thread(lambda: self.media_encoder().encode(req.media))
         except ValueError as e: raise HTTPException(422, str(e))
-        return self._body(req, meta, *await asyncio.wrap_future(self.submit(rec, media, req.use_case)))
+        return self._body(req, meta, *await asyncio.wrap_future(self.submit(rec, media, req.use_case)), log=log)
 
-    def _body(self, req, meta, ps, m):
+    def _body(self, req, meta, ps, m, log=True):
         head = getattr(getattr(self, "model", None), "head", None)   # the temperature the readout used (PointerHead.temperature_for), for the log
         T = head.temperature_for(req.use_case) if hasattr(head, "temperature_for") else None
-        answers, did = LEARNING.decide(req, to_answers(ps, meta), self.checkpoint.requested, T, getattr(head, "temperature", None))
+        answers, did = LEARNING.decide(req, to_answers(ps, meta), self.checkpoint.requested, T, getattr(head, "temperature", None), log)
         body = {"model": req.model, "answers": answers, "usage": {"input_tokens": m["tokens"], "output_tokens": output_tokens(self.tok, answers)}, "latency_ms": m["latency_ms"]}
         if did is not None: body["decision_id"] = did
         return body
@@ -284,14 +285,14 @@ class Learning:
             if mtime != self._mtime: self._cal, self._mtime = OutcomeCalibrator.load(self.calibrator_path), mtime
             return self._cal
 
-    def decide(self, req, answers, run, temperature=None, own=None):
-        """Answers as served (recalibrated when a calibrator is set), and the decision id when logging is on. The log keeps the
+    def decide(self, req, answers, run, temperature=None, own=None, log=True):
+        """Answers as served (recalibrated when a calibrator is set), and the decision id when logging is on and `log` is not False. The log keeps the
         model's own answers, which the next `d1a.learning.feedback calibrate` must fit; what was served is kept beside them in meta,
         and so are the request's use case and the temperature its probabilities were read at. The calibrator corrects them
         only with entries fitted at that temperature (OutcomeCalibrator.at; `own`: the checkpoint's)."""
         cal = self.calibrator()
         served = cal.at(temperature, own).apply(answers) if cal is not None else answers
-        if self.log is None: return served, None
+        if self.log is None or not log: return served, None
         questions = {qid: q.model_dump(exclude_none=True) for qid, q in req.questions.items()}
         with self._lock: did = self.log.decision(req.state, questions, answers, run=run, meta={"served": served} if served is not answers else None,
                                                  use_case=req.use_case, temperature=temperature)
@@ -307,6 +308,11 @@ class Learning:
 
 
 LEARNING = Learning(FEEDBACK_LOG, OUTCOME_CALIBRATOR)
+LOG_HEADER = "x-d1a-decision-log"   # "off": answer, but keep the decision out of the log (a demo, a smoke test: no outcome follows)
+
+
+def logged(request):
+    return request.headers.get(LOG_HEADER, "").strip().lower() != "off"
 
 
 def latency_summary(ms):
@@ -359,17 +365,17 @@ async def server_async():
 
 
 @app.post("/v1/systemone")
-async def systemone(req: SystemOneRequest):
+async def systemone(req: SystemOneRequest, request: Request):
     """TypeSafe-compatible endpoint: typed questions in, typed answers out, one prefill pass."""
     async with server_async() as s:
-        return await s.answer_async(req)
+        return await s.answer_async(req, logged(request))
 
 
 @app.post("/v1/systemone/media")
-async def systemone_media(req: MediaRequest):
+async def systemone_media(req: MediaRequest, request: Request):
     """/v1/systemone with a photo, a voice clip or a video (d1a.serving.media.MediaRequest), answered by the same model."""
     async with server_async() as s:
-        return await s.answer_media_async(req)
+        return await s.answer_media_async(req, logged(request))
 
 
 class Feedback(BaseModel):
@@ -396,7 +402,7 @@ class PermuteSystemOne(BaseModel):
 
 
 @app.post("/v1/systemone/permute")
-def systemone_permute(r: PermuteSystemOne):
+def systemone_permute(r: PermuteSystemOne, request: Request):
     """Re-run one Choice question under n_perm option orders. Returns per-order probabilities keyed by option name."""
     q = r.request.questions.get(r.question)
     if q is None or q.type != "choice": raise HTTPException(422, "question must be an existing choice question")
@@ -406,17 +412,17 @@ def systemone_permute(r: PermuteSystemOne):
             order = list(keys)
             if i > 0: rng.shuffle(order)
             one = r.request.model_copy(update={"questions": {r.question: q.model_copy(update={"criteria": {k: q.criteria[k] for k in order}})}})
-            resp = s.answer(one); a = resp["answers"][r.question]
+            resp = s.answer(one, logged(request)); a = resp["answers"][r.question]
             runs.append({"order": order, "probabilities": a["probabilities"], "choice": a["choice"], "latency_ms": resp["latency_ms"]})
     spread = {k: max(x["probabilities"][k] for x in runs) - min(x["probabilities"][k] for x in runs) for k in keys}
     return {"runs": runs, "argmax_stable": len({x["choice"] for x in runs}) == 1, "spread": spread}
 
 
 @app.post("/v1/systemone/separate")
-def systemone_separate(req: SystemOneRequest):
+def systemone_separate(req: SystemOneRequest, request: Request):
     """Answer each question in its own request against the same state (N passes). For packed-vs-separate comparison."""
     with server() as s:
-        parts = [s.answer(req.model_copy(update={"questions": {qid: q}})) for qid, q in req.questions.items()]
+        parts = [s.answer(req.model_copy(update={"questions": {qid: q}}), logged(request)) for qid, q in req.questions.items()]
         answers = {qid: a for p in parts for qid, a in p["answers"].items()}
         out_tokens = output_tokens(s.tok, answers)
     return {"model": req.model, "answers": answers,

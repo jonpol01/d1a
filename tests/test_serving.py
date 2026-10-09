@@ -194,7 +194,7 @@ def test_permute_answers_one_choice_question_under_each_order(n_perm, status, mo
     pass (#30: 0 divided by nothing, and an unbounded count ran forever)."""
     passes = []
 
-    def answer(req):   # favours whichever option comes first, so the choice moves with the order
+    def answer(req, log=True):   # favours whichever option comes first, so the choice moves with the order
         order = list(req.questions["q"].criteria); passes.append(order)
         probabilities = {k: 0.7 if k == order[0] else 0.1 for k in order}
         return {"answers": {"q": {"probabilities": probabilities, "choice": order[0]}}, "latency_ms": 1.0}
