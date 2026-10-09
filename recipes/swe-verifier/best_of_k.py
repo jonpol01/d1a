@@ -8,7 +8,8 @@ one exists.
 Input: zero_shot.py output with many runs per issue (`--split test --per-issue N`). Scorers: random; the heuristics'
 logistic regression, fitted on the --fit file's train-split repositories only; each probability field in the input
 (p_d1a, ...). For each issue with at least k runs, the expected resolve rate over --draws random k-subsets; ties are
-broken at random. 95% intervals from a bootstrap over issues.
+broken at random. 95% intervals from a bootstrap over issues. --pair A:B (repeatable) adds the paired difference between
+two scorers, from a bootstrap with its own generator (seed --seed + 1), so the other numbers do not move.
 """
 import argparse
 import json
@@ -38,6 +39,7 @@ def main():
     ap.add_argument("runs"); ap.add_argument("--fit", required=True, help="rows for the heuristic LR (only train-split repositories are used)")
     ap.add_argument("--k", default="2,4,8"); ap.add_argument("--draws", type=int, default=200); ap.add_argument("--boot", type=int, default=1000)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--pair", action="append", default=[], help="A:B, two scorer names (e.g. p_r1_calibrated:p_zero-shot_calibrated): A - B per issue")
     a = ap.parse_args()
     rows = [json.loads(l) for l in Path(a.runs).read_text(encoding="utf-8").splitlines() if l.strip()]
     fit = [r for r in (json.loads(l) for l in Path(a.fit).read_text(encoding="utf-8").splitlines() if l.strip()) if split_of(r["repo"]) == "train"]
@@ -47,7 +49,11 @@ def main():
     issues = {}
     for i, r in enumerate(rows): issues.setdefault(r["instance_id"], []).append(i)
     y = np.array([r["y"] for r in rows], float)
-    rng = np.random.default_rng(a.seed)
+    rng = np.random.default_rng(a.seed); pair_rng = np.random.default_rng(a.seed + 1)
+    pairs = [x.split(":", 1) for x in a.pair]
+    names = [*scorers, "oracle"]
+    for p in pairs:
+        if len(p) != 2 or not set(p) <= set(names): ap.error(f"--pair {':'.join(p)}: expected A:B, two of {', '.join(names)}")
     print(f"{len(rows)} runs, {len(issues)} issues, {y.mean():.1%} resolved; heuristic LR fitted on {len(fit)} train-split runs")
     for k in (int(x) for x in a.k.split(",")):
         ids = [iid for iid, ix in issues.items() if len(ix) >= k]
@@ -67,6 +73,10 @@ def main():
             d = per[name] - per["heuristics (LR)"]
             b = np.sort([d[rng.integers(0, len(d), len(d))].mean() for _ in range(a.boot)])
             print(f"  {name} - heuristics (LR): {d.mean():+.3f}  [{b[int(0.025 * a.boot)]:+.3f}, {b[int(0.975 * a.boot) - 1]:+.3f}]")
+        for x, z in pairs:
+            d = per[x] - per[z]
+            b = np.sort([d[pair_rng.integers(0, len(d), len(d))].mean() for _ in range(a.boot)])
+            print(f"  {x} - {z}: {d.mean():+.3f}  [{b[int(0.025 * a.boot)]:+.3f}, {b[int(0.975 * a.boot) - 1]:+.3f}]")
 
 
 if __name__ == "__main__":

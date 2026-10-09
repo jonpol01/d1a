@@ -26,10 +26,9 @@ from pathlib import Path
 
 import numpy as np
 import pyarrow.parquet as pq
-from huggingface_hub import hf_hub_download
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from zero_shot import DATASET, QUESTION, auroc, calibration, split_of, state_of  # noqa: E402
+from zero_shot import QUESTION, REVISION, auroc, calibration, shard, split_of, state_of  # noqa: E402
 
 from d1a.learning.feedback import FeedbackLog, OutcomeCalibrator, gate, log_loss, records  # noqa: E402
 
@@ -37,10 +36,10 @@ ROOT = Path(__file__).resolve().parents[2]
 COLS = ["instance_id", "target", "trajectory", "exit_status", "generated_patch"]
 
 
-def runs(shards, split, per_issue, seed):
+def runs(shards, split, per_issue, seed, revision=REVISION):
     rows = []
     for k in shards:
-        rows += [r for r in pq.read_table(hf_hub_download(DATASET, f"data/train-{k:05d}-of-00012.parquet", repo_type="dataset"), columns=COLS).to_pylist()
+        rows += [r for r in pq.read_table(shard(k, revision), columns=COLS).to_pylist()
                  if split_of(r["instance_id"].rsplit("-", 1)[0]) == split]
     by = {}
     for r in rows: by.setdefault(r["instance_id"], []).append(r)
@@ -90,12 +89,13 @@ def main():
     ap.add_argument("--stream-shards", default="3,4,5"); ap.add_argument("--eval-shards", default="0,1,2"); ap.add_argument("--per-issue", type=int, default=4)
     ap.add_argument("--steps-per-round", type=int, default=30); ap.add_argument("--lr", type=float, default=5e-5); ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--dry-run", action="store_true", help="no model and no training: test the loop on stand-in scores")
+    ap.add_argument("--revision", default=REVISION, help="the dataset revision (default: zero_shot.REVISION)")
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
     out = Path(a.out); out.mkdir(parents=True, exist_ok=True)
-    stream = runs([int(x) for x in a.stream_shards.split(",")], "train", 2, a.seed)
-    dev = runs([int(x) for x in a.eval_shards.split(",")], "dev", a.per_issue, a.seed)
-    test = runs([int(x) for x in a.eval_shards.split(",")], "test", a.per_issue, a.seed)
+    stream = runs([int(x) for x in a.stream_shards.split(",")], "train", 2, a.seed, a.revision)
+    dev = runs([int(x) for x in a.eval_shards.split(",")], "dev", a.per_issue, a.seed, a.revision)
+    test = runs([int(x) for x in a.eval_shards.split(",")], "test", a.per_issue, a.seed, a.revision)
     print(f"stream {len(stream)} runs, dev {len(dev)}, test {len(test)}", flush=True)
     y_dev, y_test = np.array([r["target"] for r in dev]), np.array([r["target"] for r in test])
     g_dev = np.array([repo(r) for r in dev])

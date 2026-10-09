@@ -15,9 +15,8 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 import pyarrow.parquet as pq
-from huggingface_hub import hf_hub_download
 
-from zero_shot import DATASET, QUESTION, split_of, state_of
+from zero_shot import QUESTION, REVISION, shard, split_of, state_of
 
 
 def main():
@@ -25,12 +24,13 @@ def main():
     ap.add_argument("--shards", type=int, default=3); ap.add_argument("--per-issue", type=int, default=4)
     ap.add_argument("--max-train", type=int, default=2000); ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--issue-chars", type=int, default=3000); ap.add_argument("--patch-chars", type=int, default=6000); ap.add_argument("--tail-chars", type=int, default=3000)
+    ap.add_argument("--revision", default=REVISION, help="the dataset revision (default: zero_shot.REVISION)")
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
     rng = random.Random(a.seed)
     by_issue = defaultdict(list)
     for k in range(a.shards):
-        for r in pq.read_table(hf_hub_download(DATASET, f"data/train-{k:05d}-of-00012.parquet", repo_type="dataset"),
+        for r in pq.read_table(shard(k, a.revision),
                                columns=["instance_id", "target", "trajectory", "exit_status", "generated_patch"]).to_pylist():
             by_issue[r["instance_id"]].append(r)
     q = QUESTION["resolved"]
