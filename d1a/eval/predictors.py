@@ -19,7 +19,9 @@ from d1a.backends.checkpoint import Checkpoint, LoadOptions
 from d1a.backends.device import sync
 from d1a.core.api import question_keys
 from d1a.core.encoding import ROW_PASS_TOKENS, ContextOverflow, rows_of
+from d1a.core.head import QueryTap
 from d1a.eval.suite import CONTEXT
+from d1a.learning.feedback import encode_vector
 from d1a.training.data import api_request, materialize
 
 # What a prediction (and the benchmark rows made from it) carries when it ran on SDPA's flash / memory-efficient kernels.
@@ -43,10 +45,13 @@ class LocalPredictor:
     also runs its state once, its questions continuing from it (d1a.backends.shared_prefix); MLX does that for every record.
     """
 
-    def __init__(self, run, device, opts=LoadOptions(), context=CONTEXT):
+    tap = None   # a QueryTap on the head when built with queries=True
+
+    def __init__(self, run, device, opts=LoadOptions(), context=CONTEXT, queries=False):
         """opts.temperature: None serves the checkpoint's own temperature, 1.0 the raw logits. context: the limits
         (max_state, max_branch, max_packed) a record must encode within: a suite manifest's context, the training context
-        by default."""
+        by default. queries: each prediction also carries every question's pointer-head query q(h_decide) (base64 fp32,
+        d1a.learning.feedback.encode_vector), the outcome memory's key (#149)."""
         t = opts.temperature
         if t is not None and not (math.isfinite(t) and t > 0):
             raise ValueError("temperature must be finite and positive")
@@ -60,6 +65,7 @@ class LocalPredictor:
         self.tok, self.model = self.checkpoint.load(device, opts)
         self.temperature = self.model.head.temperature
         self.device, self.context = device, context
+        self.tap = QueryTap(self.model.head) if queries else None
 
     def _encode(self, record):
         limits = self.context
@@ -84,6 +90,7 @@ class LocalPredictor:
         enc = self._encode(record)
         sync(self.device)
         start = time.perf_counter()
+        if self.tap is not None: self.tap.calls.clear()
         logits, efficient = self._logits(enc)
         probs = [torch.softmax(z, -1).cpu() for z in logits]
         raw = [z.float().cpu() for z in logits]
@@ -93,6 +100,9 @@ class LocalPredictor:
                "latency_ms": 1000 * (time.perf_counter() - start), "input_tokens": len(enc["ids"])}
         if efficient:
             out["kernels"] = LONG_ROW_KERNELS
+        if self.tap is not None:
+            found = self.tap.match([p.numpy() for p in probs])
+            out["queries"] = {qid: None if q is None else encode_vector(q) for qid, q in zip(keys, found)}
         return out
 
 

@@ -2,6 +2,7 @@
 (d1a.backends.torch, d1a.backends.mlx) applies to the hidden states at <decide> and at each option's </opt>."""
 import math
 
+import numpy as np
 import torch
 from torch import nn
 
@@ -39,3 +40,38 @@ class PointerHead(nn.Module):
         """forward() for many questions in one pass (serving batches). temperature: None (the head's own), one value for
         the whole batch, or one per option ([sum K]) when the batch's requests are read at different temperatures."""
         return self._tempered((self.k(h_opts) * self.q(h_decide)[owner]).sum(-1) * self.scale, temperature)
+
+
+class QueryTap:
+    """Installed on a PointerHead, records each call's query q(h_decide) beside the probabilities its logits give, so a
+    question's query can be found by its answer (match): the backends call the head in no fixed order (d1a.backends.mlx
+    once per question, d1a.backends.torch's batches through many). The head's results are untouched; a question whose
+    answer matches no call, or calls with different queries, gets None. The outcome memory's keys (#149, #158):
+    d1a.eval.benchmark --queries stores them with each row."""
+
+    def __init__(self, head):
+        self.head, self.calls, self._forward, self._many = head, [], head.forward, head.many
+        head.forward, head.many = self.forward, self.many
+
+    def _record(self, q, z):
+        self.calls.append((q.detach().float().cpu().numpy(), torch.softmax(z.detach().float(), -1).cpu().numpy()))
+
+    def forward(self, h_decide, h_opts, temperature=None):
+        z = self._forward(h_decide, h_opts, temperature)
+        self._record(self.head.q(h_decide), z)
+        return z
+
+    def many(self, h_decide, h_opts, owner, temperature=None):
+        z = self._many(h_decide, h_opts, owner, temperature)
+        q = self.head.q(h_decide)
+        for j in range(q.shape[0]): self._record(q[j], z[owner == j])
+        return z
+
+    def match(self, probs, tol=1e-5):
+        """One query (or None) per question's probabilities, among the calls recorded since `calls` was last cleared."""
+        out = []
+        for p in probs:
+            p = np.asarray(p, np.float32)
+            hits = [q for q, c in self.calls if c.shape == p.shape and np.abs(c - p).max() <= tol]
+            out.append(hits[0] if hits and all(np.allclose(h, hits[0], atol=1e-6) for h in hits) else None)
+        return out
