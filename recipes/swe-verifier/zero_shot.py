@@ -150,6 +150,7 @@ def main():
     ap.add_argument("--source", choices=["swe-agent", "openhands"], default="swe-agent",
                     help="openhands: nebius/SWE-rebench-openhands-trajectories through from_openhands.py (its 12 shards are issue buckets)")
     ap.add_argument("--issues", type=int, default=0, help="with --per-issue: keep only this many of the drawn issues, picked with --seed")
+    ap.add_argument("--exclude", help="a zero_shot.py output whose runs are left out before the draw (by trajectory_id when its rows have one, else run_key)")
     ap.add_argument("--keep-issue-md", action="store_true",
                     help="with --source openhands: keep the harness's root issue.md diff in the patch (a shortcut; to measure it)")
     ap.add_argument("--revision", help="the dataset revision (default: the source's pinned commit; for swe-agent, the one the released dev and test rows came from)")
@@ -170,6 +171,12 @@ def main():
         from from_swegemma import load_runs
         rows = load_runs(a.swegemma, a.tasks); a.n = len(rows)
     rows = [r for r in rows if a.split == "all" or split_of(r["instance_id"].rsplit("-", 1)[0]) == a.split]
+    if a.exclude:   # e.g. a natural-rate calibration sample that shares no run with a mixed-only draw
+        gone = [json.loads(l) for l in Path(a.exclude).read_text(encoding="utf-8").splitlines() if l.strip()]
+        by_tid = bool(gone) and all("trajectory_id" in g for g in gone)
+        if by_tid and not oh: ap.error("--exclude: trajectory_id rows come from --source openhands")
+        ids = {g["trajectory_id"] if by_tid else g["run_key"] for g in gone}
+        rows = [r for r in rows if (r["trajectory_id"] if by_tid else run_key(r)) not in ids]
     rng = random.Random(a.seed)
     rows = per_issue_draw(rows, a.per_issue, a.mixed_only, rng) if a.per_issue else rng.sample(rows, min(a.n, len(rows)))
     if a.issues:

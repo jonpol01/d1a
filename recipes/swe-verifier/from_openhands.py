@@ -98,10 +98,10 @@ def shortcut_counts(rows):
 
 
 def index(revision=REVISION):
-    """One light row per run, in file order: instance_id, target, shard and the row's position (_row), for drawing."""
-    t = pq.read_table(path(revision), columns=["instance_id", "resolved"])
-    return [{"instance_id": i, "target": bool(y), "shard": shard_of(i), "_row": k}
-            for k, (i, y) in enumerate(zip(t["instance_id"].to_pylist(), t["resolved"].to_pylist()))]
+    """One light row per run, in file order: trajectory_id, instance_id, target, shard and the row's position (_row), for drawing."""
+    t = pq.read_table(path(revision), columns=["trajectory_id", "instance_id", "resolved"])
+    return [{"trajectory_id": d, "instance_id": i, "target": bool(y), "shard": shard_of(i), "_row": k}
+            for k, (d, i, y) in enumerate(zip(t["trajectory_id"].to_pylist(), t["instance_id"].to_pylist(), t["resolved"].to_pylist()))]
 
 
 def hydrate(light, revision=REVISION, keep_issue_md=False):

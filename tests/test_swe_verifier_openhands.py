@@ -100,3 +100,17 @@ def test_keep_issue_md_scores_the_same_runs_with_the_diff(tmp_path, monkeypatch)
     monkeypatch.setattr("sys.argv", ["zero_shot.py", "--keep-issue-md", "--no-d1a", "--out", str(tmp_path / "x.jsonl")])
     try: zero_shot.main(); raise AssertionError("--keep-issue-md without --source openhands was accepted")
     except SystemExit as e: assert e.code == 2
+
+
+def test_exclude_draws_a_sample_that_shares_no_run_with_another(tmp_path, monkeypatch):
+    rows = _parquet(tmp_path, monkeypatch)
+    monkeypatch.setitem(__import__("sys").modules, "from_openhands", oh)
+    def run(name, *extra):
+        monkeypatch.setattr("sys.argv", ["zero_shot.py", "--source", "openhands", "--shards", "12", "--no-d1a", "--out", str(tmp_path / f"{name}.jsonl"), *extra])
+        zero_shot.main()
+        return [json.loads(l) for l in (tmp_path / f"{name}.jsonl").read_text(encoding="utf-8").splitlines()]
+    pilot = {r["trajectory_id"] for r in run("pilot", "--per-issue", "2", "--mixed-only")}
+    assert 0 < len(pilot) < len(rows)
+    rest = {r["trajectory_id"] for r in run("calib", "--n", "100", "--exclude", str(tmp_path / "pilot.jsonl"))}
+    assert rest == {r["trajectory_id"] for r in rows} - pilot   # every other run, none of the excluded
+    assert {r["trajectory_id"] for r in run("all", "--n", "100")} >= pilot   # without --exclude the pilot's runs are drawn
