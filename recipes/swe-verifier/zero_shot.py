@@ -5,7 +5,7 @@ trajectory, P(the patch resolves the issue), compared with simple trajectory heu
 
 Data: nebius/SWE-agent-trajectories (CC-BY-4.0): SWE-agent runs on SWE-bench-style tasks with `target` (resolved by
 the hidden tests), the trajectory and the generated patch. `eval_logs` holds the test results, so it is never read.
-A seeded random sample of --n runs from the first --shards shards.
+A seeded random sample of --n runs from the first --shards shards, at the pinned dataset commit (--revision).
 
 Reports AUROC, ECE (10 bins), Brier score and reliability bins for D1A's P(resolved), and the AUROC of each heuristic:
 patch size, a clean `submitted` exit, trajectory length, error observations, and "a run printed success". A logistic
@@ -26,11 +26,42 @@ import pyarrow.parquet as pq
 from huggingface_hub import hf_hub_download
 
 DATASET = "nebius/SWE-agent-trajectories"
+REVISION = "68195a1450865274106246d0d0296a1d6807b88e"   # the dataset commit every released selection was drawn from
 ERROR = re.compile(r"Traceback \(most recent call last\)|introduced new syntax error|Error:|error:|FAILED|failed", re.MULTILINE)
 SUCCESS = re.compile(r"completed successfully|All tests passed|\b\d+ passed\b(?![^\n]*failed)|^OK$", re.MULTILINE)
 QUESTION = {"resolved": {"type": "noul",
                          "instr": "A coding agent produced this patch for the issue. Does the patch correctly fix the issue, so that the repository's tests for it would pass?",
                          "criteria": {"true": "The patch fixes the issue as described", "false": "The patch is wrong, incomplete, or fixes something else"}}}
+
+
+def shard(k, revision=REVISION):
+    """Local path of the dataset's k-th parquet shard (of 12) at `revision`, downloaded once into the Hugging Face cache."""
+    return hf_hub_download(DATASET, f"data/train-{k:05d}-of-00012.parquet", repo_type="dataset", revision=revision)
+
+
+def per_issue_draw(rows, per_issue, mixed_only, rng):
+    """Up to per_issue runs of every issue, issues in sorted order, drawn with rng (a random.Random).
+
+    Without mixed_only, each issue's runs are rng.sample'd: the draw the released dev and test files were made with
+    (eval/dev-*.jsonl, eval/test-*.jsonl), so they rebuild run_key for run_key. With mixed_only, only issues whose runs
+    include both outcomes, and each sample keeps both: one success and one failure first, then at random."""
+    by_issue = {}
+    for r in rows: by_issue.setdefault(r["instance_id"], []).append(r)
+    if not mixed_only:
+        return [r for iid in sorted(by_issue) for r in rng.sample(by_issue[iid], min(per_issue, len(by_issue[iid])))]
+    by_issue = {k: v for k, v in by_issue.items() if 0 < sum(r["target"] for r in v) < len(v)}
+    out = []
+    for iid in sorted(by_issue):
+        runs = by_issue[iid]; rng.shuffle(runs)
+        keep = {id(next(x for x in runs if x["target"])), id(next(x for x in runs if not x["target"]))}
+        runs.sort(key=lambda r: id(r) not in keep)
+        out += runs[:per_issue]
+    return out
+
+
+def run_key(r):
+    """One id per recorded run, the same in full and --cut-step outputs (budget_sim.py joins on it)."""
+    return hashlib.sha1(json.dumps([r["instance_id"], r["exit_status"], r["generated_patch"], len(r["trajectory"])]).encode()).hexdigest()[:16]
 
 
 def split_of(repo):
@@ -115,32 +146,19 @@ def main():
     ap.add_argument("--cut-step", type=int, default=0, help="anytime mode: score each run as it stood after this many agent actions (runs already over are left out)")
     ap.add_argument("--swegemma", help="score a competition-harness results directory (from_swegemma.py) instead of the public runs")
     ap.add_argument("--tasks", help="with --swegemma: the tasks.jsonl holding the issues")
+    ap.add_argument("--revision", default=REVISION, help="the dataset revision (default: the pinned commit the released dev and test rows came from)")
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
     rows = []
     for k in range(0 if a.swegemma else a.shards):
-        rows += pq.read_table(hf_hub_download(DATASET, f"data/train-{k:05d}-of-00012.parquet", repo_type="dataset"),
-                              columns=["instance_id", "model_name", "target", "trajectory", "exit_status", "generated_patch"]).to_pylist()
+        rows += pq.read_table(shard(k, a.revision), columns=["instance_id", "model_name", "target", "trajectory", "exit_status", "generated_patch"]).to_pylist()
     if a.swegemma:
         from from_swegemma import load_runs
         rows = load_runs(a.swegemma, a.tasks); a.n = len(rows)
     rows = [r for r in rows if a.split == "all" or split_of(r["instance_id"].rsplit("-", 1)[0]) == a.split]
     rng = random.Random(a.seed)
-    if a.per_issue:
-        by_issue = {}
-        for r in rows: by_issue.setdefault(r["instance_id"], []).append(r)
-        if a.mixed_only: by_issue = {k: v for k, v in by_issue.items() if 0 < sum(r["target"] for r in v) < len(v)}
-        rows = []
-        for iid in sorted(by_issue):   # with --mixed-only, keep both outcomes in the sample: one success and one failure first, then at random
-            runs = by_issue[iid]; rng.shuffle(runs)
-            if a.mixed_only:
-                keep = {id(next(x for x in runs if x["target"])), id(next(x for x in runs if not x["target"]))}
-                runs.sort(key=lambda r: id(r) not in keep)
-            rows += runs[: a.per_issue]
-    else:
-        rows = rng.sample(rows, min(a.n, len(rows)))
-    for r in rows:   # one id per recorded run, the same in full and --cut-step outputs (budget_sim.py joins on it)
-        r["run_key"] = hashlib.sha1(json.dumps([r["instance_id"], r["exit_status"], r["generated_patch"], len(r["trajectory"])]).encode()).hexdigest()[:16]
+    rows = per_issue_draw(rows, a.per_issue, a.mixed_only, rng) if a.per_issue else rng.sample(rows, min(a.n, len(rows)))
+    for r in rows: r["run_key"] = run_key(r)
     if a.cut_step:
         rows = [c for c in (cut(r, a.cut_step) for r in rows) if c is not None]
     question = ANYTIME if a.cut_step else QUESTION

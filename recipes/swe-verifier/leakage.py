@@ -24,7 +24,6 @@ from pathlib import Path
 
 import numpy as np
 import pyarrow.parquet as pq
-from huggingface_hub import hf_hub_download
 from scipy.sparse import hstack, csr_matrix
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
@@ -32,16 +31,16 @@ from sklearn.model_selection import GroupKFold, KFold
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from analyze import heuristic_features  # noqa: E402
-from zero_shot import DATASET, auroc, calibration, heuristics, issue_of  # noqa: E402
+from zero_shot import REVISION, auroc, calibration, heuristics, issue_of, shard  # noqa: E402
 
 COLS = ["instance_id", "target", "trajectory", "exit_status", "generated_patch"]
 
 
-def load(shards, per_issue, seed):
+def load(shards, per_issue, seed, revision=REVISION):
     """One compact row per run (features and text; the trajectory itself is dropped), at most per_issue runs per issue."""
     rng = random.Random(seed); by = {}
     for k in range(shards):
-        for r in pq.read_table(hf_hub_download(DATASET, f"data/train-{k:05d}-of-00012.parquet", repo_type="dataset"), columns=COLS).to_pylist():
+        for r in pq.read_table(shard(k, revision), columns=COLS).to_pylist():
             by.setdefault(r["instance_id"], []).append({"issue": r["instance_id"], "repo": r["instance_id"].rsplit("-", 1)[0], "y": bool(r["target"]),
                                                         **heuristics(r), "text": issue_of(r["trajectory"])[:3000] + "\n" + (r["generated_patch"] or "")[:6000]})
         print(f"shard {k}: {sum(map(len, by.values()))} runs, {len(by)} issues", file=sys.stderr, flush=True)
@@ -90,10 +89,11 @@ def repo_bootstrap_diff(y, a, b, groups, n=1000, seed=0):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--shards", type=int, default=12); ap.add_argument("--per-issue", type=int, default=10); ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--revision", default=REVISION, help="the dataset revision (default: zero_shot.REVISION)")
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
     out = Path(a.out); out.mkdir(parents=True, exist_ok=True)
-    rows = load(a.shards, a.per_issue, a.seed); y = np.array([r["y"] for r in rows], float); groups = np.array([r["repo"] for r in rows])
+    rows = load(a.shards, a.per_issue, a.seed, a.revision); y = np.array([r["y"] for r in rows], float); groups = np.array([r["repo"] for r in rows])
     print(f"{len(rows)} runs, {len({r['issue'] for r in rows})} issues, {len(set(groups))} repositories, {y.mean():.1%} resolved")
     preds = {proto: out_of_fold(rows, proto, y) for proto in ("random runs", "by issue", "by repo")}
     result = {"runs": len(rows), "issues": len({r["issue"] for r in rows}), "repos": len(set(groups)), "resolved": float(y.mean()), "protocols": {}}

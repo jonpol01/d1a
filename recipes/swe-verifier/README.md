@@ -26,7 +26,8 @@ A calibrated P(resolved) is also a candidate reward for fine-tuning and RL; that
 
 [nebius/SWE-agent-trajectories](https://huggingface.co/datasets/nebius/SWE-agent-trajectories) (CC-BY-4.0, Nebius):
 SWE-agent runs on SWE-bench-style tasks with `target` (resolved by the hidden tests), the trajectory and the generated
-patch. The scripts never read `eval_logs`, which holds the test results. Competition data (tasks, snapshots,
+patch. The scripts never read `eval_logs`, which holds the test results. They read it at one pinned commit
+(`zero_shot.REVISION`; `--revision` overrides it), so a selection rebuilds run for run. Competition data (tasks, snapshots,
 reference patches) is not used here and never leaves the competition's private folders.
 
 Splits are by repository (`zero_shot.split_of`: a hash of the repository name; 20% test, 10% dev, 70% train), so the
