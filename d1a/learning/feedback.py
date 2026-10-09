@@ -37,6 +37,8 @@ from pathlib import Path
 
 import numpy as np
 
+from d1a.core.api import choice_confidence
+
 EPS = 1e-6
 PREFER = ("human",)   # outcome sources whose label wins over any other source's, whatever the order they arrived in
 
@@ -52,8 +54,9 @@ def _p_true(answer):
 
 
 def _choice_probs(answer):
-    """A choice answer's {option: probability} (System One answer shape), or None for other question types."""
-    probs = answer.get("probabilities") if isinstance(answer, dict) else None
+    """A choice answer's {option: probability} (System One answer shape), or None for other question types. A score answer
+    carries probabilities too (by level), but a choice calibration is neither fitted on nor applied to it (#195)."""
+    probs = answer.get("probabilities") if isinstance(answer, dict) and answer.get("type") != "score" else None
     return {k: float(v) for k, v in probs.items()} if isinstance(probs, dict) and probs else None
 
 
@@ -211,7 +214,9 @@ class OutcomeCalibrator:
         for qid, ans in answers.items():
             if _p_true(ans) is not None: ans = {**ans, "noul": round(self.p(qid, ans["noul"]), 4)}
             elif _choice_probs(ans) is not None and isinstance(self.params.get(qid), dict):
-                ans = {**ans, "probabilities": {k: round(v, 4) for k, v in self.probs(qid, _choice_probs(ans)).items()}}
+                q = self.probs(qid, _choice_probs(ans))   # the served confidence is read off the same probabilities (#195)
+                ans = {**ans, "probabilities": {k: round(v, 4) for k, v in q.items()},
+                       **({"confidence": round(choice_confidence(list(q.values())), 4)} if "confidence" in ans else {})}
             out[qid] = ans
         return out
 
@@ -265,7 +270,12 @@ def promote(resolved, current=None, share=0.3, min_outcomes=20, **gate_kw):
     current = current or OutcomeCalibrator()
     fit, test = split(resolved, share)
     cand = OutcomeCalibrator().fit(fit, min_outcomes)
-    out, report = OutcomeCalibrator(current.params), {}
+    # a choice calibration of a score question, fitted before #195, is inert in apply(): drop it, so the calibrator file
+    # and /v1/feedback's calibrated_questions list only what is applied
+    scores = {qid for d in resolved for qid, a in d["answers"].items() if isinstance(a, dict) and a.get("type") == "score"}
+    stale = sorted(qid for qid, params in current.params.items() if qid in scores and isinstance(params, dict))
+    out = OutcomeCalibrator({qid: params for qid, params in current.params.items() if qid not in stale})
+    report = {qid: {"promote": False, "dropped": "a choice calibration of a score question, which is never applied (#195)"} for qid in stale}
     for qid, params in cand.params.items():
         if isinstance(params, dict):
             rows = [d for d in test if _choice_probs(d["answers"].get(qid)) is not None and d["labels"].get(qid) in _choice_probs(d["answers"][qid])]
@@ -320,7 +330,7 @@ def main(argv=None):
     elif a.cmd == "promote":
         path = Path(a.calibrator); current = OutcomeCalibrator.load(path) if path.exists() else None
         cal, report = promote(res, current, a.held_out, a.min_outcomes)
-        if any(r["promote"] for r in report.values()):   # written whole and renamed into place: the server never reads half a file
+        if any(r["promote"] or r.get("dropped") for r in report.values()):   # written whole and renamed into place: the server never reads half a file
             tmp = path.with_name(path.name + ".tmp"); cal.save(tmp); os.replace(tmp, path)
         print(json.dumps({"promoted": sorted(q for q, r in report.items() if r["promote"]), "report": report}))
     else:
