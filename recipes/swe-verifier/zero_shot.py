@@ -6,6 +6,7 @@ trajectory, P(the patch resolves the issue), compared with simple trajectory heu
 Data: nebius/SWE-agent-trajectories (CC-BY-4.0): SWE-agent runs on SWE-bench-style tasks with `target` (resolved by
 the hidden tests), the trajectory and the generated patch. `eval_logs` holds the test results, so it is never read.
 A seeded random sample of --n runs from the first --shards shards, at the pinned dataset commit (--revision).
+--source openhands scores nebius/SWE-rebench-openhands-trajectories (another agent) instead, mapped by from_openhands.py.
 
 Reports AUROC, ECE (10 bins), Brier score and reliability bins for D1A's P(resolved), and the AUROC of each heuristic:
 patch size, a clean `submitted` exit, trajectory length, error observations, and "a run printed success". A logistic
@@ -146,18 +147,32 @@ def main():
     ap.add_argument("--cut-step", type=int, default=0, help="anytime mode: score each run as it stood after this many agent actions (runs already over are left out)")
     ap.add_argument("--swegemma", help="score a competition-harness results directory (from_swegemma.py) instead of the public runs")
     ap.add_argument("--tasks", help="with --swegemma: the tasks.jsonl holding the issues")
-    ap.add_argument("--revision", default=REVISION, help="the dataset revision (default: the pinned commit the released dev and test rows came from)")
+    ap.add_argument("--source", choices=["swe-agent", "openhands"], default="swe-agent",
+                    help="openhands: nebius/SWE-rebench-openhands-trajectories through from_openhands.py (its 12 shards are issue buckets)")
+    ap.add_argument("--issues", type=int, default=0, help="with --per-issue: keep only this many of the drawn issues, picked with --seed")
+    ap.add_argument("--revision", help="the dataset revision (default: the source's pinned commit; for swe-agent, the one the released dev and test rows came from)")
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
+    if a.swegemma and a.source != "swe-agent": ap.error("--swegemma reads its own runs; leave --source out")
+    if a.issues and not a.per_issue: ap.error("--issues needs --per-issue")
+    oh = a.source == "openhands"
+    if oh: import from_openhands
+    revision = a.revision or (from_openhands.REVISION if oh else REVISION)
     rows = []
-    for k in range(0 if a.swegemma else a.shards):
-        rows += pq.read_table(shard(k, a.revision), columns=["instance_id", "model_name", "target", "trajectory", "exit_status", "generated_patch"]).to_pylist()
+    for k in range(0 if a.swegemma or oh else a.shards):
+        rows += pq.read_table(shard(k, revision), columns=["instance_id", "model_name", "target", "trajectory", "exit_status", "generated_patch"]).to_pylist()
+    if oh:   # ids and outcomes only; the drawn runs are read in full below
+        rows = [r for r in from_openhands.index(revision) if r["shard"] < a.shards]
     if a.swegemma:
         from from_swegemma import load_runs
         rows = load_runs(a.swegemma, a.tasks); a.n = len(rows)
     rows = [r for r in rows if a.split == "all" or split_of(r["instance_id"].rsplit("-", 1)[0]) == a.split]
     rng = random.Random(a.seed)
     rows = per_issue_draw(rows, a.per_issue, a.mixed_only, rng) if a.per_issue else rng.sample(rows, min(a.n, len(rows)))
+    if a.issues:
+        keep = set(rng.sample(sorted({r["instance_id"] for r in rows}), min(a.issues, len({r["instance_id"] for r in rows}))))
+        rows = [r for r in rows if r["instance_id"] in keep]
+    if oh: rows = from_openhands.hydrate(rows, revision)
     for r in rows: r["run_key"] = run_key(r)
     if a.cut_step:
         rows = [c for c in (cut(r, a.cut_step) for r in rows) if c is not None]

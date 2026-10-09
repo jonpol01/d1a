@@ -14,6 +14,7 @@ agent's patches would come back from the tests. Each round:
 6. the incumbent, as served (its calibrator applied), is measured on the test repositories.
 Round 0 is the starting model with no feedback. Writes curve.jsonl (one line per round) and the logs; only the
 candidates' adapters are kept, and a rejected candidate's directory is deleted.
+--source openhands runs the loop on nebius/SWE-rebench-openhands-trajectories (from_openhands.py; shards are issue buckets).
 """
 import argparse
 import json
@@ -28,6 +29,7 @@ import numpy as np
 import pyarrow.parquet as pq
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import from_openhands  # noqa: E402
 from zero_shot import QUESTION, REVISION, auroc, calibration, shard, split_of, state_of  # noqa: E402
 
 from d1a.learning.feedback import FeedbackLog, OutcomeCalibrator, gate, log_loss, records  # noqa: E402
@@ -36,17 +38,20 @@ ROOT = Path(__file__).resolve().parents[2]
 COLS = ["instance_id", "target", "trajectory", "exit_status", "generated_patch"]
 
 
-def runs(shards, split, per_issue, seed, revision=REVISION):
+def runs(shards, split, per_issue, seed, revision=REVISION, source="swe-agent"):
     rows = []
-    for k in shards:
-        rows += [r for r in pq.read_table(shard(k, revision), columns=COLS).to_pylist()
-                 if split_of(r["instance_id"].rsplit("-", 1)[0]) == split]
+    if source == "openhands":   # ids and outcomes only; the drawn runs are read in full at the end
+        rows = [r for r in from_openhands.index(revision) if r["shard"] in shards and split_of(repo(r)) == split]
+    else:
+        for k in shards:
+            rows += [r for r in pq.read_table(shard(k, revision), columns=COLS).to_pylist()
+                     if split_of(r["instance_id"].rsplit("-", 1)[0]) == split]
     by = {}
     for r in rows: by.setdefault(r["instance_id"], []).append(r)
     rng = random.Random(seed)
     out = [r for iid in sorted(by) for r in rng.sample(by[iid], min(per_issue, len(by[iid])))]
     rng.shuffle(out)
-    return out
+    return from_openhands.hydrate(out, revision) if source == "openhands" else out
 
 
 def repo(r): return r["instance_id"].rsplit("-", 1)[0]
@@ -89,13 +94,15 @@ def main():
     ap.add_argument("--stream-shards", default="3,4,5"); ap.add_argument("--eval-shards", default="0,1,2"); ap.add_argument("--per-issue", type=int, default=4)
     ap.add_argument("--steps-per-round", type=int, default=30); ap.add_argument("--lr", type=float, default=5e-5); ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--dry-run", action="store_true", help="no model and no training: test the loop on stand-in scores")
-    ap.add_argument("--revision", default=REVISION, help="the dataset revision (default: zero_shot.REVISION)")
+    ap.add_argument("--source", choices=["swe-agent", "openhands"], default="swe-agent")
+    ap.add_argument("--revision", help="the dataset revision (default: the source's pinned commit, zero_shot.REVISION or from_openhands.REVISION)")
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
     out = Path(a.out); out.mkdir(parents=True, exist_ok=True)
-    stream = runs([int(x) for x in a.stream_shards.split(",")], "train", 2, a.seed, a.revision)
-    dev = runs([int(x) for x in a.eval_shards.split(",")], "dev", a.per_issue, a.seed, a.revision)
-    test = runs([int(x) for x in a.eval_shards.split(",")], "test", a.per_issue, a.seed, a.revision)
+    rev = a.revision or (from_openhands.REVISION if a.source == "openhands" else REVISION)
+    stream = runs([int(x) for x in a.stream_shards.split(",")], "train", 2, a.seed, rev, a.source)
+    dev = runs([int(x) for x in a.eval_shards.split(",")], "dev", a.per_issue, a.seed, rev, a.source)
+    test = runs([int(x) for x in a.eval_shards.split(",")], "test", a.per_issue, a.seed, rev, a.source)
     print(f"stream {len(stream)} runs, dev {len(dev)}, test {len(test)}", flush=True)
     y_dev, y_test = np.array([r["target"] for r in dev]), np.array([r["target"] for r in test])
     g_dev = np.array([repo(r) for r in dev])
