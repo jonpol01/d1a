@@ -146,7 +146,7 @@ Recalibration on outcomes works at once and needs no restart. Small retraining r
 | D1A-E2B for Apple Silicon (MLX, 8-bit) | [JohnP1/d1a-e2b-mlx-q8](https://huggingface.co/JohnP1/d1a-e2b-mlx-q8) `v0.2` (3.0 GB in memory) |
 | D1A-E4B v0.6 (Gemma 4 E4B: v0.5 refreshed on pull requests newer than all earlier training, plus long documents and routing) | [JohnP1/d1a-e4b](https://huggingface.co/JohnP1/d1a-e4b) `v0.6`: on 487 PRs newer than all its training, severity 79% (v0.5: 75%) and change type 91% (87%). Released as an explicit exception to the release rules: against v0.5 it loses 2.7 points on hard decisions and 4.1 on the older PR test set's change type (#197, #198), so pin `v0.5` for those. `v0.4`, `v0.3`, `v0.2` (Kev's later stages + Japanese + agent routing) and `v0.1` stay available |
 | D1A-E4B for Apple Silicon (MLX, 8-bit) | [JohnP1/d1a-e4b-mlx-q8](https://huggingface.co/JohnP1/d1a-e4b-mlx-q8) `v0.6` (~6 GB, plus 1 GB of photo, voice and video encoders; what the Mac mini playground serves) |
-| D1A-E4B for the Apple Neural Engine (Core ML, int8) | `JohnP1/d1a-e4b-coreml` `v0.6`, a private preview: text only, inputs up to 512 tokens ([Apple Neural Engine (Core ML)](#apple-neural-engine-core-ml)) |
+| D1A-E4B for the Apple Neural Engine (Core ML, int8) | [JohnP1/d1a-e4b-coreml](https://huggingface.co/JohnP1/d1a-e4b-coreml) `v0.6`, a preview: text only, inputs up to 512 tokens ([Apple Neural Engine (Core ML)](#apple-neural-engine-core-ml)) |
 | Live demos of twelve use cases (two from a photo or a voice note, one labeling pull requests) | [jonpol01/d1a-playground](https://github.com/jonpol01/d1a-playground) |
 | Thin clients (Python, JS) | [`clients/`](clients) |
 
@@ -294,12 +294,12 @@ D1A also runs on the Apple Neural Engine through Core ML, for on-device use on i
 
 On the Macs it gives the same answers as the full-precision model on every clear-cut question, but it is slower than MLX
 on the GPU. So the Mac mini keeps MLX, and Core ML is for iOS. The on-device model will be E2B v0.6 with the photo,
-voice and video encoders (#229). The Core ML builds are private previews until then.
+voice and video encoders (#229). The E4B Core ML build is a public preview; the E2B one follows with v0.6.
 
 | | E2B · MLX | E2B · Core ML | E4B · MLX | E4B · Core ML |
 |---|---|---|---|---|
-| Status | v0.6 planned; `v0.2` released | v0.6 planned; a v0.2.1 text pilot passed | **v0.6 released** | **v0.6 private preview** |
-| Repository | [JohnP1/d1a-e2b-mlx-q8](https://huggingface.co/JohnP1/d1a-e2b-mlx-q8) | `JohnP1/d1a-e2b-coreml` (private) | [JohnP1/d1a-e4b-mlx-q8](https://huggingface.co/JohnP1/d1a-e4b-mlx-q8) | `JohnP1/d1a-e4b-coreml` (private) |
+| Status | v0.6 planned; `v0.2` released | v0.6 planned; a v0.2.1 text pilot passed | **v0.6 released** | **v0.6 public preview** |
+| Repository | [JohnP1/d1a-e2b-mlx-q8](https://huggingface.co/JohnP1/d1a-e2b-mlx-q8) | `JohnP1/d1a-e2b-coreml` (private) | [JohnP1/d1a-e4b-mlx-q8](https://huggingface.co/JohnP1/d1a-e4b-mlx-q8) | [JohnP1/d1a-e4b-coreml](https://huggingface.co/JohnP1/d1a-e4b-coreml) |
 | Runs on | Mac GPU | Neural Engine: iPhone, iPad, Mac | Mac GPU | Neural Engine (tested on Macs only) |
 | Text | yes | yes | yes | yes |
 | Photo | yes | planned for v0.6 | yes | not yet |
