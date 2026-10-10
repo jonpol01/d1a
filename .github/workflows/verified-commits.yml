@@ -1,0 +1,28 @@
+name: verified-commits
+
+on:
+  pull_request:
+
+permissions:
+  contents: read        # every step only reads the pull request's commits
+  pull-requests: read
+
+jobs:
+  verified:
+    name: verified commits
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every commit in the pull request carries a verified signature
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          gh api --paginate "repos/$REPO/pulls/$PR/commits" \
+            --jq '.[] | "\(.sha[:12]) \(.commit.verification.verified) \(.commit.verification.reason)"' > commits.txt
+          cat commits.txt
+          [ -s commits.txt ] || { echo "::error::no commits listed for this pull request"; exit 1; }
+          if grep -v " true " commits.txt; then
+            echo "::error::every commit in a pull request must show GitHub's Verified badge (a signed commit; see CONTRIBUTING.md)"
+            exit 1
+          fi
