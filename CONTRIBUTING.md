@@ -3,6 +3,14 @@
 Run the unit tests (`uv run python -m pytest tests --unit -q`, as CI does) and `python scripts/check_license.py` before opening a pull
 request. Contributions are accepted under the Apache License 2.0.
 
+## Pull requests
+
+`main` changes only through a pull request. Every commit in it must show GitHub's **Verified** badge: sign commits with
+an SSH or GPG key registered on your GitHub account (`git config commit.gpgsign true`, and for SSH
+`git config gpg.format ssh` with `user.signingkey`). A pull request merges only when these required checks pass: the
+`verified commits` check, the CI tests (Python 3.12, 3.13 and Apple Silicon), `lint`, `package builds and installs`, and
+`license`. CodeQL also blocks high-severity alerts.
+
 ## License and provenance
 
 D1A is built on [Kev](https://github.com/jaredpalmer/kev) by Jared Palmer (Apache-2.0), and Apache-2.0 §4 requires that
