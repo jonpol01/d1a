@@ -164,6 +164,9 @@ uv run --extra serve python -m d1a.serving.serve --run JohnP1/d1a-e2b --port 800
 
 This serves the prototype checkpoint: CUDA if you have a GPU, MLX on Apple Silicon (`D1A_BACKEND=torch` for PyTorch MPS; see [Apple Silicon (MLX)](#apple-silicon-mlx)). The first run downloads the adapter and the base model. `--run` also takes a local checkpoint directory or a Hub revision (`repo@rev`). Once the D1A weights are published, `--run JohnP1/d1a-e2b` serves them the same way.
 
+Every setting (server flags, `D1A_*` variables, self-learning, photos and voice, agents) is listed with its default and
+when to change it in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
+
 Send it a ticket:
 
 ```bash
