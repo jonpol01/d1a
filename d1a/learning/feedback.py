@@ -404,6 +404,7 @@ def main(argv=None):
     cf = sub.add_parser("config", help="the self-learning settings file ($D1A_LEARNING): init, show, set key=value ..., validate")
     cf.add_argument("action", choices=("init", "show", "set", "validate")); cf.add_argument("assignments", nargs="*", help="section.key=value (set)")
     cf.add_argument("--file", help="the settings file (default: $D1A_LEARNING)")
+    cf.add_argument("--source", choices=("cli", "page"), default="cli", help="who made the change, for the audit log (the playground's Learning page passes page)")
     tr = sub.add_parser("trained", help="the trained manifest of a model: every PR id and state hash in the mixes of its lineage")
     tr.add_argument("--mix", action="append", required=True, help="a training mix (JSONL), once per stage of the model's lineage")
     tr.add_argument("--run", required=True, help="the model these mixes trained, repo@tag as the server reports it"); tr.add_argument("--out", required=True)
@@ -490,7 +491,7 @@ def _config(a, S):
                 if not eq: sys.exit(f"{x}: expected section.key=value")
                 pairs[k.strip()] = S.parse_value(v.strip())
             if not pairs: sys.exit("nothing to set: pass section.key=value ...")
-            for k, old, new in S.set_values(path, pairs, "cli"): print(f"{k}: {old!r} -> {new!r}")
+            for k, old, new in S.set_values(path, pairs, a.source): print(f"{k}: {old!r} -> {new!r}")
     except (S.SettingsError, json.JSONDecodeError, OSError) as e:
         sys.exit(f"refused: {e}")
 

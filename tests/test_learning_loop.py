@@ -274,3 +274,11 @@ def test_flags_are_reserved_validated_and_empty_by_default(tmp_path):
     path = tmp_path / "learning.json"; S.init(path)
     assert S.set_values(path, {"flags.p0p1": flag}) == [("flags.p0p1", None, flag)]
     S.set_values(path, {"flags.p0p1": None}); assert S.load(path)[0]["flags"] == {}
+
+
+def test_config_set_records_who_changed_it(tmp_path, capsys):
+    path = tmp_path / "learning.json"
+    main(["config", "init", "--file", str(path)])
+    main(["config", "set", "promotion.min_outcomes=15", "--file", str(path), "--source", "page"])
+    with pytest.raises(SystemExit, match="refused"): main(["config", "set", "promotion.held_out=0.9", "--file", str(path)])
+    assert [(e["key"], e["new"], e["source"]) for e in S.audit(path)][-1] == ("promotion.min_outcomes", 15, "page")
