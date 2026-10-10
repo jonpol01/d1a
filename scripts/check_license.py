@@ -40,7 +40,6 @@ SECTIONS = {"derived": "Derived files", "derived_noheader": "Derived files witho
 
 # "kev" is allowed in user-facing files only inside these, each for a reason:
 ALLOWED = [
-    (r"kev-latest", "compatibility alias: clients written against Kev send it, and the server keeps accepting it"),
     (r"jaredpalmer/kev[\w./-]*", "credit and upstream links, and Kev's Hub ids (the kev-suites dataset, Kev checkpoints)"),
     (r"jonpol01/kev[\w./-]*", "John's Kev fork and the kev-usecases-poc demo repo, both named before D1A existed"),
     (r"JohnP1/kev-gemma4-e2b", "the prototype checkpoint's Hub id, published before the rename"),

@@ -28,7 +28,8 @@ SUM_TOLERANCE = 0.02                                 # TypeSafe's own bound on |
 # Branch isolation: the tiny model runs in fp32, so a question answers the same with or without siblings up to the 4
 # decimals answers are served at. A GPU server batches in bf16, where a different batch shape moves answers by ~0.01.
 ISOLATION_TOLERANCE = 0.011 if EXTERNAL else 2e-4
-MODEL_NAMES = {"d1a-latest", "kev-latest", "jev-latest"}   # kev-latest for Kev's clients, jev-latest the SDK's default
+MODEL_NAMES = {"d1a-latest"}                               # the only name /v1/models lists
+ANSWERED_NAMES = ["d1a-latest", "jev-latest", "any-other-name"]   # any name is answered; jev-latest is the SDK's default
 
 TEAM = {"returns": "Exchanges, refunds, wrong or damaged items", "shipping": "Delivery status, delays, lost packages",
         "billing": "Charges, invoices, payment problems"}
@@ -120,9 +121,9 @@ def check_noul(answer):
 
 # --- answer shapes ------------------------------------------------------------------------------------------------------
 
-@pytest.mark.parametrize("model", sorted(MODEL_NAMES))
+@pytest.mark.parametrize("model", ANSWERED_NAMES)
 def test_a_choice_is_answered_with_a_distribution_over_its_criteria(api, model):
-    """Every accepted model name answers, and the response names the model the request asked for."""
+    """Any model name answers, and the response names the model the request asked for."""
     body = ask(api, "The parcel was marked delivered but never arrived.",
                {"team": {"type": "choice", "instructions": "Which team should handle this?", "criteria": TEAM}}, model=model)
     assert body["model"] == model and set(body["answers"]) == {"team"}
@@ -223,12 +224,12 @@ def test_a_question_answers_the_same_with_or_without_its_siblings(api):
 
 # --- models and request ids ---------------------------------------------------------------------------------------------
 
-def test_every_model_name_has_a_card(api):
-    """GET /v1/models lists a card per accepted name; TypeSafe's models.list() needs name, description and release_date."""
+def test_models_lists_only_d1a_latest_with_a_card(api):
+    """GET /v1/models lists d1a-latest and nothing else; TypeSafe's models.list() needs name, description and release_date."""
     r = api.get("/v1/models")
     assert r.status_code == 200 and r.headers.get(REQUEST_ID)
     cards = {card["name"]: card for card in r.json()["models"]}
-    assert MODEL_NAMES <= set(cards)
+    assert set(cards) == MODEL_NAMES
     assert all(isinstance(card["description"], str) and card["description"] and card["release_date"] for card in cards.values())
 
 
@@ -243,7 +244,7 @@ def test_a_request_id_sent_by_the_client_comes_back(api):
 
 def test_the_sdk_client_reads_every_answer_type(base_url):
     sdk = pytest.importorskip("typesafe_sdk")
-    with sdk.TypeSafeClient(api_key="local", base_url=base_url, model="kev-latest") as client:
+    with sdk.TypeSafeClient(api_key="local", base_url=base_url, model="any-other-name") as client:
         resp = client.system_one(state={"ticket": "Charged twice for one order. Please sort it out today."},
                                  questions={"billing": sdk.Noul(instructions="Is this about billing?"),
                                             "mood": sdk.Choice(instructions="How does the customer sound?", criteria={"calm": None, "annoyed": None}),
@@ -254,12 +255,12 @@ def test_the_sdk_client_reads_every_answer_type(base_url):
     assert resp.usage.input_tokens > 0 and resp.usage.output_tokens > 0
 
 
-def test_the_sdk_lists_every_model_name(base_url):
+def test_the_sdk_lists_d1a_latest(base_url):
     """The SDK refuses a card without a name, a description or a release date, so listing them checks all three."""
     sdk = pytest.importorskip("typesafe_sdk")
     with sdk.TypeSafeClient(api_key="local", base_url=base_url) as client:   # no model: the SDK's default, jev-latest
         listed = client.models.list()
-    assert MODEL_NAMES <= {card.name for card in listed.models}
+    assert {card.name for card in listed.models} == MODEL_NAMES
     assert all(card.description and card.release_date for card in listed.models)
 
 
