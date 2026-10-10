@@ -47,9 +47,8 @@ the Apache License 2.0. This file records where D1A's code came from and what D1
 - **Renames**: the Python package `kev` is `d1a` (`python -m d1a.serving.serve|train|benchmark|...`, all imports, pyproject
   name); `KEV_*` environment variables are `D1A_*`; the snapshot mirror defaults
   to `JohnP1/d1a-snapshots`.
-- **Model names**: the server lists `d1a-latest`, and keeps `kev-latest` (what clients written against Kev send) and
-  `jev-latest` (the TypeSafe SDK default) as accepted names; requests, the benchmark's remote mode and the clients
-  default to `d1a-latest`.
+- **Model names**: the server lists only `d1a-latest` (the old `kev-latest` and `jev-latest` listings were removed) and still
+  answers any model name a request sends; requests, the benchmark's remote mode and the clients default to `d1a-latest`.
 - **Clients**: D1A's dependency-free clients live in `clients/python` (`d1a-client`, import `d1a_client`) and
   `clients/js` (`d1a-client`), so the name `d1a` belongs to the main package.
 - **Removed** (Kev's research record and its own deployments, not part of D1A; all still in the history): `runs/`,

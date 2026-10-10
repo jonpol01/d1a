@@ -2,7 +2,7 @@
 
 A dependency-free client for D1A, a small decision model on Gemma 4, or any other server that speaks the System One API (`POST /v1/systemone`). The model itself, its trainer and server are in the [D1A repository](https://github.com/jonpol01/d1a), which is built on [Kev](https://github.com/jaredpalmer/kev) by Jared Palmer.
 
-The default model name is `d1a-latest`; a D1A server also accepts `kev-latest` and `jev-latest`.
+The default model name is `d1a-latest`, the only name a D1A server lists; it answers any model name a request sends.
 
 ```bash
 npm install d1a-client
