@@ -43,6 +43,21 @@ the question's `<decide>` token. README.md is the user guide; docs/UPSTREAM.md r
 - `tests/test_conformance.py` pins the answers of the committed tiny checkpoint (`tests/golden/tiny-gemma4`). A change
   that moves them on purpose rebuilds it (`tests/golden/build_tiny_gemma4.py`) in the same PR and says why.
 
+## Mac resources (mandatory)
+John's M1 Max (64 GB RAM, 1.8 TB data volume kept near full) ran out of disk on 2026-10-10: an fp32 4B benchmark grew swap
+to 11 GB on the same APFS container and the shell failed with ENOSPC at 121 MiB free.
+- Every long job (training, benchmark, gate, calibration, export, swe-verifier scoring) starts behind
+  `. ~/d1a-runs/guard/preflight.sh; d1a_preflight <name> <new GB> <peak RAM GB> [--dtype fp32 --params-b N] || exit 1`.
+  It refuses below new + 15 GB free, a peak above (64 - RAM in use) - 8 GB, and while the guard holds paused jobs.
+  Size downloads with `d1a_hf_size <repo> <rev>`; never guess.
+- fp32 models of 4B or more need `--allow-fp32-big`: 25 GB free, no other D1A job, and 23:00-07:00 JST only.
+- The diskguard LaunchAgent SIGSTOPs D1A jobs below 6 GB free, or when swap grows by 3 GB within 10 minutes while one
+  runs (swap growth, not a percentage: swap sits near 88% at rest). It SIGTERMs them below 3 GB and resumes them after
+  10 minutes above 12 GB free with swap growth under 0.5 GB (`~/d1a-runs/guard/diskguard.sh --status | --resume`).
+- Delete Hugging Face cache entries only with `scan_cache_dir().delete_revisions(...).execute()`, never `rm` on a repo folder:
+  the cache shares blobs (`hub/blobs/<xx>/<hash>` + `.refs`), so a hand delete frees nothing and leaves stale `.refs` behind.
+  Where the tool no longer lists a repo, delete one store file only after its `.refs` names nothing else, and log it.
+
 ## Quality bar (mandatory)
 John, 2026-10-06: every PR and every deploy is checked against the test suite, with numbers; nothing is downgraded or
 stripped off, and new features come with their tests.
