@@ -298,7 +298,7 @@ voice and video encoders (#229). The Core ML builds are private previews until t
 
 | | E2B · MLX | E2B · Core ML | E4B · MLX | E4B · Core ML |
 |---|---|---|---|---|
-| Status | v0.6 planned; v0.2.1 released | v0.6 planned; a v0.2.1 text pilot passed | **v0.6 released** | **v0.6 private preview** |
+| Status | v0.6 planned; `v0.2` released | v0.6 planned; a v0.2.1 text pilot passed | **v0.6 released** | **v0.6 private preview** |
 | Repository | [JohnP1/d1a-e2b-mlx-q8](https://huggingface.co/JohnP1/d1a-e2b-mlx-q8) | `JohnP1/d1a-e2b-coreml` (private) | [JohnP1/d1a-e4b-mlx-q8](https://huggingface.co/JohnP1/d1a-e4b-mlx-q8) | `JohnP1/d1a-e4b-coreml` (private) |
 | Runs on | Mac GPU | Neural Engine: iPhone, iPad, Mac | Mac GPU | Neural Engine (tested on Macs only) |
 | Text | yes | yes | yes | yes |
@@ -312,7 +312,7 @@ voice and video encoders (#229). The Core ML builds are private previews until t
 | API | System One API (`d1a.serving.serve`), with `/v1/systemone/media` | Python reference only; no iOS app yet | System One API, served on the Mac mini | Python reference only (one process per chunk) |
 | Download size | 3.8 GB + 1.0 GB media | not built | 6.6 GB + 1.0 GB media | 6.1 GB (3.9 GB chunks + 2.1 GB embeddings) |
 | Text speed (median) | ~0.4 s per 6-question request, M1 Max | pilot: ~0.95 s at 512 tokens, M4 | 0.63 s M4, 0.8 s M1 Max ¹ | 1.8 s M4, 2.9 s M1 Max ¹; load 52 s / 106 s |
-| Media speed (median, M1 Max, v0.2.1) | photo 0.57 s, voice 0.19 s, video 1.94 s | not built | not measured | not built |
+| Media speed (median, M1 Max, today's E2B) | photo 0.57 s, voice 0.19 s, video 1.94 s | not built | not measured | not built |
 | Answer changes vs full precision | 5 of 274 (v0.2) | pilot: 0 clear-cut | 0 of 38 clear-cut ¹ | 0 of 38 clear-cut ¹ |
 
 ¹ The same 28 real requests (42 questions, all ≤ 512 tokens), against the fp32 PyTorch build of v0.6. "Clear-cut"
