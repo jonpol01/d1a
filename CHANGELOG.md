@@ -267,6 +267,7 @@ Checkpoints on Hugging Face, newest first. Each version continues training the p
 | JohnP1/d1a-e4b | `v0.3` | pull-request labeling (type, blast radius, severity), English and Japanese | |
 | JohnP1/d1a-e4b | `v0.2` | Kev's later stages (dates, missing evidence, hard, tool-use and long-document decisions), Japanese (JGLUE), agent routing | `v0.2-hybrid` |
 | JohnP1/d1a-e4b | `v0.1` | general decisions (decision-v7, 2 epochs, calibrated) | `v0.1.1-2epoch-calibrated` |
+| JohnP1/d1a-e2b | `v0.6` | every later D1A skill in one run from v0.2.1 (PR labels with the 479 current hermes-agent PRs, hard-v1, devtools-v1, documents-v1, JGLUE, routing; 23,427 records): hard-v1 31.4% → 62.1%, devtools-v1 +14.9, documents-v1 +13.6, PR change type 40.0% → 84.5%; on 487 newer PRs severity 77.2% and type 87.5% (E4B v0.6: 79.1%, 90.6%), but P0/P1 recall 0/30. Released as an explicit exception to its pre-registered bar (#229: decision-v7 −1.4 [−2.8, +0.1] against a −1 limit); MLX build with photo, voice and video encoders (T 1.45) | |
 | JohnP1/d1a-e2b | `v0.2` | general decisions, 2 epochs, calibrated | `v0.2.1-2epoch-calibrated` |
 | JohnP1/d1a-e2b | `v0.1` | general decisions, 1 epoch | `v0.1-1epoch` |
 

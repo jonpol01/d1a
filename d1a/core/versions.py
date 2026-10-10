@@ -7,7 +7,7 @@ A release adds its tag here and a row to CHANGELOG.md's "Model versions" table; 
 two disagree, so a new version cannot leave a default behind. Results should record the pinned id they ran with.
 """
 
-LATEST = {"JohnP1/d1a-e4b": "v0.6", "JohnP1/d1a-e2b": "v0.2"}
+LATEST = {"JohnP1/d1a-e4b": "v0.6", "JohnP1/d1a-e2b": "v0.6"}
 FORMATS = ("-mlx-q8",)   # build repos that carry the same tags as their source repo
 
 
