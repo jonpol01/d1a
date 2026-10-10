@@ -24,6 +24,10 @@ default unless this page names a reason to change it.
 curl -s 127.0.0.1:8009/v1/models | python -m json.tool
 ```
 
+Before starting a server, `python -m d1a.serving.serve --show-config` prints every `D1A_*` setting with its value,
+whether it was set or is the default, and the module that reads it (secrets masked), plus where the self-learning
+settings come from. The list lives in `d1a/core/settings.py`; every module reads its settings through it.
+
 ## I want to ...
 
 | Goal | Setting |
@@ -52,6 +56,7 @@ and `--extra mcp` for the MCP server.
 | `--port` | `8008` | The port. The docs and the playground use 8009. |
 | `--device` | `auto` | `auto` tries cuda, then mps, then cpu, and skips a device whose test kernel fails. Name a device to insist on it. |
 | `--idle-unload` | `0` | Seconds without a request before the model is dropped from memory; the next request reloads it. `0` keeps it loaded. |
+| `--show-config` | off | Prints the settings in force (above) and exits without loading a model. |
 
 | Variable | Default | What it does | When to change it |
 |---|---|---|---|
@@ -95,6 +100,8 @@ a statistical gate. Details are in README "Self-Learning" and in the `d1a.learni
 | header `x-d1a-decision-log: off` | logged | Answers the request but keeps it out of the log. Use it for demos, smoke tests and anything no outcome will follow. |
 | `POST /v1/feedback` | — | `{"decision_id", "labels": {question_id: answer}, "src": "human" or "reviewer", "group": "<e.g. owner/repo#123>"}`. When sources disagree on a question, the most trusted one's label wins. Returns 404 when logging is off. |
 | `D1A_OUTCOME_CALIBRATOR=<path>` | unset (off) | Applies this calibrator to yes/no and choice answers. The server reloads it when the file changes, so promotion needs no restart. |
+| `D1A_LEARNING=<path>` | unset (today's behaviour) | The self-learning settings file (below), read by `promote`, `replay` and `tick` on every run, so a change needs no restart. The server itself does not read it: decision logging stays `D1A_FEEDBACK_LOG`, because the outcome poster and `/review` depend on that log. |
+| header `x-d1a-replay-of: <decision id>` | — | Sent by `replay` only. The server logs the answer as a decision of the model it serves now, marked as a replay of that earlier decision, so the replay takes its outcomes. `/v1/systemone` only. |
 
 The `python -m d1a.learning.feedback` commands each take the log as their first argument, and also `--src` (only
 outcomes from one source) and `--run` (only decisions one model made):
@@ -104,14 +111,41 @@ outcomes from one source) and `--run` (only decisions one model made):
 | `status <log>` | Counts resolved and pending decisions, per question. |
 | `records <log> --out <file>` | Turns resolved decisions into training records for `d1a.training.train --data`. |
 | `calibrate <log> --out <file> [--min-outcomes 20]` | Fits a calibrator on every outcome, with no gate. |
-| `promote <log> --calibrator <file> [--min-outcomes 20] [--held-out 0.3] --run <served run>` | Fits on part of the outcomes, split by group. It gates each question on the rest and rewrites the calibrator only for the questions that pass: log loss better, with a 95% bootstrap interval clear of zero. Schedule it, for example daily. |
+| `promote <log> --calibrator <file> [--min-outcomes 20] [--held-out 0.3] --run <served run>` | Fits on part of the outcomes, split by group. It gates each question on the rest and rewrites the calibrator only for the questions that pass: log loss better, with a bootstrap interval clear of zero. Flags not given come from the settings file. Each question's report gives `mde`, the smallest log-loss gain its held-out set can detect. |
+| `config init\|show\|set key=value ...\|validate [--file <path>]` | Creates, shows (with where each value came from and the last changes), changes or checks the settings file (`$D1A_LEARNING`). `set` validates the whole file first and writes nothing when a value is out of range. |
+| `trained --mix <mix.jsonl> [--mix ...] --run <repo@tag> --out <file> [--log <log>]` | The trained manifest of a model: every PR id and state hash in the mixes of its lineage (give every stage's mix). A mix that is not found makes it incomplete, and replay refuses it. `--log` gives records exported from a feedback log their PR id. |
+| `replay <log> --server <url> --trained <file> [--cap 50] [--pause 1]` | Re-sends the decisions an earlier model made, that have outcomes, to the live server, one at a time and only while no request waits, so the served model starts with every earlier outcome. It skips a decision whose PR or state is in the manifest, or that has no PR id (by default), and refuses a missing, incomplete or other model's manifest. The idle check can race with one live request, which then waits one replay. With `D1A_DATE_FACTS=1` a replayed state gets today's date facts, not the original day's. |
+| `tick <log> --calibrator <file> --server <url> --trained-dir <dir>` | One run of the loop, meant every few minutes: replay after a model change, then `promote` when it is due (`schedule`), a report line in `learning-status.json` beside the log, and a webhook message on a promotion or when a question first has enough outcomes. |
+
+The settings file (`D1A_LEARNING`; `config show` prints it). Unset, or a key left out, means the default:
+
+| Setting | Default | Allowed | What it does |
+|---|---|---|---|
+| `outcomes.enabled` | `true` | true, false | Whether outcome collectors (the playground's poster) run. |
+| `outcomes.sources` | `null` (all) | a list, e.g. `["reviewer", "human"]` | The outcome sources that count for learning. |
+| `promotion.auto` | `true` | true, false | `false`: the gate still runs and reports, and never writes the calibrator. |
+| `promotion.questions` | `null` (all) | a list of question ids | The questions that learn. |
+| `promotion.min_outcomes` | `20` | ≥ 10 | Fit outcomes a question needs before it is fitted at all. |
+| `promotion.held_out` | `0.3` | 0.1 to 0.5 | The share of groups the gate holds out. |
+| `promotion.ci_level` | `0.95` | 0.9, 0.95, 0.99 | The gate's bootstrap interval. |
+| `promotion.tolerance`, `promotion.bootstrap` | `0.01`, `2000` | 0 to 0.1; 200 to 20,000 | Frozen-suite tolerance; bootstrap resamples. |
+| `schedule.daily_at` | `"04:00"` | `HH:MM` local time, or `null` | `tick` runs the gate once a day after this time. |
+| `schedule.after_new_outcomes` | `10` | ≥ 1, or `null` | `tick` also runs the gate after this many new outcomes. |
+| `replay.enabled`, `replay.on_model_change` | `true`, `true` | true, false | Replay earlier outcomes when the served model changes. |
+| `replay.exclude_no_pr_id` | `true` | true, false | Skip decisions with no PR id (they cannot be checked against training). |
+| `replay.per_tick_cap`, `replay.pause_s` | `50`, `1.0` | 1 to 500; 0 to 60 s | Replays per tick, and the pause between them. |
+| `reports.webhook_file` | `null` | a path | A file holding a webhook URL (Discord-compatible); the URL itself never goes in the settings. |
+| `reports.notify` | `["promotion", "min_reached"]` | from `promotion`, `min_reached`, `every_gate` | What `tick` posts to the webhook. |
+
+A file with an error is never used: jobs keep the last valid one (`<file>.last-valid.json`) and report the error, and
+every accepted change is appended to `<file>.audit.jsonl`.
 
 How to set it up on your own deployment:
 1. Serve with `D1A_FEEDBACK_LOG=runs/feedback/decisions.jsonl` and `D1A_OUTCOME_CALIBRATOR=runs/feedback/calibrator.json`.
 2. Send the outcome back to `POST /v1/feedback` whenever you learn it, with a `group` (the PR, ticket or document it belongs to) and a `src`.
-3. Watch `python -m d1a.learning.feedback status runs/feedback/decisions.jsonl --run <served run>`.
-4. Schedule `promote ... --run <served run>`. Pass the served run, because a calibrator fitted on another model's answers does not fit this one's.
-5. Check `GET /v1/models` → `learning.calibrated_questions` after a promotion.
+3. `export D1A_LEARNING=runs/feedback/learning.json` and run `python -m d1a.learning.feedback config init`; change what you need with `config set`.
+4. Write the served model's trained manifest (`trained --mix ... --run <served run>`) into a folder, then schedule `tick runs/feedback/decisions.jsonl --calibrator runs/feedback/calibrator.json --server http://127.0.0.1:8009 --trained-dir <folder>` every few minutes. It replays after a model change and gates when `schedule` says so; a calibrator fitted on another model's answers is never applied to this one's.
+5. Read `runs/feedback/learning-status.json` (each question's outcomes and how many it still needs, and the last gate reports), and `GET /v1/models` → `learning.calibrated_questions` after a promotion.
 
 A question needs `--min-outcomes` (20) outcomes before it is fitted, and the gate needs enough held-out groups to
 decide. With a few outcomes a day, expect weeks rather than days.

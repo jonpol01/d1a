@@ -33,6 +33,7 @@ from d1a.backends.backbone import for_config
 from d1a.backends.torch import DecisionModel
 from d1a.core.api import USE_CASE_MAX_LENGTH
 from d1a.core.encoding import load_tokenizer, pad_id
+from d1a.core.settings import get as setting
 
 HUB_ID = re.compile(r"[\w.-]+/[\w.-]+(@[\w.-]+)?")
 EXPORT_CONFIG, EXPORT_HEAD = "d1a_config.json", "head.safetensors"   # an MLX export folder's two D1A files, and a training run's
@@ -293,14 +294,14 @@ class LoadOptions:
         D1A_CUDA_GRAPHS=0|1, D1A_FUSED=0|1, D1A_PLE_FLASH=0|1. For the command-line entry points only (library code passes
         its own LoadOptions). An explicit value equal to a library default is kept as given (fp32 as torch.float32,
         "torch" as a string), so a caller with defaults of its own, like d1a.serving.serve, can tell "asked for it" from "said nothing"."""
-        backend = env.get("D1A_BACKEND") or None
+        backend = setting("D1A_BACKEND", env) or None
         if backend not in cls.BACKENDS:
             raise ValueError(f"D1A_BACKEND must be one of torch, mlx, auto; got {backend!r}")
-        return cls(dtype=cls.DTYPES.get(env.get("D1A_DTYPE", "")), merge=env.get("D1A_MERGE", "1") != "0", attn=env.get("D1A_ATTN") or None,
-                   lora_scale=float(env.get("D1A_LORA_SCALE", "1")),
-                   temperature=float(env["D1A_TEMPERATURE"]) if env.get("D1A_TEMPERATURE") else None, backend=backend,
-                   cuda_graphs=cls.SWITCH.get(env.get("D1A_CUDA_GRAPHS", "")), fused=cls.SWITCH.get(env.get("D1A_FUSED", "")),
-                   ple_flash=cls.SWITCH.get(env.get("D1A_PLE_FLASH", "")))
+        t = setting("D1A_TEMPERATURE", env)
+        return cls(dtype=cls.DTYPES.get(setting("D1A_DTYPE", env)), merge=setting("D1A_MERGE", env) != "0", attn=setting("D1A_ATTN", env) or None,
+                   lora_scale=float(setting("D1A_LORA_SCALE", env)), temperature=float(t) if t else None, backend=backend,
+                   cuda_graphs=cls.SWITCH.get(setting("D1A_CUDA_GRAPHS", env)), fused=cls.SWITCH.get(setting("D1A_FUSED", env)),
+                   ple_flash=cls.SWITCH.get(setting("D1A_PLE_FLASH", env)))
 
 
 def mlx_available():
