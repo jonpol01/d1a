@@ -92,7 +92,7 @@ from d1a.learning.feedback import FeedbackLog
 m, log = D1A.load("JohnP1/d1a-e4b-mlx-q8"), FeedbackLog("runs/feedback/verifier.jsonl")
 q = {"resolved": {"type": "noul", "instr": "Does this patch fix the issue?"}}
 answers = m.decide(issue_and_patch, q)
-did = log.decision(issue_and_patch, q, answers, run="JohnP1/d1a-e4b-mlx-q8@v0.5")
+did = log.decision(issue_and_patch, q, answers, run="JohnP1/d1a-e4b-mlx-q8@v0.6")
 ...                                     # later, when the tests have run
 log.outcome(did, {"resolved": True})
 ```
@@ -107,7 +107,7 @@ python -m d1a.learning.feedback records runs/feedback/verifier.jsonl --out feedb
 
 ```bash
 D1A_FEEDBACK_LOG=runs/feedback/verifier.jsonl D1A_OUTCOME_CALIBRATOR=runs/feedback/cal.json \
-  uv run --extra serve python -m d1a.serving.serve --run JohnP1/d1a-e4b-mlx-q8@v0.5 --port 8009
+  uv run --extra serve python -m d1a.serving.serve --run JohnP1/d1a-e4b-mlx-q8@v0.6 --port 8009
 curl -s localhost:8009/v1/feedback -H 'content-type: application/json' \
   -d '{"decision_id": "<from the answer>", "labels": {"resolved": true}}'
 python -m d1a.learning.feedback calibrate runs/feedback/verifier.jsonl --out runs/feedback/cal.json   # picked up on the next request
@@ -144,12 +144,12 @@ Recalibration on outcomes works at once and needs no restart. Small retraining r
 | Training and serving on Gemma 4 E2B / E4B (and Qwen) | yes, this repo |
 | D1A-E2B (Gemma 4 E2B) | [JohnP1/d1a-e2b](https://huggingface.co/JohnP1/d1a-e2b) `v0.2` (2 epochs, calibrated); `v0.1` (1 epoch) |
 | D1A-E2B for Apple Silicon (MLX, 8-bit) | [JohnP1/d1a-e2b-mlx-q8](https://huggingface.co/JohnP1/d1a-e2b-mlx-q8) `v0.2` (3.0 GB in memory) |
-| D1A-E4B v0.5 (Gemma 4 E4B: Kev's skills back on top of two pull-request labeling rounds, English and Japanese) | [JohnP1/d1a-e4b](https://huggingface.co/JohnP1/d1a-e4b) `v0.5`: hard decisions 71% (v0.4: 55%), developer tools 70% (64%), transfer 72% (69%), PR change type 90% (88%). `v0.4` is the better PR labeler for blast radius and severity (owner's PRs: blast 87% against 74%); `v0.3`, `v0.2` (Kev's later stages + Japanese + agent routing) and `v0.1` stay available |
-| D1A-E4B for Apple Silicon (MLX, 8-bit) | [JohnP1/d1a-e4b-mlx-q8](https://huggingface.co/JohnP1/d1a-e4b-mlx-q8) `v0.5` (~6 GB, plus 1 GB of photo, voice and video encoders; what the Mac mini playground serves) |
+| D1A-E4B v0.6 (Gemma 4 E4B: v0.5 refreshed on pull requests newer than all earlier training, plus long documents and routing) | [JohnP1/d1a-e4b](https://huggingface.co/JohnP1/d1a-e4b) `v0.6`: on 487 PRs newer than all its training, severity 79% (v0.5: 75%) and change type 91% (87%). Released as an explicit exception to the release rules: against v0.5 it loses 2.7 points on hard decisions and 4.1 on the older PR test set's change type (#197, #198), so pin `v0.5` for those. `v0.4`, `v0.3`, `v0.2` (Kev's later stages + Japanese + agent routing) and `v0.1` stay available |
+| D1A-E4B for Apple Silicon (MLX, 8-bit) | [JohnP1/d1a-e4b-mlx-q8](https://huggingface.co/JohnP1/d1a-e4b-mlx-q8) `v0.6` (~6 GB, plus 1 GB of photo, voice and video encoders; what the Mac mini playground serves) |
 | Live demos of twelve use cases (two from a photo or a voice note, one labeling pull requests) | [jonpol01/d1a-playground](https://github.com/jonpol01/d1a-playground) |
 | Thin clients (Python, JS) | [`clients/`](clients) |
 
-Model versions: one Hugging Face repository per size and format, and one tag per version (`v0.1`, `v0.2`, `v0.3`, `v0.4`, `v0.5`, ...); each version continues training the one before it, and its model card lists what it was trained on. Load a version as `JohnP1/d1a-e4b@v0.3`. Older tag names (`v0.2-hybrid`, `v0.2-2epoch`, ...) still work.
+Model versions: one Hugging Face repository per size and format, and one tag per version (`v0.1`, `v0.2`, `v0.3`, `v0.4`, `v0.5`, `v0.6`, ...); each version continues training the one before it, and its model card lists what it was trained on. Load a version as `JohnP1/d1a-e4b@v0.3`. Older tag names (`v0.2-hybrid`, `v0.2-2epoch`, ...) still work.
 
 ## Quick Start
 
@@ -181,7 +181,7 @@ curl -s localhost:8009/v1/systemone -H 'content-type: application/json' -d '{
 
 `POST /v1/systemone` takes a `state` (the document), a `model` name and up to many `questions`, each a `noul` (yes/no), `choice` (one of named options) or `score` (an ordered scale). The response has one answer per question with a probability per option, plus token usage and latency. `GET /v1/models` lists the accepted model names with the serving details, including load: requests and batches served, the queue, prefix-cache hits and the recent batches' model time (p50, p95, max). `GET /metrics` reports the same in Prometheus text format (plus memory), for a scraper; like `/v1`, it needs the bearer key when `D1A_API_KEY` is set.
 
-A request may also name its use case, `"use_case": "routing"` (optional, at most 64 characters, surrounding whitespace ignored; D1A's own field, which other System One servers ignore). When the checkpoint carries a temperature for that use case, the request's probabilities are read at it; without `use_case`, or with a name the checkpoint has no temperature for, the checkpoint's own temperature applies and the answers are exactly what they were. The top answer never changes, only how sure it is. `GET /v1/models` lists the checkpoint's `use_case_temperatures` (`{}` for most checkpoints), and the decision log records each request's use case and the temperature it was read at. The agent presets, the MCP tools, `D1A.decide(..., use_case=...)` and both clients pass it. Routing is the first use case: v0.5 is served at T 1.78, which leaves its routing answers under-confident; on held-out factory routing rows a routing temperature of 0.85 lowers ECE from 0.132 to 0.030 and raises the share of answers at 0.9 confidence or more from 0.28 to 0.66, with the same accuracy (#209).
+A request may also name its use case, `"use_case": "routing"` (optional, at most 64 characters, surrounding whitespace ignored; D1A's own field, which other System One servers ignore). When the checkpoint carries a temperature for that use case, the request's probabilities are read at it; without `use_case`, or with a name the checkpoint has no temperature for, the checkpoint's own temperature applies and the answers are exactly what they were. The top answer never changes, only how sure it is. `GET /v1/models` lists the checkpoint's `use_case_temperatures` (`{}` for most checkpoints), and the decision log records each request's use case and the temperature it was read at. The agent presets, the MCP tools, `D1A.decide(..., use_case=...)` and both clients pass it. Routing is the first use case: v0.5 is served at T 1.78, which leaves its routing answers under-confident; on held-out factory routing rows a routing temperature of 0.85 lowers ECE from 0.132 to 0.030 and raises the share of answers at 0.9 confidence or more from 0.28 to 0.66, with the same accuracy (#209). v0.6 ships without a routing temperature yet: its own is to be fitted on the same rows and gated before it is added.
 
 Model names: the server answers any name and lists `d1a-latest`, `kev-latest` and `jev-latest`. `d1a-latest` is D1A's own name. `kev-latest` stays accepted so clients written against Kev keep working unchanged, and `jev-latest` is the TypeSafe SDK's default, so an unconfigured SDK client works too. Set `D1A_API_KEY` to require `Authorization: Bearer <key>`.
 
@@ -244,7 +244,7 @@ print(answer["answers"]["team"]["probabilities"])
 The model server answers questions about an image, a short voice clip or a video with the same model, the same request shape plus a `media` field. On Apple Silicon, serve an MLX build that carries Gemma 4's vision and audio encoders (`media/`, about 1 GB, fetched on the first such request; `JohnP1/d1a-e4b-mlx-q8@v0.3` has them, and `scripts/export_mlx.py --media` adds them to your own export):
 
 ```bash
-uv run --extra serve --extra media python -m d1a.serving.serve --run JohnP1/d1a-e4b-mlx-q8@v0.5 --port 8009 --idle-unload 600
+uv run --extra serve --extra media python -m d1a.serving.serve --run JohnP1/d1a-e4b-mlx-q8@v0.6 --port 8009 --idle-unload 600
 ```
 
 ```bash
