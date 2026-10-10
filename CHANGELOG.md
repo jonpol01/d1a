@@ -261,6 +261,7 @@ Checkpoints on Hugging Face, newest first. Each version continues training the p
 
 | Model | Tag | What it adds | Older tag name |
 |---|---|---|---|
+| JohnP1/d1a-e4b | `v0.6` | current pull-request labels (hermes-agent PRs of 2026-10-02 to 10-05): on 487 newer PRs severity +4.3 and change type +3.9 against v0.5, P1 recall 0.22 → 0.35; documents-v1 +2.0, factory routing +3.4. Released as an explicit exception to decide.py's veto V1 (hard-v1 −2.7; older PR test set change type −4.1): pin `v0.5` for hard-v1-style reasoning or the older PR-label conventions. No use-case temperatures yet (routing: v0.6.1) | |
 | JohnP1/d1a-e4b | `v0.5` | Kev's skills back on top of v0.4's pull-request labeling: hard-v1 +16, devtools-v1 +6, transfer-v4 +2.7, JGLUE +1.1, PR change type +2; PR severity −2 and blast radius on the owner's repositories lower than v0.4 | |
 | JohnP1/d1a-e4b | `v0.4` | pull-request labeling round 2: severity, Japanese, a blast-radius answer no longer biased to "broad"; earlier skills 1–3 points lower than v0.3 | |
 | JohnP1/d1a-e4b | `v0.3` | pull-request labeling (type, blast radius, severity), English and Japanese | |
