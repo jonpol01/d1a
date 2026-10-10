@@ -291,35 +291,39 @@ Gemma 4's per-layer embeddings are read from the weight files per request instea
 ### Apple Neural Engine (Core ML)
 
 D1A also runs on the Apple Neural Engine through Core ML, for on-device use on iPhone and iPad (#224):
-- The text model is converted in chunks of 6 or 7 layers (7 chunks for E4B), with int8 weights (per block of 64).
+- The text model is converted in chunks of 6 or 7 layers (5 chunks for E2B, 7 for E4B), with int8 weights (per block of 64).
 - The embedding tables stay on the host as row lookups.
 - Each chunk runs in its own process.
 
-On the Macs it gives the same answers as the full-precision model on every clear-cut question, but it is slower than MLX
-on the GPU. So the Mac mini keeps MLX, and Core ML is for iOS. The on-device model will be E2B v0.6 with the photo,
-voice and video encoders (#229). The E4B Core ML build is a public preview; the E2B one follows with v0.6.
+Both Core ML builds give the same answers as the full-precision model on every clear-cut question. On a Mac, MLX on the GPU
+is several times faster, so the Mac mini keeps MLX; Core ML is for iPhone and iPad, where it keeps the GPU free. The
+photo, voice and video encoders are not converted yet. Each Core ML repository's `reference/run.py` answers a request from
+the downloaded files.
+
+Measured on 2026-10-11 on the same 28 real requests (42 questions, all ≤ 512 tokens), on an Apple M1 Max and a Mac mini M4.
 
 | | E2B · MLX | E2B · Core ML | E4B · MLX | E4B · Core ML |
 |---|---|---|---|---|
-| Status | v0.6 planned; `v0.2` released | v0.6 planned; a v0.2.1 text pilot passed | **v0.6 released** | **v0.6 public preview** |
-| Repository | [JohnP1/d1a-e2b-mlx-q8](https://huggingface.co/JohnP1/d1a-e2b-mlx-q8) | `JohnP1/d1a-e2b-coreml` (private) | [JohnP1/d1a-e4b-mlx-q8](https://huggingface.co/JohnP1/d1a-e4b-mlx-q8) | [JohnP1/d1a-e4b-coreml](https://huggingface.co/JohnP1/d1a-e4b-coreml) |
-| Runs on | Mac GPU | Neural Engine: iPhone, iPad, Mac | Mac GPU | Neural Engine (tested on Macs only) |
+| Version | v0.6 | v0.6 | v0.6 | v0.6 |
+| Repository | [JohnP1/d1a-e2b-mlx-q8](https://huggingface.co/JohnP1/d1a-e2b-mlx-q8) | [JohnP1/d1a-e2b-coreml](https://huggingface.co/JohnP1/d1a-e2b-coreml) | [JohnP1/d1a-e4b-mlx-q8](https://huggingface.co/JohnP1/d1a-e4b-mlx-q8) | [JohnP1/d1a-e4b-coreml](https://huggingface.co/JohnP1/d1a-e4b-coreml) |
+| Runs on | Mac GPU | Neural Engine (iPhone, iPad, M4-class Macs) | Mac GPU | Neural Engine |
 | Text | yes | yes | yes | yes |
-| Photo | yes | planned for v0.6 | yes | not yet |
-| Voice | yes | planned for v0.6 | yes | not yet |
-| Video (16 frames, no sound) | yes | planned for v0.6 | yes | not yet |
-| Input length | long documents | ≤ 512 tokens | long documents (trained up to 5,120 tokens) | ≤ 512 tokens |
+| Photo, voice, video (16 frames, no sound) | yes | not yet (next) | yes | not yet |
+| Input length | long documents | ≤ 512 tokens | long documents | ≤ 512 tokens |
 | Questions | yes/no, choice, score, with a calibrated probability for each option | same | same | same |
 | Languages | questions in English; documents in English or Japanese | same | same | same |
-| PR labeling (v0.3–v0.6 skills) | arrives with v0.6 | arrives with v0.6 (PRs ≤ 512 tokens) | yes | yes, for PRs that fit in 512 tokens |
-| API | System One API (`d1a.serving.serve`), with `/v1/systemone/media` | Python reference only; no iOS app yet | System One API, served on the Mac mini | Python reference only (one process per chunk) |
-| Download size | 3.8 GB + 1.0 GB media | not built | 6.6 GB + 1.0 GB media | 6.1 GB (3.9 GB chunks + 2.1 GB embeddings) |
-| Text speed (median) | ~0.4 s per 6-question request, M1 Max | pilot: ~0.95 s at 512 tokens, M4 | 0.63 s M4, 0.8 s M1 Max ¹ | 1.8 s M4, 2.9 s M1 Max ¹; load 52 s / 106 s |
-| Media speed (median, M1 Max, today's E2B) | photo 0.57 s, voice 0.19 s, video 1.94 s | not built | not measured | not built |
-| Answer changes vs full precision | 5 of 274 (v0.2) | pilot: 0 clear-cut | 0 of 38 clear-cut ¹ | 0 of 38 clear-cut ¹ |
+| PR labels, 487 newest PRs: type / severity | 87.5% / 77.2%; 0 of 30 P0/P1 found | same model | 90.6% / 79.1%; 13 of 30 P0/P1 | same model |
+| Size | 3.8 GB + 1.0 GB media | 3.5 GB (1.8 GB chunks + 1.6 GB embeddings) | 6.6 GB + 1.0 GB media | 6.1 GB (3.9 GB chunks + 2.1 GB embeddings) |
+| Median request, M4 (p95) | **0.20 s** (0.26) | 0.96 s (0.97) | 0.63 s (0.89) | 1.80 s (1.91) |
+| Median request, M1 Max (p95) | **0.17 s** (0.23) | 9.7 s (10.0) ² | 0.81 s (1.33) | 2.93 s (2.95) |
+| Load, M4 / M1 Max | 2 s / 9 s | 40 s / 247 s | 3 s / – | 52 s / 106 s |
+| Answer changes vs fp32 PyTorch ¹ | 0 of 37 clear-cut (M4: 1 near-tie of 42) | 0 of 37 clear-cut (M4: 1 near-tie of 42) | 0 of 38 clear-cut | 0 of 38 clear-cut |
+| Photo / voice / video, median (M1 Max) | 0.83 s over the 14 demo requests | – | – | – |
 
-¹ The same 28 real requests (42 questions, all ≤ 512 tokens), against the fp32 PyTorch build of v0.6. "Clear-cut"
-means the reference's top answer leads by more than 0.05.
+¹ Each build is compared with the fp32 PyTorch rebuild of the same v0.6 model. "Clear-cut" means the reference's top
+answer leads by more than 0.05; a near-tie can flip either way.
+² On the M1 Max's Neural Engine, the E2B chunks fall back to the CPU: each chunk takes the same time with or without the
+Neural Engine. The M4 runs the same files on its Neural Engine.
 
 ## Training
 
