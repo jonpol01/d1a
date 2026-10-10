@@ -264,6 +264,38 @@ def test_the_outcome_calibrator_keeps_answers_read_at_different_temperatures_apa
     assert answer(None) == round(OutcomeCalibrator({"resolved": [1.0, -2.0, 50]}).p("resolved", 0.8), 4) < 0.8 and answer("routing") == 0.8
 
 
+def test_a_request_marked_decision_log_off_is_answered_but_never_logged(tmp_path, monkeypatch):
+    """Demo and smoke traffic sends `x-d1a-decision-log: off`: no outcome ever follows it, so logged it only swelled the
+    pending decisions the outcome collector and `status` count. Every answering endpoint honours it; without it, or with
+    any other value, the answer is logged as before."""
+    from concurrent.futures import Future
+    from contextlib import asynccontextmanager, nullcontext
+    from types import SimpleNamespace
+    from fastapi.testclient import TestClient
+    from d1a.serving import serve
+
+    def submit(rec, media=None, use_case=None):
+        f = Future(); f.set_result(([[0.2, 0.8]], {"tokens": 10, "latency_ms": 1.0})); return f
+    fake = SimpleNamespace(checkpoint=SimpleNamespace(requested="JohnP1/d1a-e4b-mlx-q8@v0.5"), tok=None, submit=submit,
+                           probs=lambda rec, use_case=None: submit(rec).result())
+    for name in ("answer", "answer_async", "_body"): setattr(fake, name, getattr(serve.Server, name).__get__(fake))
+    monkeypatch.setattr(serve, "server", lambda: nullcontext(fake))
+    @asynccontextmanager
+    async def server_async():
+        yield fake
+    monkeypatch.setattr(serve, "server_async", server_async)
+    monkeypatch.setattr(serve, "output_tokens", lambda tok, answers: 0)
+    monkeypatch.setattr(serve, "LEARNING", serve.Learning(tmp_path / "log.jsonl"))
+    req = {"state": "issue + patch", "questions": Q}
+    with TestClient(serve.app) as client:
+        for path in ("/v1/systemone", "/v1/systemone/separate"):
+            r = client.post(path, json=req, headers={"x-d1a-decision-log": "Off"})
+            assert r.status_code == 200 and r.json()["answers"]["resolved"]["noul"] == 0.8 and "decision_id" not in r.json()
+        assert serve.LEARNING.log.events() == []
+        kept = [client.post("/v1/systemone", json=req, headers=h).json() for h in ({}, {"x-d1a-decision-log": "on"})]
+    assert [e["id"] for e in serve.LEARNING.log.events()] == [k["decision_id"] for k in kept]
+
+
 def test_a_recalibrated_choice_answer_carries_its_own_confidence_and_a_score_answer_is_left_alone():
     """#195: the served answer must not contradict itself. A choice answer's confidence is read off the recalibrated
     probabilities; a score answer, which also carries probabilities by level, is never rescaled as a choice."""
