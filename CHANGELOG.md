@@ -16,6 +16,440 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-11
+
+D1A on the v0.6 models: a package layout of its own, release rules with statistical gates, use-case temperatures,
+Core ML builds for the Apple Neural Engine, one page for every setting, and the first learned decision flags.
+
+### What's new
+
+- **v0.6 models.** D1A-E4B v0.6 and D1A-E2B v0.6 are the defaults (`d1a.core.versions.LATEST`). E4B labels current pull
+  requests better than v0.5 (severity 79.1%, change type 90.6% on 487 PRs newer than its training). E2B v0.6 learns
+  every D1A skill at a fraction of the cost (0.20 s per request on a Mac mini M4). Both ship as release exceptions,
+  with the reasons in their model cards.
+- **Apple Neural Engine.** Both models run through Core ML (`JohnP1/d1a-e4b-coreml`, `JohnP1/d1a-e2b-coreml`, text up
+  to 512 tokens, with a reference runner); README "Apple Neural Engine (Core ML)" compares all four builds.
+- **Every setting in one place.** `docs/CONFIGURATION.md` lists each `D1A_*` variable and server flag with its default
+  and when to change it, a test keeps it complete, and `CLAUDE.md` points coding agents at it.
+- **Safer releases and training.** `scripts/decide.py` and `scripts/quality_gate.py` gate model and serving changes on
+  real weights; a fine-tune refuses a mix that drops a trained skill; calibration refuses data the model trained on;
+  every pull request needs signed (Verified) commits and the CI checks to merge.
+- **Use-case temperatures** and **learned decision flags** (`d1a.learning.flags`: a threshold on a group of options,
+  fitted offline, reported beside the answer; served from 0.5.0).
+
+### Added
+
+- `d1a.learning.flags` (#237, part 1): learned decision flags. A flag is a group of a choice question's options plus a
+  threshold, raised when the top answer is in the group or the group's probability reaches the threshold; it is read on
+  the model's raw probabilities and never changes the answer. `python -m d1a.learning.flags fit` sets the threshold at a
+  flag-rate budget on a labelled kit, `gate` serves it only if it catches more positives than the top answer on a later
+  kit (bootstrap over groups) within the budget. Serving the flag and its settings come with part 2, after #233.
+- A `verified commits` check fails a pull request when any of its commits lacks GitHub's Verified badge. With the CI
+  tests, lint, the package build and the license check, it is required before anything merges into `main`
+  (CONTRIBUTING.md, "Pull requests").
+- docs/CONFIGURATION.md: every setting in one place: the server's flags, all 20 `D1A_*` variables (12 were documented
+  nowhere), the self-learning loop and its commands, photos and voice, agents and evaluation. Each entry gives its
+  default and when to change it. tests/test_configuration_doc.py keeps the page complete, and a CLAUDE.md points
+  coding agents at AGENTS.md and the page.
+- README: an "Apple Neural Engine (Core ML)" section with a table comparing the four D1A builds (E2B and E4B, MLX and
+  Core ML): inputs, length, API, size, speed and answer changes. The Core ML builds are private previews (#224, #231).
+- AGENTS.md: a "Mac resources" section (mandatory). Long jobs on the M1 Max start behind a disk and RAM preflight, fp32 models of 4B or more run only overnight with 25 GB free, a guard pauses D1A jobs on low disk or fast swap growth, and Hugging Face cache entries are deleted only through `scan_cache_dir` (#228).
+- `d1a.serving.serve` (#221): a request that sends the header `x-d1a-decision-log: off` is answered but kept out of the decision
+  log (`D1A_FEEDBACK_LOG`), on `/v1/systemone`, `/v1/systemone/media`, `/permute` and `/separate`. The playground's demos
+  and its smoke test send it, so the log's pending decisions are the ones an outcome can still follow.
+- `recipes/swe-verifier` analysis tools (#220), each run on saved `zero_shot.py` outputs, CPU only and with no model:
+  `recompute_gate.py` (the promotion gate between two scored files, with Platt scaling and with D1A's
+  `OutcomeCalibrator`, out of fold by repository), `refit_heuristics.py` (the heuristics' regression refitted on dev, on
+  train and on both, scored on the same test rows), `token_lengths.py` (the token length of every scored input, after
+  checking the rebuilt selection against the saved file run for run) and `latency.py` (seconds per run). `best_of_k.py
+  --pair A:B` adds the paired difference between two scorers without moving its other numbers.
+- `recipes/swe-verifier/reproduce.sh` (#220) downloads the study's scored rows and r1 adapter
+  (`JohnP1/d1a-swe-verifier-eval`, `JohnP1/d1a-swe-verifier-r1`; private until the release, `REVISION` pins them),
+  checks them against their manifest, reruns the scripts that wrote each output and compares every one byte for byte.
+- `recipes/mix/build_mix.py`, the plan-driven training-mix builder that built D2 and D2-skills (#202), with its plans
+  (`recipes/mix/plans/`) and a verifier (`recipes/mix/verify_mix.py`). A plan sets each source's count, stratification
+  and weights, label quotas and an "only unseen" filter. Every eval partition and eval-only kit is screened out (exact
+  state, PR id including the hand-labelled PRs', near-duplicates of the nearest eval state), and the same plan and seed
+  give the same bytes, whatever PYTHONHASHSEED is. A plan that leaves out a training
+  source or decision-v7 is refused unless it names it with a reason, and the sidecar is the one `d1a.training.train`
+  checks. The verifier checks every record byte for byte against its source and reruns the leak screens.
+- `scripts/quality_gate.py --head-run`: gates a new checkpoint against the one it replaces (#175).
+  - The head server and the head suites load the new weights; the base keeps `--run`.
+  - Changed answers are listed for review instead of failing, since a new checkpoint is meant to change some.
+  - Still failures: lower accuracy or worse calibration on a suite, latency above the noise floor, or a request one
+    side does not answer or answers with other options.
+- `scripts/compare_checkpoints.py`: a training run's verdict table from its benchmark folders (#175).
+  - Per suite: each checkpoint's accuracy, and its difference from a reference with a paired 95% bootstrap interval that
+    resamples whole records.
+  - ECE at each checkpoint's fitted temperature, from the rows' logits.
+  - A pre-registered bar (`--bar SUITE=MIN`, `--floor`): exit 1 when a run misses it.
+- `recipes/skills/`: the skills stage D1A-E4B never had (#175).
+  - The mix: every hard-v1 and devtools-v1 training record plus replay, 15,320 records with the trainer's decision-v7
+    replay.
+  - An HF Jobs script. It first runs 5 steps on the 40 longest states to test memory, then trains and calibrates as
+    v0.4 was.
+  - The #167 B0 pilot (300 steps) already raised hard-v1 and devtools-v1 by about 5 points each.
+- Fine-tunes keep the skills (#167): `recipes/pr-labeler/mix.py --replay-skills N` (default 500 per suite) replays the
+  hard-v1, devtools-v1 and documents-v1 train partitions; `--replay-skills 0` rebuilds the v0.3 and v0.4 mixes byte for
+  byte. `scripts/quality_gate.py --card-suites` also scores the five card suites. `recipes/README.md` and AGENTS.md make
+  both the rule for any run that starts from a trained checkpoint.
+- `scripts/quality_gate.py --base <ref> [--head <ref>]` (#156): the quality gate for model, loading and serving changes.
+  Two `d1a.serve` instances, one per version, on the same real weights answer every demo example (regenerated from a
+  d1a-playground checkout with `--playground`) and the labeler replay, alternating which goes first. A base/base run
+  measures the noise floor. It fails on a changed choice, a probability moving more than `--tol` (1e-6), a request only
+  one side answers, latency above the floor, or, with `--suites`, a frozen suite whose accuracy or calibration gets
+  worse; exit 1 on FAIL. AGENTS.md makes it the required step for model and serving PRs and playground pin moves.
+- `python -m d1a.feedback promote <log> --calibrator <file>` (#148): the promotion gate on a live decision log. Whole
+  groups (an outcome's optional `group`, e.g. a pull request; `POST /v1/feedback` takes it) go to the fit or the
+  held-out side. A calibrator fitted on the fit side replaces the served one for a question only if it passes the gate
+  on the held-out side; the file is written whole and renamed into place, so `d1a.serve` reloads it safely.
+- Self-learning for choice questions (#139). `d1a.feedback`'s `OutcomeCalibrator` fits one temperature per choice
+  question on the outcomes, which changes how sure an answer is but never which option it picks; `gate_choice()` applies
+  the promotion rule to the multi-class log loss. Outcomes name their source (`POST /v1/feedback`'s `src`, or
+  `meta["src"]`): labels merge per question, and a person's (`human`) beats another model's (e.g. `reviewer`) whatever
+  arrived last. `python -m d1a.feedback status|records|calibrate --src` keeps one source. First stream: the PR labeler's
+  type and blast-radius questions, with the review bot's labels as outcomes.
+- A versioned format for training runs (#64): `d1a_config.json` (format `d1a-torch`, version 1: the base, the head's size,
+  the temperature, `weights`, and the run's recorded arguments as JSON) with the pointer head in `head.safetensors`, the
+  file names MLX exports already use. `d1a.train` and `d1a.calibrate` write it, and loading it unpickles nothing. A run
+  that has both it and a `head.pt` must say the same in both, or loading stops and names the field. Runs saved before
+  it (head.pt only) load as before, with no end date; published checkpoints are unchanged.
+- Conformance against committed golden vectors (#64): `tests/golden/tiny-gemma4/` holds a tiny Gemma 4 checkpoint
+  (weights in git, 556 KB, built by `tests/golden/build_tiny_gemma4.py`) and `golden.json`, with 40 requests and 154
+  questions. `tests/test_conformance.py` requires its token ids exactly and every probability to 1e-5, through the model,
+  `d1a.serve` and `scripts/golden_vectors.py compare`.
+- Training recipes (#63): `python -m d1a.recipe run <recipe.yaml> --out <dir> --device <device>` runs a versioned YAML
+  file of stages (`format: d1a-recipe`, version 1), each one `d1a.train` run with the options it lists, a later stage
+  starting from the previous stage's checkpoint. Every option is checked by `d1a.train`'s own parser before anything
+  runs, machine settings (device, resume, save interval) come from the command, and each stage's directory gets
+  `recipe.json` (the recipe, its sha256, the stage and the exact command). `--dry-run` prints the commands.
+  `recipes/d1a-e2b.yaml` is the README's E2B run. `d1a.train`'s `parse_args` takes an argument list; PyYAML is now a
+  declared dependency.
+- `python -m d1a.training.study` runs a study end to end (#62). It trains a recipe, calibrates the checkpoint on
+  held-out rows (`--calibrate`, fitted by `d1a.training.calibrate`, which refuses rows the checkpoint trained on), scores
+  each `--evaluate` at that temperature, and writes `study/study.json` and `study.md`. `--publish owner/repo:prefix` (or
+  the `publish` command) uploads the checkpoint and the report, and refuses a checkpoint whose temperature was never
+  fitted, or was fitted in distribution without `--allow-in-distribution`. A study that stopped continues where it
+  stopped; an evaluation scored at another temperature is scored again.
+- Position bias in every benchmark report (#38). `position_bias`: how often a clean choice question's answer is its first
+  option, against how often its label is. `identical_options` (`d1a.benchmark --identical-options N`, default 100; 0
+  for none): the first N clean choice questions asked again with every option the first option's text, as a score
+  question whose levels may repeat; it reports how far the answers are from uniform and how often the first slot is
+  strictly the top one, with each control's answer in identical_options.json. The suite's own predictions and rows are
+  unchanged.
+- `tests/test_tiny_checkpoint.py` (in CI): a random 6-layer Gemma 4, with sliding and KV-shared layers, goes through
+  `d1a.train`, `d1a.checkpoint` and `d1a.serve` with no download. Every scoring path (packed, rows, prefix miss and hit,
+  serving batch) and the served answers must match an independent reference: each question as a plain causal row
+  through transformers. Ten mutation checks must fail: off-by-one readouts, a leaky question mask, the sliding window
+  ignored, positions that do not restart, a dropped `<bos>`, temperature ignored, and three misread answer types (#33).
+- `docs/SPEC.md` (#7): what an implementation must do to give D1A's answers: how a System One request becomes model
+  input, the attention rule, the pointer head, the answer formats, calibration, the checkpoint formats (`d1a-torch`,
+  `head.pt`, `d1a-mlx`) and the conformance test (#9).
+- `d1a.training.calibrate` warns when a fit lands on an end of its grid (0.25 or 4), where the best temperature may lie
+  beyond it, and records it in `temperature_fit.grid_edge` (#196).
+- `scripts/decide.py` judges a new checkpoint on one scorecard (#202). It reads the files `scripts/quality_gate.py
+  --all-suites` writes, plus the live labeler check's answers. It scores every suite and the two live labeler lines,
+  pooled with a 95% interval, and gives one verdict:
+  - INCOMPLETE when anything is missing;
+  - VETO on the card-suite floor, latency, or a large suite 5 points down;
+  - BETTER on a pooled lower bound above 0, or 3 significant wins on distinct sources with no loss;
+  - NOT BETTER otherwise, a near miss when the pooled Δ > 0 with 2 wins and no loss.
+  Every significant loss is listed as a follow-up. AGENTS.md and `recipes/README.md` make it the rule for a new
+  checkpoint.
+- `scripts/quality_gate.py --use-case NAME` sends `"use_case": NAME` with the routing requests: the playground's
+  routing demo and any request asking a `d1a.agents.presets` question set, as the presets' clients send them. Both
+  servers get the same requests, and a server without the field ignores it. So a change to the use-case temperature
+  path can be gated with the field it serves. Without the flag every request goes out as before.
+- `python -m d1a.learning.feedback promote --run <repo@tag>` (and `status`, `records`, `calibrate`) keeps only the
+  decisions that model made, as the decision log records them per decision. A calibrator corrects one model's
+  probabilities: after a model switch, fitted on the old model's decisions, it would correct the new model by the old
+  one's errors. With `--run`, `min_outcomes` counts the served model's outcomes only, so nothing is promoted until it
+  has enough. `FeedbackLog.resolved(run=...)` does the same in code.
+- `scripts/quality_gate.py --all-suites` scores every suite: the five card suites and every evaluation partition of
+  every D1A suite (pr-labels, routing, ja-jglue, night2, external; composites once through their parts), on top of
+  every demo and the labeler replay. AGENTS.md makes it the gate for any model or checkpoint change, decided on the
+  whole scorecard.
+- A required `quality-gate` status on pull requests. CI (`.github/workflows/quality-gate.yml`) leaves it pending on a
+  pull request that changes a module the model server loads, or the dependencies (`scripts/gate_required.py`, read
+  from the server's own imports). `scripts/quality_gate.py --post-status` then sets it to the verdict, on the exact
+  commit it tested; it refuses a head checkout with uncommitted changes. Any other pull request gets the status as
+  success, with the reason. A new head starts pending again. It is off by default (the workflow disabled, the check
+  not required) and turned on on demand, for a pull request whose severity calls for it, when the local machine
+  is free to run the gate; AGENTS.md (Quality bar) has the steps.
+- `scripts/equivalence/` (`api.py`, `metrics.py`, `benchmark.py`, `suite.py`): each runs a rewritten module and the same
+  module at a git commit (`--ref`; the default is the last commit before its rewrite) on generated inputs, and stops at
+  the first difference: types, float bits, key order, files byte for byte, error messages.
+- `python -m d1a.training.calibrate --judge rows.json [--guard rows.json] [--confirm rows.json] [--locked rows.json]` (#189):
+  a refitted temperature replaces the checkpoint's current one only when it passes Kev's round 28 rule and confirmation. On
+  the judge rows pooled, its Brier score must be lower with a 95% interval below zero and its ECE lower, and no judge or
+  guard panel's ECE may rise by more than 0.005; then, scored only once that passes, ECE must fall on every `--confirm` file,
+  and on every `--locked` file Brier may rise by at most 0.005 with accuracy unchanged. Otherwise nothing is written and the
+  run names each criterion that failed. Before anything is fitted, the run refuses a file in another role that shares a row
+  with the rows the fit reads (rows `--exclude_rows` drops do not count), and a confirmation file that shares a row with a
+  rule file; a whole or partial copy shares its rows, and another read of the same suite partition counts as the same file.
+  In every role, `--rows` included, it also refuses a selection with no scored rows and a `path:source,...` naming a source its suite does not
+  list, and `--temperature` refuses these options instead of ignoring them. The rule's bootstrap is Kev's registered paired
+  read: seed 0 whatever `--seed` is, and the rows in (id, question) order with every tie broken (devtools-v1 repeats ids
+  across groups), so reordering a rows file never moves a verdict.
+  Every fit now records the 90% bootstrap interval of its temperature in `temperature_fit.interval`.
+- `docs/TRAINING_DATA.md`: every source a D1A model can train on (records, what each teaches, which use cases it
+  serves), what is never trained on, and what v0.5, phase C and D2-skills each used, with the lessons from those mixes.
+- Per-use-case temperatures (#209). A System One request may name its use case (`"use_case": "routing"`). When the
+  checkpoint carries a temperature for it, that request's probabilities are read at it, on torch and MLX alike, each
+  request of a batch at its own. Without `use_case`, or with a name the checkpoint has none for, answers are exactly as
+  before. The top answer never moves. `python -m d1a.training.calibrate --use-case routing` fits or writes the temperature
+  into the checkpoint's `use_case_temperatures`, leaving its own temperature alone. With `--judge`, a use-case refit is judged
+  against the incumbent's temperature for that use case (its entry, else its temperature): `--incumbent`'s, a fine-tune's
+  `--init_from` until the fine-tune has an entry of its own, or the run's own. `GET /v1/models` lists the map, and
+  the decision log records each request's use case and temperature. The agent presets (`USE_CASES`), the MCP tools,
+  `D1A.decide(..., use_case=...)` and both clients send it. `use_case` is at most 64 characters (longer is a 422), and a
+  use-case name in the map or in `--use-case` is stored without surrounding whitespace and refused beyond 64 characters; a
+  request's own `use_case` is read stripped too. For v0.5, routing at T 0.85 instead of 1.78 lowers held-out
+  factory-routing ECE from 0.132 to 0.030 with the same accuracy.
+- The agent presets' advice follows the temperature an answer was read at: `advise(..., temperatures=, use_case=)` (the
+  checkpoint's temperatures from `D1A.temperatures` or `/v1/models`, which the MCP tools read on each call) carries
+  `fail_up`'s small threshold through the temperature ratio, 0.7 at v0.5's T 1.78 becoming 0.855 at the routing T 0.85, so
+  routing does not send more cards too low (3 of 108 held-out factory cards, not 5). The other thresholds stay as they are.
+- The outcome calibrator keeps temperatures apart: `d1a.learning.feedback` fits, promotes (`"question@T"` in its report) and
+  serves each temperature's entries from the decisions read at it only. A calibrator file written before keeps working at
+  the checkpoint's own temperature and is never applied to answers read at a use case's.
+
+### Changed
+
+- The newest D1A-E2B is `v0.6` (`JohnP1/d1a-e2b@v0.6` and `JohnP1/d1a-e2b-mlx-q8@v0.6`, #229, #236): every later D1A skill
+  trained into E2B v0.2.1 in one run, on one L40S. The run covered PR labels (with the 479 current hermes-agent PRs),
+  hard-v1, devtools-v1, documents-v1, JGLUE and routing (23,427 records, lr 5e-5). Against v0.2.1, MLX 8-bit:
+  - hard-v1 31.4% → 62.1% (+30.7 [+26.9, +34.4]), devtools-v1 +14.9, documents-v1 +13.6, JGLUE +13.3;
+  - factory routing 64.2% → 89.4%, PR change type 40.0% → 84.5%; pooled +18.9 [+17.4, +20.4].
+  - On 487 PRs newer than all its training: severity 77.2% and type 87.5% (E4B v0.6: 79.1%, 90.6%), but P0/P1 recall
+    0/30, so E4B stays the PR labeller.
+  It is an explicit release exception. Its pre-registered bar allowed no card suite below −1, and decision-v7 is −1.4
+  [−2.8, +0.1]; `scripts/decide.py`'s V1 limit (−2.0) passes it. Calibration error rose on 10 of 22 suites, most on
+  typesafe-v1 and dates. The MLX build carries the photo, voice and video encoders (`media/`, T 1.45).
+  `d1a.core.versions.latest()` now resolves E2B to v0.6.
+- README: the Apple Neural Engine section compares all four v0.6 builds (E2B and E4B, MLX and Core ML) measured on the
+  same 28 requests on an M1 Max and an M4, and links the public E2B Core ML build.
+- README: JohnP1/d1a-e4b-coreml, the E4B v0.6 Core ML build, is public (#224).
+- `GET /v1/models` lists only `d1a-latest`; `kev-latest` and `jev-latest` are no longer listed (#230). The server still answers
+  any model name a request sends, so existing clients and an unconfigured TypeSafe SDK client keep working.
+- `scripts/quality_gate.py`'s default `--run` is `JohnP1/d1a-e4b-mlx-q8@v0.6`, what the Mac mini serves since 2026-10-10 (#225, #226), and the README's model table and examples name v0.6. v0.6 has no routing temperature yet.
+- The newest D1A-E4B is `v0.6` (`JohnP1/d1a-e4b@v0.6` and `JohnP1/d1a-e4b-mlx-q8@v0.6`, #225): v0.5 trained further on
+  current pull-request labels (479 hermes-agent PRs created 2026-10-02 to 10-05, #198), with documents-v1, routing and low
+  replay of every earlier skill. On 487 PRs created after all its training, MLX 8-bit: severity 74.7% → 79.1% (+4.3
+  [+0.8, +7.8]), change type 86.7% → 90.6% (+3.9 [+1.2, +6.6]), P1 recall 0.22 → 0.35. Also documents-v1 +2.0 and
+  factory routing +3.4, with lower calibration error on most suites (T 1.95). It is an explicit release exception:
+  `scripts/decide.py` vetoes it against v0.5 (V1, hard-v1 −2.7 [−4.9, −0.5]; change type on the older frozen PR test set
+  −4.1 [−6.0, −2.3]; pooled −0.20 [−0.98, +0.52]), and it ships because the Mac mini's job is labelling current PRs.
+  Pin `@v0.5` for hard-v1-style reasoning or the older PR-label conventions. v0.6 carries no use-case temperatures, so a
+  `"use_case": "routing"` request is read at T 1.95; a refitted routing temperature follows as v0.6.1.
+  `d1a.core.versions.latest()`, and the scripts and demos that take their default from it, now resolve to v0.6.
+- `recipes/swe-verifier/reproduce.sh` (#222) rebuilds the self-improvement texts (`self-improve/feedback.jsonl`,
+  `train-r{1,2,3}.jsonl`) from `nebius/SWE-agent-trajectories` at the pinned revision with the new `rebuild_texts.py`,
+  and checks each against the manifest's sha256. `JohnP1/d1a-swe-verifier-eval` now ships them as ids, labels and scores
+  (`*.ids.jsonl`, each decision naming its source shard, row and run_key) instead of re-hosting the source's text.
+- `scripts/quality_gate.py` runs when this environment meets both versions' requirements (dependencies and the server
+  extras), instead of requiring them to be declared the same; any difference is recorded in the report.
+- Encoding and the pointer head moved out of the torch backend into `d1a.core` (#60): `d1a.core.encoding` (`encode`,
+  `layout`, `rows_of`, the context limits) and `d1a.core.head` (`PointerHead`). The torch backend, the MLX backend and
+  media all read the same encoding from there. `d1a.backends.torch` still exports every name, so imports keep working.
+  The code is unchanged, and answers are identical bit for bit.
+- The package is split by job (#60): `d1a.core` (the System One schema), `d1a.backends` (the torch and MLX models,
+  checkpoints), `d1a.serving` (the server, media, in-process use), `d1a.learning` (learning from outcomes),
+  `d1a.training` (training, data, recipes, calibration), `d1a.eval` (benchmarks, metrics, suites) and `d1a.agents`
+  (presets, MCP). Commands move with them: `python -m d1a.serving.serve`, `python -m d1a.training.train`,
+  `python -m d1a.eval.benchmark`, `python -m d1a.learning.feedback`, and so on. The code is unchanged.
+- CI runs every test file (`pytest tests --unit`) except the few `tests/conftest.py`'s `OUTSIDE_UNIT_TESTS` lists with
+  why, instead of a list naming each file: a new test file runs without being listed, and two pull requests adding test
+  files no longer conflict on that list. The release runs the same command. CI keeps the Hugging Face cache (the pinned
+  tokenizers the tests read) between runs. `docs/UPSTREAM.md` lists rewritten files one per line.
+- `d1a/api.py` is rewritten in D1A's own code, no longer derived from Kev. The schema, the text the model reads, the
+  answers and the validation errors are unchanged: they were checked identical to the previous version on 166,718
+  generated requests, distributions and dates. Its tests are rewritten too, as `tests/test_system_one.py`.
+- `d1a/benchmark.py` is rewritten in D1A's own code, no longer derived from Kev. Its rows, reports, the files it writes
+  (byte for byte), its failure and skip rules and its command line are unchanged: checked against the previous version
+  on about 34,000 generated cases and end to end on a frozen suite. Its tests are rewritten too, as
+  `tests/test_benchmark.py`.
+- `d1a/checkpoint.py` is rewritten in D1A's own code, no longer derived from Kev. Its decisions (backend, dtype, merge),
+  refusals, metadata and on-disk formats are unchanged (`scripts/equivalence/checkpoint.py`, new), and `head.pt` is read
+  with `weights_only=True` explicitly, so it can hold only tensors and plain data even under
+  `TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD`. Its tests are rewritten too, as `tests/test_checkpoint.py`.
+- `d1a/training/composition.py` (the compositional suites' rule shapes and the structure keys that keep held-out shapes
+  out of training) is rewritten in D1A's own code, no longer derived from Kev. `scripts/equivalence/composition.py` found
+  it identical to the previous version on 140,103 comparisons: the shapes and their splits, and every function on the
+  suite shapes and 20,000 generated trees.
+- `d1a/data.py` is rewritten in D1A's own code, no longer derived from Kev. Every converter, `build`, `augment`,
+  `none_pair`, `load_records` and `materialize` gives the same records from the same seeds, every random draw in the same
+  order (`scripts/equivalence/data.py`, new). Its tests are rewritten too, as `tests/test_data.py`.
+- The newest D1A-E4B is `v0.5` (`JohnP1/d1a-e4b@v0.5` and `JohnP1/d1a-e4b-mlx-q8@v0.5`, #175): Kev's skills trained back on
+  top of v0.4. On held-out data, MLX 8-bit: hard decisions 55% → 71%, developer tools 64% → 70%, transfer-v4 +2.7, JGLUE
+  +1.1, routing +1.5, PR change type +2.0. Severity is 2 points lower, and blast radius on the owner's own repositories
+  drops (87% → 74% on 39 hand-checked PRs); v0.4 stays the better PR labeler for those. `d1a.core.versions.latest()`,
+  and the scripts and demos that take their default from it, now resolve to v0.5.
+- `d1a/metrics.py` is rewritten in D1A's own code, no longer derived from Kev. Every figure, report (key order included),
+  fitted temperature and bootstrap interval is bit-identical to the previous version: checked on about 300,000 generated
+  calls and on saved benchmark rows. Its tests are rewritten too, as `tests/test_metrics.py`.
+- `d1a/model.py` is rewritten in D1A's own code, no longer derived from Kev. Every public name stays, and the encoding,
+  the masks, every scoring path (batched, row form, prefix cache, shared prefix) and the training gradients are identical
+  to the previous version on tiny Gemma 4 and Qwen3.5 models (`scripts/equivalence/model.py`, new), and on real weights
+  (`scripts/equivalence/real_weights.py --module d1a/model.py`).
+- `d1a/eval/predictors.py` is rewritten in D1A's own code, no longer derived from Kev. `scripts/equivalence/predictors.py`
+  found it identical to the previous version on 1,294 comparisons, latency aside:
+  - the local predictor on the committed tiny Gemma 4 checkpoint (long rows, the CUDA kernel policy, the hybrid branch,
+    context overflows);
+  - the remote predictor (requests, retries, waits, failures);
+  - rotation averaging, with and without logits.
+- `d1a/backends/shared_prefix.py` (Qwen3.5 training through a shared state prefix) is rewritten in D1A's own code, no
+  longer derived from Kev. `scripts/equivalence/shared_prefix.py` found it identical to the previous version on 200
+  comparisons, each a batch's branch hidden states and every parameter's gradient, on a tiny random Qwen3.5: eager and
+  SDPA attention, padded and unpadded states, gradient checkpointing on and off, plus the Prefix cache calls.
+- `d1a/suite.py` is rewritten in D1A's own code, no longer derived from Kev. The pins, the partition checks, the Hub
+  mirror rules, the file formats (byte for byte) and the training-source guard are unchanged (`scripts/equivalence/suite.py`).
+  Its tests are rewritten too, as `tests/test_suite.py`.
+- `d1a/train.py` is rewritten in D1A's own code, no longer derived from Kev. The run, its options, what it writes and how it
+  resumes are unchanged: on the CPU the adapter, the head, the configs and the logs are identical to the previous version
+  under 15 option sets, a stopped and resumed run included (`scripts/equivalence/train.py`, new). Its tests are rewritten
+  too, as `tests/test_train.py`, with a check that a seed reproduces a run bit for bit.
+- The model server's state-prefix cache makes room before a batch runs (`PrefixCache.make_room`, ported from Kev
+  `1d77363`). It drops, before the pass, exactly the states that batch's store would evict afterwards, so an old long
+  state no longer stays in memory through the pass of the new state replacing it. The cache ends the same; the peak is
+  lower. The out-of-memory retry still fires when the batch holds a hit that make_room already dropped from the cache.
+- Fine-tunes keep every skill: `d1a.eval.suites.train_sources()` lists every training source (hard-v1, devtools-v1,
+  documents-v1 and every D1A train partition: PR labels incl. blast and Japanese, routing, JGLUE). Both mix tools
+  refuse a new mix that leaves one out. `recipes/skills/mix.py` now replays 300 records of each source its plan leaves
+  out (`--replay-rest`; `--recorded` rebuilds v0.5's mix). `recipes/pr-labeler/mix.py` takes the train-blast PRs by
+  default. v0.5's skills stage had no routing and only 1,350 PR records, and its labeler severity slipped (#187).
+- The HTTP API tests (`tests/test_api.py`) are rewritten as D1A's own and run in the unit suite: they start
+  `d1a.serving.serve`'s app in process on the committed tiny checkpoint (CPU, a few seconds), or check a running
+  server when `D1A_BASE_URL` is set (`pytest tests/test_api.py -m server`). They keep every old check (answer shapes,
+  null and structured criteria, the one-level score, 422s, branch isolation, the model names and cards, the request id,
+  the TypeSafe SDK clients) and add more: probabilities in the request's order summing to 1 within TypeSafe's 0.02, the
+  confidence and expected-score formulas, 422s at both option limits, each question alone, reversed and through
+  `/v1/systemone/separate`, and a client's request id echoed back. Of 24 bugs planted in the API and server code, the
+  old tests caught 17 and the new ones 23, including all 17; the one neither catches (a yes/no answer reporting P(no))
+  is caught by `tests/test_conformance.py`.
+- `tests/test_conventions.py` states its single-home facts, their scanner and the private-mirror check in D1A's own code
+  (Kev lines 60 → 18; the rest are the patterns, kept verbatim). Every pattern and owner set is unchanged, and on a planted file restating each fact once the old
+  and new scanners report identical offenders, fact by fact. No library code changed.
+- The tests of the packed encoding, the block-causal masks and the pointer head are rewritten as `tests/test_encoding.py`,
+  no longer derived from Kev. The new tests check:
+  - every mask against the attention rule, on every query and key pair: random layouts, a padded batch, and Gemma 4's
+    sliding window;
+  - delimiter forgery under both the Qwen and the Gemma 4 tokenizer, each given the other's control tokens too;
+  - the whole layout, through `rows_of`;
+  - that `PointerHead.many` scores each question as `forward` does.
+- Kev's `tests/test_research.py` is rewritten in D1A's own tests. The remote and rotation-averaged predictor tests are now
+  `tests/test_predictors.py`; strict truncation and the batched mask's exact equality are in `tests/test_encoding.py`.
+  The new tests catch every planted bug the old ones catch, including a real token attending to a pad column. Its unused
+  fixtures are gone. No library code changed.
+- The tests of the server's batching are rewritten as `tests/test_serving.py`, no longer derived from Kev. They cover the
+  state-prefix cache, the retry after running out of device memory, the permute endpoint and the API key, plus the pass
+  sizing they rely on (`rows_per_pass`, the CUDA-graph buckets and length groups, the cached-state copies). The cache is
+  now checked against its rule over random batches: a batch keeps exactly what it would leave, and the cache holds the
+  most recently used states that fit.
+- The Kev-derived tests left in `tests/test_unit.py` are rewritten as D1A's own. Epoch planning (`--length_sort`, the
+  none-pair gate, `--pass_tokens_max`, `--row_budget`), a NaN gradient, the gradient-norm summary and resume points are
+  in `tests/test_train.py`. The shared-prefix tests are in the new `tests/test_shared_prefix.py`, and the long-record
+  `LocalPredictor` tests in `tests/test_predictors.py`. The tiny hybrid Qwen3.5 they train on is built once per session
+  in `tests/conftest.py`. A test whose checks `tests/test_data.py`, `tests/test_train.py` and `tests/test_system_one.py`
+  already made is gone, and so are two unused stand-ins. Of 57 bugs planted in the code under test, the old tests caught
+  50 and the new ones 54, including all 50; the other three are equivalent mutants. No library code changed.
+- `d1a.training.train` refuses a fine-tune (`--init_from`) whose training data leaves out a training source (#211): every
+  `d1a.eval.suites.train_sources()` entry and decision-v7 must be in the `--data` mix (read from its sidecar `<data>.json`,
+  as `recipes/skills/mix.py`, `recipes/pr-labeler/mix.py` and the D2 builder write it), replayed with `--suite` and
+  `--replay`, or in `--extra_suites`. The check runs before any weights load and names what is missing; `--data` without a
+  sidecar is refused for a fine-tune. A source left out on purpose takes `--allow_missing_sources <source,...|all> --reason
+  "<why>"`, which the run's log names at its start and `training_config.json` records under `sources`. A sidecar's record
+  counts must be whole numbers. `d1a.training.recipe` (and so `d1a.training.study`) runs the same check on every fine-tune
+  stage before the first stage trains. Resume points written before this change still resume. A run from the base model
+  is unchanged.
+
+### Deprecated
+
+- The old flat module paths (`d1a.serve`, `d1a.model`, `python -m d1a.train`, ...) still work in D1A 0.4, as the very
+  same modules, with a DeprecationWarning; D1A 0.5 removes them. `d1a/_layout.py` lists where each one went.
+- Writing `head.pt`. D1A 0.4 still writes it beside `d1a_config.json`, so D1A 0.3 and older can load new runs; D1A 0.5
+  stops writing it. Reading `head.pt` stays, for every run saved before 0.4.
+
+### Removed
+
+- `python -m d1a.suite`, the suite freezer inherited from Kev, with `d1a/contrastive.py` and the record generator of
+  `d1a/composition.py`. D1A loads its frozen suites as data and never rebuilds them; `paired_flip` moved to
+  `d1a.benchmark`, and the rule shapes that `d1a.suite.validate_training` checks stay. See docs/removed-tools.md (#65).
+- The `d1a.data` converters only that freezer read (13 sources; `build()` keeps its six defaults) and
+  `scripts/longdoc_serving.py`, which ran only through Kev's removed Modal app (#65).
+
+### Fixed
+
+- `recipes/swe-verifier/zero_shot.py --per-issue` draws each issue's runs with `rng.sample` again, as the dev and test
+  sets were scored (#220), so they rebuild run_key for run_key; `--mixed-only` keeps its draw. The draw is
+  `zero_shot.per_issue_draw`, and the recipe reads `nebius/SWE-agent-trajectories` at a pinned commit
+  (`zero_shot.REVISION`, `--revision` to override).
+- `scripts/quality_gate.py` gates versions from before the package layout (#60) again. Each checkout's servers and
+  benchmarks run its own module paths (`d1a.serving.serve`, or `d1a.serve` before #166), so it can gate a new main
+  against the Mac mini's pin.
+- `d1a.benchmark` no longer crashes after scoring a suite when an identical-option control (#38) is too long: the
+  first option repeated K times can outgrow the row its question fit in (20 of decision-v2's first 100 on Gemma 4).
+  Such controls are skipped and counted in `identical_options.skipped_overlong`, and the report is written.
+- `d1a.training.calibrate`'s held-out guard places D1A suites (#196). Rows scored on `evals/d1a/<suite>:<partition>` are
+  matched to their partition by its sha256 and role, and the checkpoint's training is read from its
+  `training_config.json` and the sidecar of its `--data` mix (the shapes `d1a.training.train` reads), with `--extra_suites`
+  and the sources it recorded covering. As for frozen suites, a partition the checkpoint trained on is refused, and so is an
+  eval partition (development, test) of a suite whose train partitions it trained on (named SAME CORPUS in the refusal;
+  with `--allow-in-distribution` the fit goes ahead and records it in `temperature_fit.same_corpus`). D1A eval partitions
+  of suites the checkpoint never trained on now pass the guard without `--allow-in-distribution`. Frozen suites keep their
+  rule, now also for the frozen suites a mix replays.
+- `d1a.training.calibrate --judge` judges a fine-tune's refit against the temperature its `--init_from` checkpoint serves
+  (#207). Training writes every run at temperature 1.0, so a refit was compared against an uncalibrated model and passed
+  the rule where it should not. A fine-tune not calibrated since training now takes its init's served temperature as the
+  incumbent, and says so; `--incumbent <run|T>` names another (it needs `--judge`). The incumbent and where it came from
+  are recorded in the checkpoint's `temperature_fit.rule.incumbent`. A run trained from a base model is judged as before.
+- The outcome calibrator (`D1A_OUTCOME_CALIBRATOR`) no longer serves a choice answer whose `confidence` contradicts its
+  recalibrated `probabilities`: the confidence is read off the same probabilities (#195). It also no longer fits or
+  applies a choice calibration to score answers, which carry probabilities by level too.
+  `promote` drops such a choice calibration of a score question from the file it rewrites, so `/v1/feedback`'s
+  `calibrated_questions` lists only what is applied.
+- A calibrator file moved aside (`D1A_OUTCOME_CALIBRATOR`) now stops being applied from the next answer, so a rollback
+  needs no restart. Before, the server kept applying the last one it had loaded. A path that names no file yet serves
+  the model's own answers until promote writes it. Any other error reading the file keeps the last calibrator rather
+  than silently dropping it.
+- The quality gate scores D1A partitions at the serving context. At the training context it skipped every record
+  longer than that, 770 of the 953 PRs in `pr-labels:test`, and reported the short ones only.
+- README: the benchmark example scores `--run runs/d1a-e2b`, where `d1a.train --out runs/d1a-e2b` writes the checkpoint (it named a `checkpoint/` folder that does not exist).
+- `scripts/golden_vectors.py compare` no longer crashes on a one-option question (a choice with one criterion or a
+  one-level score), which has no second-best probability to measure a flip margin against.
+- `d1a.training.calibrate`'s cross-validation report no longer merges records of two D1A partitions that share a line
+  number (`custom/<n>`) into one fold and resampling unit. The fitted temperature never changed; the recorded
+  cross-validation numbers of a pool with two or more rows files can.
+- MLX exports keep where their temperature came from (#196): `scripts/export_mlx.py` now copies `temperature_fit`, and
+  the use-case temperatures with their fits, into the export's `d1a_config.json`.
+
+### Models tested with this release
+
+| Checkpoint | Hugging Face tag |
+|---|---|
+| D1A-E4B v0.6, PyTorch | `JohnP1/d1a-e4b@v0.6` |
+| D1A-E4B v0.6, MLX 8-bit (with photo, voice and video encoders) | `JohnP1/d1a-e4b-mlx-q8@v0.6` |
+| D1A-E4B v0.6, Core ML (text, ≤ 512 tokens) | `JohnP1/d1a-e4b-coreml@v0.6` |
+| D1A-E2B v0.6, PyTorch | `JohnP1/d1a-e2b@v0.6` |
+| D1A-E2B v0.6, MLX 8-bit (with photo, voice and video encoders) | `JohnP1/d1a-e2b-mlx-q8@v0.6` |
+| D1A-E2B v0.6, Core ML (text, ≤ 512 tokens) | `JohnP1/d1a-e2b-coreml@v0.6` |
+
+Package 0.4.0 serves every model tag from v0.1 to v0.6.
+
+### Upgrade notes (from 0.3.0)
+
+- Modules moved into subpackages (`d1a.serving.serve`, `d1a.learning.feedback`, `d1a.core.api`, ...). The old flat paths
+  (`d1a.serve`, `d1a.feedback`, ...) still work in 0.4 and are removed in 0.5: update imports and `python -m` commands.
+- Removed (#65): `python -m d1a.suite` (the suite freezer), the `d1a.data` converters only it read, and
+  `scripts/longdoc_serving.py`; see `docs/removed-tools.md`.
+- `GET /v1/models` lists only `d1a-latest` (#230). Any model name in a request is still answered.
+- `d1a.training.train` refuses a fine-tune whose `--data` mix leaves out a trained source (#211), unless
+  `--allow_missing_sources ... --reason` says why; `d1a.training.calibrate` refuses fit rows the checkpoint trained on.
+- A run's metadata lives in `d1a_config.json` and `head.safetensors` (#64). 0.4 still writes `head.pt` too, so 0.3 can
+  load new runs; 0.5 stops writing it. Reading `head.pt` stays.
+- PyYAML is a new dependency (training recipes).
+- No `D1A_*` variable was renamed; new ones are listed in `docs/CONFIGURATION.md`.
+
 ## [0.3.0] - 2026-10-05
 
 **D1A learns from outcomes.** Every decision can be logged with the model that made it; when the real outcome comes back

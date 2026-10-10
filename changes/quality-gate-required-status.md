@@ -1,9 +1,0 @@
-### Added
-
-- A required `quality-gate` status on pull requests. CI (`.github/workflows/quality-gate.yml`) leaves it pending on a
-  pull request that changes a module the model server loads, or the dependencies (`scripts/gate_required.py`, read
-  from the server's own imports). `scripts/quality_gate.py --post-status` then sets it to the verdict, on the exact
-  commit it tested; it refuses a head checkout with uncommitted changes. Any other pull request gets the status as
-  success, with the reason. A new head starts pending again. It is off by default (the workflow disabled, the check
-  not required) and turned on on demand, for a pull request whose severity calls for it, when the local machine
-  is free to run the gate; AGENTS.md (Quality bar) has the steps.
