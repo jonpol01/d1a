@@ -131,7 +131,8 @@ def validate(data):
 
 
 def path_from_env():
-    p = os.environ.get(ENV)
+    from d1a.core.settings import get
+    p = get(ENV)
     return Path(p) if p else None
 
 

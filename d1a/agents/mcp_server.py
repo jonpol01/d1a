@@ -11,9 +11,10 @@ questions). Each returns D1A's answers with their probabilities and `advice`: th
 import json, os, time, urllib.request
 
 from d1a.agents.presets import PRESETS, USE_CASES, advise, gate_state, judge_state
+from d1a.core.settings import get as setting
 
-URL = os.environ.get("D1A_URL", "http://127.0.0.1:8009").rstrip("/")
-RUN = os.environ.get("D1A_RUN")
+URL = setting("D1A_URL").rstrip("/")
+RUN = setting("D1A_RUN")
 _local = None
 
 

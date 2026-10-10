@@ -27,6 +27,7 @@ Silicon the hybrid Qwen3.5 checkpoints run on MLX by default, elsewhere on torch
 import argparse, asyncio, atexit, hmac, math, os, queue, random, re, subprocess, sys, threading, time, traceback, uuid
 from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
+from d1a.core.settings import get as setting
 from collections import deque
 from concurrent.futures import Future
 import torch
@@ -42,14 +43,14 @@ from d1a.learning.feedback import FeedbackLog, OutcomeCalibrator
 from d1a.serving.media import MEDIA_DIR, MediaEncoder, MediaRequest, OnDemand, with_media
 from d1a.core.encoding import SERVE_MAX_BRANCH, SERVE_MAX_STATE, layout
 
-PREFIX_CACHE_SIZE = int(os.environ.get("D1A_PREFIX_CACHE", "4"))          # states kept (KV + DeltaNet states; attention-only backbones also the state's hidden states); 0 disables
-PREFIX_MIN_TOKENS = os.environ.get("D1A_PREFIX_MIN_TOKENS")               # states shorter than this are not cached; default = the model's prefix_min_tokens (0 for hybrid backbones and MLX, 384 for attention-only torch models)
-PREFIX_MAX_TOKENS = int(os.environ.get("D1A_PREFIX_MAX_TOKENS", "65536"))  # state tokens the cache holds in all (least recently used evicted first); a longer state is not cached.
+PREFIX_CACHE_SIZE = int(setting("D1A_PREFIX_CACHE"))          # states kept (KV + DeltaNet states; attention-only backbones also the state's hidden states); 0 disables
+PREFIX_MIN_TOKENS = setting("D1A_PREFIX_MIN_TOKENS")               # states shorter than this are not cached; default = the model's prefix_min_tokens (0 for hybrid backbones and MLX, 384 for attention-only torch models)
+PREFIX_MAX_TOKENS = int(setting("D1A_PREFIX_MAX_TOKENS"))  # state tokens the cache holds in all (least recently used evicted first); a longer state is not cached.
                                                                          # One 64k state (Kev-27B: ~1.3 GB of keys, values and DeltaNet states), or four 16k ones, not four 64k ones
-DATE_FACTS = os.environ.get("D1A_DATE_FACTS", "0") == "1"
-FEEDBACK_LOG = os.environ.get("D1A_FEEDBACK_LOG")                         # set = log every decision (d1a.learning.feedback) and accept outcomes at POST /v1/feedback
-OUTCOME_CALIBRATOR = os.environ.get("D1A_OUTCOME_CALIBRATOR")             # set = apply this d1a.learning.feedback calibrator to yes/no and choice answers, reloaded when the file changes
-API_KEY = os.environ.get("D1A_API_KEY")                                  # unset = open server; set = require Authorization: Bearer <key>, as the TypeSafe clients always send
+DATE_FACTS = setting("D1A_DATE_FACTS") == "1"
+FEEDBACK_LOG = setting("D1A_FEEDBACK_LOG")                         # set = log every decision (d1a.learning.feedback) and accept outcomes at POST /v1/feedback
+OUTCOME_CALIBRATOR = setting("D1A_OUTCOME_CALIBRATOR")             # set = apply this d1a.learning.feedback calibrator to yes/no and choice answers, reloaded when the file changes
+API_KEY = setting("D1A_API_KEY")                                  # unset = open server; set = require Authorization: Bearer <key>, as the TypeSafe clients always send
 MAX_BATCH = 64                                                           # requests the model thread takes at once (d1a.backends.cuda_graphs splits them to fit its buffers)
 KEEP_ALIVE_S = 75                                                        # idle keep-alive; above Node's pooled-socket reuse window, so a proxy (the playground's Next.js rewrite) never reuses a socket uvicorn just closed (ECONNRESET, #42); uvicorn's default is 5
 MODEL_NAMES = ("d1a-latest",)   # what /v1/models lists; any model name is answered, so a client that sends another name (the TypeSafe SDK default, say) still works
@@ -539,7 +540,15 @@ def main():
     ap.add_argument("--port", type=int, default=8008)
     ap.add_argument("--device", choices=("auto", "cuda", "mps", "cpu"), default="auto", help="accelerator; auto = cuda, then mps, then cpu, skipping one that cannot run a kernel")
     ap.add_argument("--idle-unload", type=int, default=0, help="seconds without a request before the model is dropped from memory and loaded again on the next one; 0 keeps it loaded")
+    ap.add_argument("--show-config", action="store_true", help="print every D1A_* setting in force (secrets masked) and the self-learning file, then exit")
     a = ap.parse_args()
+    if a.show_config:
+        from d1a.core.settings import show
+        from d1a.learning import settings as learning
+        _, error, source = learning.load()
+        print(show(extra=[("self-learning settings", source + (f" (ERROR: {error})" if error else "")),
+                          ("flags", f"--run {a.run} --host {a.host} --port {a.port} --device {a.device} --idle-unload {a.idle_unload}")]))
+        return
     run = a.run if is_hub_id(a.run) or os.path.exists(f"{a.run}/head.pt") or os.path.exists(f"{a.run}/{EXPORT_CONFIG}") else a.fallback
     if run != a.run: print(f"{a.run} not found, falling back to {run}")
     dev = default_device() if a.device == "auto" else a.device

@@ -26,6 +26,7 @@ from d1a.core.encoding import ROW_PASS_TOKENS, ContextOverflow
 from d1a.eval.predictors import LocalPredictor, RemotePredictor, RotationAveraged
 from d1a.eval.suites import resolve
 from d1a.eval.suite import CONTEXT, ENCODING, SERVING_CONTEXT, digest, load_split, read_manifest, record_digest, write_json
+from d1a.core.settings import get as setting
 
 
 # --- rows ---------------------------------------------------------------------------------------------------------------
@@ -346,7 +347,7 @@ def main():
     if a.date_facts:
         records = [{**record, "state": with_date_facts(record["state"])} for record in records]
     if a.remote:
-        predictor = RemotePredictor(a.remote, a.remote_model, os.environ.get("D1A_REMOTE_API_KEY", "local"), concurrency=a.remote_concurrency)
+        predictor = RemotePredictor(a.remote, a.remote_model, setting("D1A_REMOTE_API_KEY"), concurrency=a.remote_concurrency)
     else:
         predictor = LocalPredictor(a.run, a.device, LoadOptions.from_env(), context=context)
     scorer = RotationAveraged(predictor, a.rotations) if a.rotations > 1 else predictor

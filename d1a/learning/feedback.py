@@ -427,7 +427,8 @@ def main(argv=None):
         print(f"wrote {a.out}: {a.run}, {len(m['pr_ids'])} PR ids and {len(m['state_sha256'])} states from {len(m['mixes'])} mixes"
               + ("" if m["complete"] else f"; INCOMPLETE, replay will refuse it: not found {m['missing_mixes']}")); return
     if a.cmd in ("replay", "tick"):
-        key = os.environ.get("D1A_API_KEY")
+        from d1a.core.settings import get as setting
+        key = setting("D1A_API_KEY")
         if a.cmd == "tick":
             print(json.dumps(loop.tick(a.log, a.calibrator, a.server, a.run, a.trained_dir, api_key=key), default=str)); return
         st, err, _ = S.load(); r = st["replay"]

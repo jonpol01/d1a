@@ -24,6 +24,10 @@ default unless this page names a reason to change it.
 curl -s 127.0.0.1:8009/v1/models | python -m json.tool
 ```
 
+Before starting a server, `python -m d1a.serving.serve --show-config` prints every `D1A_*` setting with its value,
+whether it was set or is the default, and the module that reads it (secrets masked), plus where the self-learning
+settings come from. The list lives in `d1a/core/settings.py`; every module reads its settings through it.
+
 ## I want to ...
 
 | Goal | Setting |
@@ -52,6 +56,7 @@ and `--extra mcp` for the MCP server.
 | `--port` | `8008` | The port. The docs and the playground use 8009. |
 | `--device` | `auto` | `auto` tries cuda, then mps, then cpu, and skips a device whose test kernel fails. Name a device to insist on it. |
 | `--idle-unload` | `0` | Seconds without a request before the model is dropped from memory; the next request reloads it. `0` keeps it loaded. |
+| `--show-config` | off | Prints the settings in force (above) and exits without loading a model. |
 
 | Variable | Default | What it does | When to change it |
 |---|---|---|---|

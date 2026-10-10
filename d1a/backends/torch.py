@@ -13,6 +13,7 @@ layers cannot honour the mask, always use them); and, when serving, the state ru
 continue from (probs_and_prefix, probs_with_prefix).
 """
 import copy, os
+from d1a.core.settings import get as setting
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -148,7 +149,7 @@ class DecisionModel(nn.Module):
     def hidden(self, enc):
         return self.hidden_batch([enc])[0, : len(enc["ids"])]
 
-    SHAPE_BUCKET = int(os.environ.get("D1A_SHAPE_BUCKET", "64"))   # MPS: pad sequences to a multiple of this (kernels warm per shape); 1 disables
+    SHAPE_BUCKET = int(setting("D1A_SHAPE_BUCKET"))   # MPS: pad sequences to a multiple of this (kernels warm per shape); 1 disables
 
     def _pad_rows(self, rows):
         """(ids, pos) token rows right-padded to [N, L] id and position tensors, with an [N, L] attention mask (1: a real
