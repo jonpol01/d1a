@@ -34,19 +34,48 @@ def raised(probabilities, top, flag):
     return top in flag["options"] or group_p(probabilities, flag["options"]) >= flag["t"]
 
 
-def annotate(answers, raw_answers, flags, run):
-    """The served answers with each configured flag added inside its question's answer as
-    answers[q]["flags"][name] = {"on", "p", "t", "space"}, read on raw_answers (the answers before the outcome calibrator)
-    and only for flags fitted for `run`. Nothing else in an answer changes; with no flag that applies, `answers` is
-    returned as it came."""
+def compute(raw_answers, flags, run):
+    """{question: {name: {"on", "p", "t", "space"}}} for the flags in `flags` that apply: fitted for `run`, in the raw
+    space, on a choice question these answers hold. Read on raw_answers, the answers before the outcome calibrator."""
+    out = {}
     for name, f in (flags or {}).items():
         raw = raw_answers.get(f["question"])
-        if f["run"] != run or f["space"] != "raw" or raw is None or raw.get("type") != "choice" or f["question"] not in answers:
+        if f["run"] != run or f["space"] != "raw" or raw is None or raw.get("type") != "choice":
             continue
         p = group_p(raw["probabilities"], f["options"])
-        answers[f["question"]].setdefault("flags", {})[name] = {"on": raised(raw["probabilities"], raw["choice"], f),
-                                                                 "p": round(p, 4), "t": f["t"], "space": "raw"}
+        out.setdefault(f["question"], {})[name] = {"on": raised(raw["probabilities"], raw["choice"], f), "p": round(p, 4),
+                                                   "t": f["t"], "space": "raw"}
+    return out
+
+
+def attach(answers, computed):
+    """The answers with each question's flags added as answers[q]["flags"]; nothing else in an answer changes."""
+    for q, fl in computed.items():
+        if q in answers: answers[q].setdefault("flags", {}).update(fl)
     return answers
+
+
+def annotate(answers, raw_answers, flags, run):
+    """attach(answers, compute(raw_answers, flags, run)): with no flag that applies, `answers` is returned as it came."""
+    return attach(answers, compute(raw_answers, flags, run))
+
+
+class Configured:
+    """The flags in force for a server: d1a.learning.settings' "flags" (the file D1A_LEARNING names), re-read when the
+    file changes, so a fitted flag is served or withdrawn without a restart. No file, or no flags: none."""
+
+    def __init__(self, path=None):
+        from d1a.learning import settings
+        self._settings, self.path = settings, (path or settings.path_from_env())
+        self._mtime, self._flags = None, {}
+
+    def current(self):
+        if self.path is None: return {}
+        try: mtime = self.path.stat().st_mtime
+        except OSError: return {}
+        if mtime != self._mtime:
+            self._flags, self._mtime = self._settings.load(self.path)[0].get("flags") or {}, mtime
+        return self._flags
 
 
 def _rows(rows, question):
