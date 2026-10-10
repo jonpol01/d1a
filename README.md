@@ -146,6 +146,7 @@ Recalibration on outcomes works at once and needs no restart. Small retraining r
 | D1A-E2B for Apple Silicon (MLX, 8-bit) | [JohnP1/d1a-e2b-mlx-q8](https://huggingface.co/JohnP1/d1a-e2b-mlx-q8) `v0.2` (3.0 GB in memory) |
 | D1A-E4B v0.6 (Gemma 4 E4B: v0.5 refreshed on pull requests newer than all earlier training, plus long documents and routing) | [JohnP1/d1a-e4b](https://huggingface.co/JohnP1/d1a-e4b) `v0.6`: on 487 PRs newer than all its training, severity 79% (v0.5: 75%) and change type 91% (87%). Released as an explicit exception to the release rules: against v0.5 it loses 2.7 points on hard decisions and 4.1 on the older PR test set's change type (#197, #198), so pin `v0.5` for those. `v0.4`, `v0.3`, `v0.2` (Kev's later stages + Japanese + agent routing) and `v0.1` stay available |
 | D1A-E4B for Apple Silicon (MLX, 8-bit) | [JohnP1/d1a-e4b-mlx-q8](https://huggingface.co/JohnP1/d1a-e4b-mlx-q8) `v0.6` (~6 GB, plus 1 GB of photo, voice and video encoders; what the Mac mini playground serves) |
+| D1A-E4B for the Apple Neural Engine (Core ML, int8) | `JohnP1/d1a-e4b-coreml` `v0.6`, a private preview: text only, inputs up to 512 tokens ([Apple Neural Engine (Core ML)](#apple-neural-engine-core-ml)) |
 | Live demos of twelve use cases (two from a photo or a voice note, one labeling pull requests) | [jonpol01/d1a-playground](https://github.com/jonpol01/d1a-playground) |
 | Thin clients (Python, JS) | [`clients/`](clients) |
 
@@ -283,6 +284,39 @@ Parity is measured against golden vectors from the fp32 PyTorch path (`scripts/g
 The 4-bit export keeps the accuracy but moves individual probabilities too far to stand in for the fp32 model (8% of the answers change), so it is not published. The error comes from the linear layers: with them in bf16 and both embeddings at 4 bits the maximum is 0.089. The mixed export (8-bit linear layers and token embeddings, 4-bit per-layer embeddings, which are half of E2B's weights) stays close to bf16. Process footprint on the M1 Max: 3.1 GB after loading the 4-bit export and 4.2 GB for the mixed one, about 1 GB more after serving, and a 60-question request peaks at 5.3 / 6.4 GB; a 6-question request takes about 0.4 s and a 60-question one about 4.5 s with either.
 
 Gemma 4's per-layer embeddings are read from the weight files per request instead of held in memory (each request needs only its own tokens' rows): the 8-bit E2B export uses 2.96 GB after loading instead of 4.22 GB, E4B 5.37 GB instead of 6.88 GB, with bit-identical probabilities and no slower (the lookup adds about 0.25 ms per pass). `D1A_PLE_FLASH=0` keeps them in memory.
+
+### Apple Neural Engine (Core ML)
+
+D1A also runs on the Apple Neural Engine through Core ML, for on-device use on iPhone and iPad (#224):
+- The text model is converted in chunks of 6 or 7 layers (7 chunks for E4B), with int8 weights (per block of 64).
+- The embedding tables stay on the host as row lookups.
+- Each chunk runs in its own process.
+
+On the Macs it gives the same answers as the full-precision model on every clear-cut question, but it is slower than MLX
+on the GPU. So the Mac mini keeps MLX, and Core ML is for iOS. The on-device model will be E2B v0.6 with the photo,
+voice and video encoders (#229). The Core ML builds are private previews until then.
+
+| | E2B · MLX | E2B · Core ML | E4B · MLX | E4B · Core ML |
+|---|---|---|---|---|
+| Status | v0.6 planned; v0.2.1 released | v0.6 planned; a v0.2.1 text pilot passed | **v0.6 released** | **v0.6 private preview** |
+| Repository | [JohnP1/d1a-e2b-mlx-q8](https://huggingface.co/JohnP1/d1a-e2b-mlx-q8) | `JohnP1/d1a-e2b-coreml` (private) | [JohnP1/d1a-e4b-mlx-q8](https://huggingface.co/JohnP1/d1a-e4b-mlx-q8) | `JohnP1/d1a-e4b-coreml` (private) |
+| Runs on | Mac GPU | Neural Engine: iPhone, iPad, Mac | Mac GPU | Neural Engine (tested on Macs only) |
+| Text | yes | yes | yes | yes |
+| Photo | yes | planned for v0.6 | yes | not yet |
+| Voice | yes | planned for v0.6 | yes | not yet |
+| Video (16 frames, no sound) | yes | planned for v0.6 | yes | not yet |
+| Input length | long documents | ≤ 512 tokens | long documents (trained up to 5,120 tokens) | ≤ 512 tokens |
+| Questions | yes/no, choice, score, with a calibrated probability for each option | same | same | same |
+| Languages | questions in English; documents in English or Japanese | same | same | same |
+| PR labeling (v0.3–v0.6 skills) | arrives with v0.6 | arrives with v0.6 (PRs ≤ 512 tokens) | yes | yes, for PRs that fit in 512 tokens |
+| API | System One API (`d1a.serving.serve`), with `/v1/systemone/media` | Python reference only; no iOS app yet | System One API, served on the Mac mini | Python reference only (one process per chunk) |
+| Download size | 3.8 GB + 1.0 GB media | not built | 6.6 GB + 1.0 GB media | 6.1 GB (3.9 GB chunks + 2.1 GB embeddings) |
+| Text speed (median) | ~0.4 s per 6-question request, M1 Max | pilot: ~0.95 s at 512 tokens, M4 | 0.63 s M4, 0.8 s M1 Max ¹ | 1.8 s M4, 2.9 s M1 Max ¹; load 52 s / 106 s |
+| Media speed (median, M1 Max, v0.2.1) | photo 0.57 s, voice 0.19 s, video 1.94 s | not built | not measured | not built |
+| Answer changes vs full precision | 5 of 274 (v0.2) | pilot: 0 clear-cut | 0 of 38 clear-cut ¹ | 0 of 38 clear-cut ¹ |
+
+¹ The same 28 real requests (42 questions, all ≤ 512 tokens), against the fp32 PyTorch build of v0.6. "Clear-cut"
+means the reference's top answer leads by more than 0.05.
 
 ## Training
 
