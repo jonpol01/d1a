@@ -1,5 +1,5 @@
 # Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); lists only d1a-latest and answers any model name; model cards name D1A; serves MLX export folders; --device with a GPU usability probe; a startup self-check of the readout and a warning when serving an uncalibrated checkpoint; recent batch latency in /v1/models; a 75 s keep-alive for proxies in front of it; --idle-unload; photos and voice clips through the same model (POST /v1/systemone/media); prefix cache keyed by state ids only (option isolation removed); self-learning hooks (decision log, POST /v1/feedback, outcome calibrator, the x-d1a-decision-log: off request header); GET /metrics; PrefixCache.make_room ported from later upstream Kev (1d77363).
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); lists only d1a-latest and answers any model name; model cards name D1A; serves MLX export folders; --device with a GPU usability probe; a startup self-check of the readout and a warning when serving an uncalibrated checkpoint; recent batch latency in /v1/models; a 75 s keep-alive for proxies in front of it; --idle-unload; photos and voice clips through the same model (POST /v1/systemone/media); prefix cache keyed by state ids only (option isolation removed); self-learning hooks (decision log, POST /v1/feedback, outcome calibrator, the x-d1a-decision-log: off and x-d1a-replay-of request headers); GET /metrics; PrefixCache.make_room ported from later upstream Kev (1d77363).
 """FastAPI sidecar for the playground: loads one checkpoint, exposes prefill-only decisions.
 
 Run: uv run --extra serve python -m d1a.serving.serve --run runs/d1a --port 8008
@@ -24,7 +24,7 @@ batches, queue depth, batch latency, prefix cache, memory). D1A_PREFIX_CACHE / D
 date preprocessing (api.with_date_facts). Backend and precision follow LoadOptions (D1A_BACKEND, D1A_DTYPE, ...): on Apple
 Silicon the hybrid Qwen3.5 checkpoints run on MLX by default, elsewhere on torch in bf16.
 """
-import argparse, asyncio, atexit, hmac, math, os, queue, random, subprocess, sys, threading, time, traceback, uuid
+import argparse, asyncio, atexit, hmac, math, os, queue, random, re, subprocess, sys, threading, time, traceback, uuid
 from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 from collections import deque
@@ -294,8 +294,9 @@ class Learning:
         served = cal.at(temperature, own).apply(answers) if cal is not None else answers
         if self.log is None or not log: return served, None
         questions = {qid: q.model_dump(exclude_none=True) for qid, q in req.questions.items()}
+        replay_of = log.get("replay_of") if isinstance(log, dict) else None   # d1a.learning.loop.replay re-scoring an earlier decision
         with self._lock: did = self.log.decision(req.state, questions, answers, run=run, meta={"served": served} if served is not answers else None,
-                                                 use_case=req.use_case, temperature=temperature)
+                                                 use_case=req.use_case, temperature=temperature, replay_of=replay_of)
         return served, did
 
     def outcome(self, did, labels, meta=None):
@@ -309,10 +310,17 @@ class Learning:
 
 LEARNING = Learning(FEEDBACK_LOG, OUTCOME_CALIBRATOR)
 LOG_HEADER = "x-d1a-decision-log"   # "off": answer, but keep the decision out of the log (a demo, a smoke test: no outcome follows)
+REPLAY_HEADER = "x-d1a-replay-of"   # <decision id>: d1a.learning.loop.replay re-scoring that decision with the model served now
+DECISION_ID = re.compile(r"^[0-9a-f]{32}$")
 
 
 def logged(request):
-    return request.headers.get(LOG_HEADER, "").strip().lower() != "off"
+    """False when the request asks to stay out of the log; {"replay_of": id} for a replay; else True."""
+    if request.headers.get(LOG_HEADER, "").strip().lower() == "off": return False
+    replay_of = request.headers.get(REPLAY_HEADER, "").strip().lower()
+    if not replay_of: return True
+    if not DECISION_ID.match(replay_of): raise HTTPException(422, f"{REPLAY_HEADER} must be a 32-character hex decision id")
+    return {"replay_of": replay_of}
 
 
 def latency_summary(ms):
@@ -412,7 +420,7 @@ def systemone_permute(r: PermuteSystemOne, request: Request):
             order = list(keys)
             if i > 0: rng.shuffle(order)
             one = r.request.model_copy(update={"questions": {r.question: q.model_copy(update={"criteria": {k: q.criteria[k] for k in order}})}})
-            resp = s.answer(one, logged(request)); a = resp["answers"][r.question]
+            resp = s.answer(one, logged(request) is not False); a = resp["answers"][r.question]   # a replay comes through /v1/systemone only
             runs.append({"order": order, "probabilities": a["probabilities"], "choice": a["choice"], "latency_ms": resp["latency_ms"]})
     spread = {k: max(x["probabilities"][k] for x in runs) - min(x["probabilities"][k] for x in runs) for k in keys}
     return {"runs": runs, "argmax_stable": len({x["choice"] for x in runs}) == 1, "spread": spread}
@@ -422,7 +430,7 @@ def systemone_permute(r: PermuteSystemOne, request: Request):
 def systemone_separate(req: SystemOneRequest, request: Request):
     """Answer each question in its own request against the same state (N passes). For packed-vs-separate comparison."""
     with server() as s:
-        parts = [s.answer(req.model_copy(update={"questions": {qid: q}}), logged(request)) for qid, q in req.questions.items()]
+        parts = [s.answer(req.model_copy(update={"questions": {qid: q}}), logged(request) is not False) for qid, q in req.questions.items()]
         answers = {qid: a for p in parts for qid, a in p["answers"].items()}
         out_tokens = output_tokens(s.tok, answers)
     return {"model": req.model, "answers": answers,

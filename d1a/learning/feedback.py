@@ -34,6 +34,7 @@ import hashlib
 import json
 import math
 import os
+import sys
 import time
 import uuid
 from pathlib import Path
@@ -71,14 +72,16 @@ class FeedbackLog:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with open(self.path, "a", encoding="utf-8") as f: f.write(json.dumps(event) + "\n")
 
-    def decision(self, state, questions, answers, run, meta=None, use_case=None, temperature=None):
+    def decision(self, state, questions, answers, run, meta=None, use_case=None, temperature=None, replay_of=None):
         """Record a decision as it was made: the request, the answers and the model `run` (repo@tag), and, when known, the
         request's use case and the temperature its probabilities were read at (a checkpoint's use-case temperature moves
-        them without changing `run`, #209). -> its id."""
+        them without changing `run`, #209). `replay_of`: the id of an earlier decision this one re-scores with the model
+        now served (replay()); it takes that decision's outcomes and never gets its own. -> its id."""
         did = uuid.uuid4().hex
         self._append({"kind": "decision", "id": did, "ts": time.time(), "run": run, "state": state, "questions": questions,
                       "answers": answers, "meta": meta or {}, **({"use_case": use_case} if use_case is not None else {}),
-                      **({"temperature": temperature} if temperature is not None else {})})
+                      **({"temperature": temperature} if temperature is not None else {}),
+                      **({"replay_of": replay_of} if replay_of else {})})
         return did
 
     def outcome(self, did, labels, meta=None):
@@ -89,29 +92,37 @@ class FeedbackLog:
         if not self.path.exists(): return []
         return [json.loads(l) for l in self.path.read_text(encoding="utf-8").splitlines() if l.strip()]
 
-    def resolved(self, src=None, run=None):
+    def resolved(self, src=None, run=None, events=None):
         """Decisions with an outcome, oldest first. Each question's label comes from the outcomes of the most trusted source
-        (PREFER), the latest of them; `src` keeps only outcomes from that source. label_src says where each label came from.
-        `run` keeps only the decisions that model made (repo@tag, as logged): a calibrator corrects one model's
-        probabilities, and fitted across a model switch it would correct the new model by the old one's errors."""
-        decisions, outcomes = {}, {}
-        for e in self.events():
+        (PREFER), the latest of them; `src` (a source, or a list of them) keeps only outcomes from those sources. label_src
+        says where each label came from. `run` keeps only the decisions that model made (repo@tag, as logged): a calibrator
+        corrects one model's probabilities, and fitted across a model switch it would correct the new model by the old one's
+        errors. A replay (a decision with replay_of, see replay()) takes the outcomes of the decision it re-scores, and
+        says which model made that one in replayed_from."""
+        srcs = None if src is None else {src} if isinstance(src, str) else set(src)
+        events = self.events() if events is None else events
+        decisions, outcomes, runs = {}, {}, {}
+        for e in events:
             if e["kind"] == "decision":
+                runs[e["id"]] = e.get("run")
                 if run is None or e.get("run") == run: decisions[e["id"]] = e
-            elif src is None or e.get("meta", {}).get("src") == src: outcomes.setdefault(e["id"], []).append(e)
+            elif srcs is None or e.get("meta", {}).get("src") in srcs: outcomes.setdefault(e["id"], []).append(e)
         out = []
         for i, d in decisions.items():
-            if i not in outcomes: continue
+            own = outcomes.get(d.get("replay_of") or i)
+            if not own: continue
             labels, label_src = {}, {}
-            for o in sorted(outcomes[i], key=lambda o: (o.get("meta", {}).get("src") in PREFER, o["ts"])):   # trusted and latest last
+            for o in sorted(own, key=lambda o: (o.get("meta", {}).get("src") in PREFER, o["ts"])):   # trusted and latest last
                 for qid, label in o["labels"].items(): labels[qid], label_src[qid] = label, o.get("meta", {}).get("src")
-            group = next((o["meta"]["group"] for o in reversed(outcomes[i]) if o.get("meta", {}).get("group")), None)
-            out.append({**d, "labels": labels, "label_src": label_src, "group": group, "outcome_ts": max(o["ts"] for o in outcomes[i])})
+            group = next((o["meta"]["group"] for o in reversed(own) if o.get("meta", {}).get("group")), None)
+            extra = {"replayed_from": runs.get(d["replay_of"])} if d.get("replay_of") else {}
+            out.append({**d, "labels": labels, "label_src": label_src, "group": group, "outcome_ts": max(o["ts"] for o in own), **extra})
         return out
 
     def pending(self):
+        """Decisions still waiting for an outcome. Replays never are: they take their original's outcomes."""
         done = {e["id"] for e in self.events() if e["kind"] == "outcome"}
-        return [e for e in self.events() if e["kind"] == "decision" and e["id"] not in done]
+        return [e for e in self.events() if e["kind"] == "decision" and e["id"] not in done and not e.get("replay_of")]
 
 
 def records(resolved, src="feedback"):
@@ -274,17 +285,17 @@ def choice_log_loss(probs, labels):
     return -np.log(np.clip([pr.get(label, 0.0) for pr, label in zip(probs, labels)], EPS, 1))
 
 
-def gate(y, p_candidate, p_incumbent, groups=None, suite_deltas=None, tolerance=0.01, n=2000, seed=0):
-    """Promote the candidate only if its mean log loss on held-out outcomes is lower with a 95% bootstrap interval (over
+def gate(y, p_candidate, p_incumbent, groups=None, suite_deltas=None, tolerance=0.01, n=2000, seed=0, level=0.95):
+    """Promote the candidate only if its mean log loss on held-out outcomes is lower with a `level` bootstrap interval (over
     `groups`, e.g. repositories, else over items) entirely below zero, and no frozen suite's accuracy dropped by more
     than `tolerance` (suite_deltas: {suite: candidate minus incumbent accuracy}). -> {"promote": bool, ...}"""
-    return _gate(log_loss(y, p_candidate) - log_loss(y, p_incumbent), groups, suite_deltas, tolerance, n, seed)
+    return _gate(log_loss(y, p_candidate) - log_loss(y, p_incumbent), groups, suite_deltas, tolerance, n, seed, level)
 
 
-def gate_choice(labels, probs_candidate, probs_incumbent, groups=None, suite_deltas=None, tolerance=0.01, n=2000, seed=0):
+def gate_choice(labels, probs_candidate, probs_incumbent, groups=None, suite_deltas=None, tolerance=0.01, n=2000, seed=0, level=0.95):
     """gate() for a choice question: the same rule on the multi-class log loss ({option: probability} per item)."""
     d = choice_log_loss(probs_candidate, labels) - choice_log_loss(probs_incumbent, labels)
-    return _gate(d, groups, suite_deltas, tolerance, n, seed)
+    return _gate(d, groups, suite_deltas, tolerance, n, seed, level)
 
 
 def held_out(group, share=0.3):
@@ -300,7 +311,7 @@ def split(resolved, share=0.3):
     return [d for d in resolved if not held_out(_group(d), share)], [d for d in resolved if held_out(_group(d), share)]
 
 
-def promote(resolved, current=None, share=0.3, min_outcomes=20, **gate_kw):
+def promote(resolved, current=None, share=0.3, min_outcomes=20, questions=None, **gate_kw):
     """The promotion gate run on a live log, separately for each temperature the decisions were read at (fitted across
     two, a calibrator would correct answers read at one by the errors of answers read at the other). Each decision's group
     (its outcome's meta["group"], else the decision itself) goes to the fit or the held-out side by held_out(); a
@@ -309,6 +320,10 @@ def promote(resolved, current=None, share=0.3, min_outcomes=20, **gate_kw):
     -> (the calibrator to serve, {question: report}, a question at a logged temperature T reported as "question@T");
     questions that fail keep the current parameters."""
     current = current or OutcomeCalibrator()
+    if questions is not None:   # only these learn: the other questions' labels are left out of the fit and the gate
+        keep = set(questions)
+        resolved = [{**d, "labels": {q: v for q, v in d["labels"].items() if q in keep}} for d in resolved]
+        resolved = [d for d in resolved if d["labels"]]
     out = OutcomeCalibrator(current.params, {t: OutcomeCalibrator(c.params) for t, c in current.temperatures.items()})
     report = {}
     for t, rows in sorted(_by_temperature(resolved).items(), key=lambda kv: (kv[0] is not None, kv[0] or 0)):
@@ -341,20 +356,33 @@ def _promote(resolved, current, share, min_outcomes, **gate_kw):
             g = gate(y, [cand.p(qid, x) for x in p], [current.p(qid, x) for x in p], [_group(d) for d in rows], **gate_kw) if rows else None
         ok = bool(g and g["promote"])
         if ok: out.params[qid] = params
-        report[qid] = {"promote": ok, "fit": len(fit), "held_out": len(rows), **({k: g[k] for k in ("delta_log_loss", "ci", "reasons")} if g else {"reasons": ["no held-out outcomes"]})}
+        replayed = sum(1 for d in rows if d.get("replay_of"))
+        report[qid] = {"promote": ok, "fit": len(fit), "held_out": len(rows), "held_out_replayed": replayed,
+                       **({k: g[k] for k in ("delta_log_loss", "ci", "level", "mde", "reasons")} if g else {"reasons": ["no held-out outcomes"]})}
     return out.params, report
 
 
-def _gate(d, groups, suite_deltas, tolerance, n, seed):
+def _gate(d, groups, suite_deltas, tolerance, n, seed, level=0.95):
     groups = np.arange(len(d)) if groups is None else np.asarray(groups)
     keys = np.unique(groups); idx = {g: np.flatnonzero(groups == g) for g in keys}; rng = np.random.default_rng(seed)
     boots = np.sort([d[np.concatenate([idx[g] for g in rng.choice(keys, len(keys))])].mean() for _ in range(n)])
-    lo, hi = float(boots[int(0.025 * n)]), float(boots[int(0.975 * n) - 1])
+    tail = (1 - level) / 2
+    lo, hi = float(boots[int(tail * n)]), float(boots[int((1 - tail) * n) - 1])
     regressions = {s: v for s, v in (suite_deltas or {}).items() if v < -tolerance}
     reasons = []
-    if hi >= 0: reasons.append(f"log loss not clearly lower (delta {d.mean():+.4f}, 95% CI [{lo:+.4f}, {hi:+.4f}])")
+    if hi >= 0: reasons.append(f"log loss not clearly lower (delta {d.mean():+.4f}, {level:.0%} CI [{lo:+.4f}, {hi:+.4f}])")
     if regressions: reasons.append("frozen suites regressed: " + ", ".join(f"{s} {v:+.3f}" for s, v in regressions.items()))
-    return {"promote": not reasons, "delta_log_loss": float(d.mean()), "ci": [lo, hi], "regressions": regressions, "reasons": reasons}
+    return {"promote": not reasons, "delta_log_loss": float(d.mean()), "ci": [lo, hi], "level": level, "regressions": regressions,
+            "reasons": reasons, "mde": mde(float(boots.std()), level), "groups": int(len(keys))}
+
+
+def mde(se, level=0.95, power=0.8):
+    """The smallest true drop in log loss this held-out set detects with probability `power` at the gate's interval
+    `level`: (z of the interval + z of the power) x the bootstrap standard error. A |delta| well below it is noise, not
+    evidence either way, so it says how far a question is from deciding anything."""
+    from statistics import NormalDist
+    z = NormalDist().inv_cdf
+    return float((z(1 - (1 - level) / 2) + z(power)) * se)
 
 
 def main(argv=None):
@@ -364,11 +392,39 @@ def main(argv=None):
     c = sub.add_parser("calibrate"); c.add_argument("log"); c.add_argument("--out", required=True); c.add_argument("--min-outcomes", type=int, default=20)
     pr = sub.add_parser("promote", help="fit on part of the log, gate on the rest, and update the served calibrator only where it passes")
     pr.add_argument("log"); pr.add_argument("--calibrator", required=True, help="the file d1a.serving.serve's D1A_OUTCOME_CALIBRATOR reads")
-    pr.add_argument("--min-outcomes", type=int, default=20); pr.add_argument("--held-out", type=float, default=0.3)
+    pr.add_argument("--min-outcomes", type=int, help="default: the settings file's promotion.min_outcomes (20)")
+    pr.add_argument("--held-out", type=float, help="default: the settings file's promotion.held_out (0.3)")
+    cf = sub.add_parser("config", help="the self-learning settings file ($D1A_LEARNING): init, show, set key=value ..., validate")
+    cf.add_argument("action", choices=("init", "show", "set", "validate")); cf.add_argument("assignments", nargs="*", help="section.key=value (set)")
+    cf.add_argument("--file", help="the settings file (default: $D1A_LEARNING)")
+    tr = sub.add_parser("trained", help="the trained manifest of a model: every PR id and state hash in the mixes of its lineage")
+    tr.add_argument("--mix", action="append", required=True, help="a training mix (JSONL), once per stage of the model's lineage")
+    tr.add_argument("--run", required=True, help="the model these mixes trained, repo@tag as the server reports it"); tr.add_argument("--out", required=True)
+    rp = sub.add_parser("replay", help="re-score earlier models' decisions that have outcomes with the model the server runs (fail closed)")
+    rp.add_argument("log"); rp.add_argument("--server", required=True); rp.add_argument("--trained", help="the served model's trained manifest")
+    rp.add_argument("--cap", type=int); rp.add_argument("--pause", type=float)
+    tk = sub.add_parser("tick", help="one run of the loop: replay on a model change, the gate when due, a report line, notifications")
+    tk.add_argument("log"); tk.add_argument("--calibrator", required=True); tk.add_argument("--server", help="the live server (its /v1/models names the served run)")
+    tk.add_argument("--run", help="the served run when no --server"); tk.add_argument("--trained-dir", help="the folder of trained manifests (<repo>__<name>@<tag>.json)")
     for x in (s, r, c, pr):
         x.add_argument("--src", help="only outcomes from this source (meta src, e.g. human or reviewer)")
         x.add_argument("--run", help="only decisions this model made (repo@tag, as the log records it; the served model's for promote)")
     a = ap.parse_args(argv)
+    from d1a.learning import loop, settings as S
+    if a.cmd == "config": return _config(a, S)
+    if a.cmd == "trained":
+        m = loop.build_manifest(a.mix, a.run); Path(a.out).write_text(json.dumps(m) + "\n", encoding="utf-8")
+        print(f"wrote {a.out}: {a.run}, {len(m['pr_ids'])} PR ids and {len(m['state_sha256'])} states from {len(m['mixes'])} mixes"); return
+    if a.cmd in ("replay", "tick"):
+        key = os.environ.get("D1A_API_KEY")
+        if a.cmd == "tick":
+            print(json.dumps(loop.tick(a.log, a.calibrator, a.server, a.run, a.trained_dir, api_key=key), default=str)); return
+        st, err, _ = S.load(); r = st["replay"]
+        if err: print(f"settings: {err}; using the last valid ones", file=sys.stderr)
+        try: rep = loop.replay(FeedbackLog(a.log), a.server, a.trained, a.cap or r["per_tick_cap"], r["pause_s"] if a.pause is None else a.pause,
+                               r["exclude_no_pr_id"], st["outcomes"]["sources"], key)
+        except loop.ReplayRefused as e: sys.exit(f"replay refused: {e}")
+        print(json.dumps(rep)); return
     log = FeedbackLog(a.log); res = log.resolved(a.src, a.run)
     if a.cmd == "status":
         print(f"{len(res)} resolved, {len(log.pending())} pending decisions")
@@ -382,9 +438,14 @@ def main(argv=None):
         recs = records(res, a.src or "feedback"); Path(a.out).write_text("".join(json.dumps(x) + "\n" for x in recs), encoding="utf-8")
         print(f"wrote {len(recs)} labelled requests to {a.out}")
     elif a.cmd == "promote":
+        st, err, _ = S.load(); p = st["promotion"]
+        if err: print(f"settings: {err}; using the last valid ones", file=sys.stderr)
         path = Path(a.calibrator); current = OutcomeCalibrator.load(path) if path.exists() else None
-        cal, report = promote(res, current, a.held_out, a.min_outcomes)
-        if any(r["promote"] or r.get("dropped") for r in report.values()):   # written whole and renamed into place: the server never reads half a file
+        cal, report = promote(res, current, p["held_out"] if a.held_out is None else a.held_out,
+                              p["min_outcomes"] if a.min_outcomes is None else a.min_outcomes, p["questions"],
+                              tolerance=p["tolerance"], n=p["bootstrap"], level=p["ci_level"])
+        if not p["auto"]: report = {q: {**r, "not_written": "promotion.auto is false"} for q, r in report.items()}
+        if p["auto"] and any(r["promote"] or r.get("dropped") for r in report.values()):   # written whole and renamed into place: the server never reads half a file
             tmp = path.with_name(path.name + ".tmp"); cal.save(tmp); os.replace(tmp, path)
         print(json.dumps({"promoted": sorted(q for q, r in report.items() if r["promote"]), "report": report}))
     else:
@@ -392,6 +453,32 @@ def main(argv=None):
         entries = [(q, v) for q, v in cal.params.items()] + [(f"{q}@{t!r}", v) for t, c in sorted(cal.temperatures.items()) for q, v in c.params.items()]
         print(f"wrote {a.out}: " + ", ".join(f"{q} s={v['s']:.3f} (n={v['n']})" if isinstance(v, dict) else f"{q} a={v[0]:.3f} b={v[1]:+.3f} (n={v[2]})"
                                              for q, v in entries))
+
+
+
+def _config(a, S):
+    path = Path(a.file) if a.file else S.path_from_env()
+    if a.action == "show":
+        st, err, source = S.load(path)
+        print(f"# from: {source}" + (f"\n# ERROR in the file: {err}" if err else ""))
+        print(json.dumps(st, indent=2, ensure_ascii=False))
+        for e in S.audit(path, 10) if path else []: print(f"# {time.strftime('%Y-%m-%d %H:%M', time.localtime(e['ts']))} {e['source']}: {e['key']} {e['old']!r} -> {e['new']!r}")
+        return
+    if path is None: sys.exit("no settings file: set D1A_LEARNING=<path> or pass --file")
+    try:
+        if a.action == "init": S.init(path); print(f"wrote {path} with the defaults")
+        elif a.action == "validate":
+            S.validate(json.loads(path.read_text(encoding="utf-8"))); print(f"{path}: valid")
+        else:
+            pairs = {}
+            for x in a.assignments:
+                k, eq, v = x.partition("=")
+                if not eq: sys.exit(f"{x}: expected section.key=value")
+                pairs[k.strip()] = S.parse_value(v.strip())
+            if not pairs: sys.exit("nothing to set: pass section.key=value ...")
+            for k, old, new in S.set_values(path, pairs, "cli"): print(f"{k}: {old!r} -> {new!r}")
+    except (S.SettingsError, json.JSONDecodeError, OSError) as e:
+        sys.exit(f"refused: {e}")
 
 
 if __name__ == "__main__":
