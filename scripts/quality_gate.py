@@ -13,7 +13,7 @@ accuracy drops or whose calibration (ECE, NLL) gets worse. Exit 0 PASS, 1 FAIL, 
     python scripts/quality_gate.py --base 0c601b2a --head origin/main --playground ../d1a-playground \\
         --suites v7/decision-v7,pr-labels:development --suite-run JohnP1/d1a-e2b@v0.2
     python scripts/quality_gate.py --base origin/main --head <pr branch> --post-status     # sets the PR's required check
-    python scripts/quality_gate.py --base origin/main --head origin/main --run JohnP1/d1a-e4b-mlx-q8@v0.5 \
+    python scripts/quality_gate.py --base origin/main --head origin/main --run JohnP1/d1a-e4b-mlx-q8@v0.6 \
         --head-run <new checkpoint> --card-suites --playground ../d1a-playground    # a new checkpoint against the served one
     python scripts/quality_gate.py --base <old pin> --head <new pin> --playground . --post-status jonpol01/d1a-playground@<pr head>
     python scripts/quality_gate.py --base origin/main --head <pr branch> --playground ../d1a-playground --use-case routing
@@ -420,7 +420,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--base", required=True, help="git ref or directory of the version to compare against")
     ap.add_argument("--head", default=str(ROOT), help="git ref or directory of the new version (default: this working tree)")
-    ap.add_argument("--run", default="JohnP1/d1a-e4b-mlx-q8@v0.5", help="the weights both servers load (default: what the Mac mini serves)")
+    ap.add_argument("--run", default="JohnP1/d1a-e4b-mlx-q8@v0.6", help="the weights both servers load (default: what the Mac mini serves)")
     ap.add_argument("--playground", help="a d1a-playground checkout (npm ci done): its demo examples, as its smoke test builds them")
     ap.add_argument("--demo-requests", default=str(ROOT / "runs/labeler-replay/demo-requests.json"), help="the demo requests as a file, without --playground")
     ap.add_argument("--replay", default=str(ROOT / "runs/labeler-replay"), help="the labeler replay kit (labeler-calls.jsonl, questions.json); private, never committed")
