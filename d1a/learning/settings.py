@@ -29,7 +29,9 @@ DEFAULTS = {
     "schedule": {"daily_at": "04:00", "after_new_outcomes": 10},   # local time HH:MM, or None; >= N new outcomes, or None
     "replay": {"enabled": True, "on_model_change": True, "exclude_no_pr_id": True, "per_tick_cap": 50, "pause_s": 1.0},
     "reports": {"webhook_file": None, "notify": ["promotion", "min_reached"]},
+    "flags": {},   # learned decision thresholds (#237), by name; none by default, so a no-op. Read only by d1a.learning.flags
 }
+FLAG_KEYS = {"question", "options", "t", "space", "run", "budget", "fitted_on"}
 CI_LEVELS = (0.9, 0.95, 0.99)
 NOTIFY = ("promotion", "min_reached", "every_gate")
 HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
@@ -67,12 +69,38 @@ RULES = {   # key -> (check, what it must be)
 
 
 def flat(d, prefix=""):
-    """{"a": {"b": 1}} -> {"a.b": 1} (one level of sections)."""
+    """{"a": {"b": 1}} -> {"a.b": 1} (one level of sections; `flags` is checked by check_flag, not flattened)."""
     out = {}
     for k, v in d.items():
+        if k == "flags": continue
         if isinstance(v, dict): out.update({f"{prefix}{k}.{kk}": vv for kk, vv in v.items()})
         else: out[f"{prefix}{k}"] = v
     return out
+
+
+def check_flag(name, f):
+    """A learned decision threshold (#237): {question, options, t, space, run, budget, fitted_on: {kit, created_max, n}}.
+    Fitted and gated offline by d1a.learning.flags, never by tick/promote/replay; computed on raw probabilities (space
+    "raw", before the outcome calibrator) and pinned to `run`, so a calibrator promotion never moves it. -> problems."""
+    from datetime import datetime
+    if not isinstance(f, dict): return [f"flags.{name}: must be an object"]
+    p = [f"flags.{name}.{k}: unknown setting (known: {sorted(FLAG_KEYS)})" for k in f if k not in FLAG_KEYS]
+    p += [f"flags.{name}.{k}: missing" for k in sorted(FLAG_KEYS) if k not in f]
+    if "question" in f and not (isinstance(f["question"], str) and f["question"].strip()): p.append(f"flags.{name}.question: a question id")
+    if "options" in f and not (_str_list(f["options"]) and f["options"]): p.append(f"flags.{name}.options: a non-empty list of distinct option keys")
+    if "t" in f and not (_is_num(f["t"]) and 0 <= f["t"] <= 1): p.append(f"flags.{name}.t: a number from 0 to 1")
+    if "space" in f and f["space"] != "raw": p.append(f"flags.{name}.space: must be \"raw\" (probabilities before the calibrator)")
+    if "run" in f and not (isinstance(f["run"], str) and "@" in f["run"]): p.append(f"flags.{name}.run: the model it was fitted for, repo@tag")
+    if "budget" in f and not (_is_num(f["budget"]) and 0.01 <= f["budget"] <= 0.5): p.append(f"flags.{name}.budget: a number from 0.01 to 0.5")
+    if "fitted_on" in f:
+        fo = f["fitted_on"]
+        if not (isinstance(fo, dict) and set(fo) == {"kit", "created_max", "n"}): p.append(f"flags.{name}.fitted_on: {{kit, created_max, n}}")
+        else:
+            if not (isinstance(fo["kit"], str) and fo["kit"].strip()): p.append(f"flags.{name}.fitted_on.kit: the kit it was fitted on")
+            if not (_is_int(fo["n"]) and fo["n"] >= 1): p.append(f"flags.{name}.fitted_on.n: an integer >= 1")
+            try: datetime.fromisoformat(str(fo["created_max"]).replace("Z", "+00:00"))
+            except ValueError: p.append(f"flags.{name}.fitted_on.created_max: an ISO time")
+    return p
 
 
 def validate(data):
@@ -84,11 +112,15 @@ def validate(data):
         if section == "version": continue
         if section not in DEFAULTS: problems.append(f"{section}: unknown section (known: {sorted(k for k in DEFAULTS if k != 'version')})"); continue
         if not isinstance(v, dict): problems.append(f"{section}: must be an object"); continue
+        if section == "flags":
+            for name, f in v.items(): problems += check_flag(name, f)
+            continue
         for key in v:
             if key not in DEFAULTS[section]: problems.append(f"{section}.{key}: unknown setting (known: {sorted(DEFAULTS[section])})")
     out = copy.deepcopy(DEFAULTS)
     for section, v in data.items():
-        if section in DEFAULTS and isinstance(v, dict) and section != "version":
+        if section == "flags" and isinstance(v, dict): out["flags"] = copy.deepcopy(v)
+        elif section in DEFAULTS and isinstance(v, dict) and section != "version":
             out[section].update({k: x for k, x in v.items() if k in DEFAULTS[section]})
     for key, value in flat(out).items():
         if key == "version": continue
@@ -155,6 +187,12 @@ def set_values(path, assignments, source="cli"):
     new = copy.deepcopy(current); changes = []
     for key, value in assignments.items():
         section, _, name = key.partition(".")
+        if section == "flags" and name:   # flags.<name>={...} sets one flag, flags.<name>=null removes it
+            old = new.get("flags", {}).get(name)
+            if value is None: new.setdefault("flags", {}).pop(name, None)
+            else: new.setdefault("flags", {})[name] = value
+            if old != value: changes.append((key, old, value))
+            continue
         if not name or section not in DEFAULTS or section == "version" or name not in DEFAULTS[section]:
             raise SettingsError(f"{key}: unknown setting (known: {sorted(k for k in RULES)})")
         old = new.get(section, {}).get(name, DEFAULTS[section][name])

@@ -47,18 +47,30 @@ def pr_key(pr_id):
     return f"{m['repo'].lower()}#{int(m['number'])}" if m else None
 
 
-def build_manifest(mixes, run):
-    """{run, pr_ids, state_sha256, mixes} from training mixes (JSONL records with a state and, for PRs, an id)."""
-    prs, states, sources = set(), set(), []
+def build_manifest(mixes, run, log=None):
+    """{run, pr_ids, state_sha256, mixes} from training mixes (JSONL records with a state and, for PRs, an id). A record
+    exported from a feedback log (feedback records: meta.feedback_id) may carry no id; with `log`, its decision's outcome
+    group stands in, so a PR re-rendered later (new commits, other truncation) is still excluded by its id."""
+    groups = {}
+    if log is not None:
+        for d in log.resolved(): groups[d["id"]] = d.get("group")
+    prs, states, sources, missing = set(), set(), [], []
     for mix in mixes:
+        if not Path(mix).is_file():   # a lineage mix that cannot be read: the manifest is incomplete, and replay refuses it
+            missing.append(str(mix)); continue
         n = 0
         for line in Path(mix).read_text(encoding="utf-8").splitlines():
             if not line.strip(): continue
             r = json.loads(line); n += 1
             states.add(state_sha256(r["state"]))
-            if (k := pr_key(r.get("id"))): prs.add(k)
+            fid = (r.get("meta") or {}).get("feedback_id")
+            for pid in (r.get("id"), groups.get(fid) if fid else None):
+                if (k := pr_key(pid)): prs.add(k)
+            if fid and log is None and not pr_key(r.get("id")):
+                raise ValueError(f"{mix}: record {n} came from a feedback log (feedback_id {fid}) and has no PR id: pass --log so its PR is excluded by id")
         sources.append({"mix": Path(mix).name, "records": n, "sha256": hashlib.sha256(Path(mix).read_bytes()).hexdigest()})
-    return {"run": run, "created": time.time(), "mixes": sources, "pr_ids": sorted(prs), "state_sha256": sorted(states)}
+    return {"run": run, "created": time.time(), "complete": not missing, "missing_mixes": missing, "mixes": sources,
+            "pr_ids": sorted(prs), "state_sha256": sorted(states)}
 
 
 def load_manifest(path, run):
@@ -68,6 +80,8 @@ def load_manifest(path, run):
     if not p.exists(): raise ReplayRefused(f"no trained manifest for {run} at {p}")
     m = json.loads(p.read_text(encoding="utf-8"))
     if m.get("run") != run: raise ReplayRefused(f"{p} is the trained manifest of {m.get('run')!r}, not of the served {run!r}")
+    if m.get("complete") is not True:   # a partial manifest treated as complete is how the exclusion would fail open
+        raise ReplayRefused(f"{p} is incomplete: lineage mixes not found {m.get('missing_mixes') or '(not recorded)'}")
     if not m.get("mixes"): raise ReplayRefused(f"{p} names no training mixes")
     return {"run": run, "pr_ids": set(m["pr_ids"]), "state_sha256": set(m["state_sha256"])}
 
@@ -213,6 +227,17 @@ def progress(resolved, settings):
 def tick(log_path, calibrator_path, server=None, run=None, trained_dir=None, settings_path=None, api_key=None, now=None):
     """One run of the loop, meant every few minutes (a LaunchAgent, cron): replay on a model change, then the promotion gate
     when it is due, a report line in <log dir>/learning-status.json, and notifications. -> that report line."""
+    import fcntl
+    lock = open(Path(log_path).with_name(Path(log_path).name + ".lock"), "a", encoding="utf-8")
+    try: fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        lock.close(); return {"skipped": "another tick runs"}
+    try: return _tick(log_path, calibrator_path, server, run, trained_dir, settings_path, api_key, now)
+    finally:
+        fcntl.flock(lock, fcntl.LOCK_UN); lock.close()
+
+
+def _tick(log_path, calibrator_path, server, run, trained_dir, settings_path, api_key, now):
     from d1a.learning.feedback import FeedbackLog, OutcomeCalibrator, promote
     now = time.time() if now is None else now
     settings, error, source = S.load(settings_path)
@@ -236,7 +261,7 @@ def tick(log_path, calibrator_path, server=None, run=None, trained_dir=None, set
             rep = replay(log, server, manifest_path(trained_dir, served), r["per_tick_cap"], r["pause_s"], r["exclude_no_pr_id"],
                          settings["outcomes"]["sources"], api_key)
             line["replay"] = rep
-            first_replay = not status.get("replay_reported")
+            first_replay = rep["replayed"] > 0 and not status.get("replay_reported")
             if rep["left"] == 0 and not rep["errors"] and not rep["paused_for_live_traffic"]: status["replay_complete"] = True
         except ReplayRefused as e:
             line["replay"] = {"refused": str(e)}
@@ -247,6 +272,8 @@ def tick(log_path, calibrator_path, server=None, run=None, trained_dir=None, set
     status["per_question"] = per_q
     p = settings["promotion"]
     reason = due(settings, status, len(resolved), now) or ("the first replay after a model change" if first_replay else None)
+    if reason and not settings["outcomes"]["enabled"]:
+        line["gate"] = {"reason": reason, "skipped": "outcomes.enabled is false: learning from outcomes is off"}; reason = None
     if reason:
         path = Path(calibrator_path); current = OutcomeCalibrator.load(path) if path.exists() else None
         cal, report = promote(resolved, current, p["held_out"], p["min_outcomes"], p["questions"], tolerance=p["tolerance"],

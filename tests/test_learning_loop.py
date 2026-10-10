@@ -1,6 +1,8 @@
 """The self-learning loop (#233): settings, replay across model versions (fail closed), the data-triggered gate."""
+import importlib.util
 import json
 import time
+from pathlib import Path
 
 import pytest
 
@@ -21,12 +23,24 @@ def decide(log, state, run, group, label="bug", p=0.7, src="reviewer"):
     return did
 
 
-def manifest(tmp_path, run=NEW, prs=(), states=()):
-    path = tmp_path / "trained.json"
-    data = {"run": run, "mixes": [{"mix": "train.jsonl"}], "pr_ids": sorted(loop.pr_key(p) for p in prs),
-            "state_sha256": sorted(loop.state_sha256(s) for s in states)}
-    path.write_text(json.dumps(data), encoding="utf-8")
+def write_jsonl(path, rows):
+    path.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8")
     return path
+
+
+def manifest(tmp_path, run=NEW, prs=(), states=(), log=None, extra_mixes=()):
+    """The trained manifest as `feedback trained` writes it, from a mix file shaped like the real ones: PR records carry
+    ids like "hermes-agent#40604:ja"; other records only a state."""
+    mix = write_jsonl(tmp_path / f"mix-{run.rpartition('@')[2]}.jsonl",
+                      [{"id": p, "state": f"title of {p}", "questions": {}} for p in prs] + [{"state": s, "questions": {}} for s in states])
+    path = tmp_path / f"trained-{run.rpartition('@')[2]}.json"
+    path.write_text(json.dumps(loop.build_manifest([mix, *extra_mixes], run, log)), encoding="utf-8")
+    return path
+
+
+def build_mix():
+    spec = importlib.util.spec_from_file_location("build_mix", Path(__file__).resolve().parents[1] / "recipes/mix/build_mix.py")
+    module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module); return module
 
 
 class FakeServer:
@@ -54,7 +68,7 @@ def test_settings_reject_values_outside_the_agreed_ranges_and_unknown_keys():
     S.validate({})   # every default is valid
     bad = [{"promotion": {"min_outcomes": 9}}, {"promotion": {"held_out": 0.05}}, {"promotion": {"held_out": 0.6}},
            {"promotion": {"ci_level": 0.8}}, {"schedule": {"after_new_outcomes": 0}}, {"schedule": {"daily_at": "4:00"}},
-           {"schedule": {"daily_at": "24:00"}}, {"promotion": {"min_outcome": 20}}, {"flags": {}}, {"promotion": {"auto": "yes"}},
+           {"schedule": {"daily_at": "24:00"}}, {"promotion": {"min_outcome": 20}}, {"flagz": {}}, {"promotion": {"auto": "yes"}},
            {"outcomes": {"sources": []}}, {"reports": {"notify": ["sometimes"]}}, {"version": 2}]
     for data in bad:
         with pytest.raises(S.SettingsError): S.validate(data)
@@ -90,14 +104,16 @@ def test_replay_never_rescores_a_training_pr_and_fails_closed_without_the_manife
     keep = decide(log, "owner PR, never trained", OLD, "jonpol01/d1a#232")
     decide(log, "a hermes-agent PR it trained on", OLD, "NousResearch/hermes-agent#40604")
     decide(log, "trained state, no group", OLD, None)
-    decide(log, "trained state, other group", OLD, "jonpol01/d1a#999")
+    decide(log, {"title": "trained state", "files": ["a.py"]}, OLD, "jonpol01/d1a#999")
     decide(log, "no group at all", OLD, None)
     decide(log, "made by the served model itself", NEW, "jonpol01/d1a#300")
-    m = manifest(tmp_path, prs=["hermes-agent#40604:ja"], states=["trained state, no group", "trained state, other group"])
-    for bad in (None, tmp_path / "missing.json", manifest(tmp_path, run=OLD)):
+    states = ["trained state, no group", {"files": ["a.py"], "title": "trained state"}]   # a dict state, keys in another order
+    for state in states: assert loop.state_sha256(state) == build_mix().state_hash({"state": state})   # the mix screens' identity
+    for bad in (None, tmp_path / "missing.json", manifest(tmp_path, run=OLD),
+                manifest(tmp_path, prs=["hermes-agent#40604:ja"], states=states, extra_mixes=[tmp_path / "gone.jsonl"])):
         with pytest.raises(loop.ReplayRefused): loop.replay(log, "http://s", bad, sleep=lambda s: None)
         assert fake.sent == []
-    m = manifest(tmp_path, prs=["hermes-agent#40604:ja"], states=["trained state, no group", "trained state, other group"])
+    m = manifest(tmp_path, prs=["hermes-agent#40604:ja"], states=states)
     rep = loop.replay(log, "http://s", m, sleep=lambda s: None)
     assert fake.sent == [keep]
     assert rep["excluded"] == {"its pull request is in the served model's training": 1, "its state is in the served model's training": 2,
@@ -192,3 +208,69 @@ def test_the_server_logs_a_replay_with_its_original_and_rejects_a_malformed_id(t
         client.post("/v1/systemone/separate", json=req, headers={"x-d1a-replay-of": original})   # replays only via /v1/systemone
     events = serve.LEARNING.log.events()
     assert [e.get("replay_of") for e in events] == [original, None] and events[0]["run"] == NEW
+
+
+def test_an_incomplete_lineage_writes_an_incomplete_manifest_that_replay_refuses(tmp_path, server):
+    log, fake = server
+    decide(log, "owner PR", OLD, "jonpol01/d1a#232")
+    m = manifest(tmp_path, prs=["hermes-agent#1"], extra_mixes=[tmp_path / "stage-v0.3.jsonl"])
+    data = json.loads(m.read_text(encoding="utf-8"))
+    assert data["complete"] is False and data["missing_mixes"] == [str(tmp_path / "stage-v0.3.jsonl")]
+    with pytest.raises(loop.ReplayRefused, match="incomplete"): loop.replay(log, "http://s", m, sleep=lambda s: None)
+    assert fake.sent == [] and not any(e.get("replay_of") for e in log.events())
+
+
+def test_a_mix_exported_from_feedback_is_excluded_by_its_decisions_pr(tmp_path, server):
+    """feedback records carry the PR as their id now; an older export with only meta.feedback_id gets its PR from the log,
+    so the same PR re-rendered later (another state) is still excluded by id. Without the log the manifest refuses."""
+    log, fake = server
+    trained = decide(log, "PR as rendered at training time", "JohnP1/d1a-e4b-mlx-q8@v0.4", "jonpol01/d1a#120")
+    decide(log, "the same PR, re-rendered after new commits", OLD, "jonpol01/d1a#120")
+    old_export = write_jsonl(tmp_path / "feedback-mix.jsonl", [{"state": "PR as rendered at training time", "questions": {}, "meta": {"feedback_id": trained}}])
+    with pytest.raises(ValueError, match="--log"): loop.build_manifest([old_export], NEW)
+    m = tmp_path / "trained.json"; m.write_text(json.dumps(loop.build_manifest([old_export], NEW, log)), encoding="utf-8")
+    rep = loop.replay(log, "http://s", m, sleep=lambda s: None)
+    assert fake.sent == [] and rep["excluded"] == {"its pull request is in the served model's training": 2}
+    from d1a.learning.feedback import records
+    assert {r["id"] for r in records(log.resolved())} == {"jonpol01/d1a#120"}   # new exports carry the PR id themselves
+
+
+def test_two_replays_of_one_decision_count_once(tmp_path):
+    log = FeedbackLog(tmp_path / "log.jsonl")
+    original = decide(log, "owner PR", OLD, "jonpol01/d1a#232")
+    for p in (0.6, 0.7): log.decision("owner PR", Q, answer(p), NEW, replay_of=original)
+    (row,) = log.resolved(run=NEW)
+    assert row["answers"]["type"]["probabilities"]["bug"] == 0.7   # the latest replay
+
+
+def test_promote_without_run_refuses_a_log_with_replays(tmp_path):
+    log = FeedbackLog(tmp_path / "log.jsonl")
+    original = decide(log, "owner PR", OLD, "jonpol01/d1a#232")
+    log.decision("owner PR", Q, answer(0.6), NEW, replay_of=original)
+    with pytest.raises(SystemExit, match="--run"): main(["promote", str(log.path), "--calibrator", str(tmp_path / "cal.json")])
+
+
+def test_one_tick_at_a_time_and_outcomes_off_skips_the_gate(tmp_path, monkeypatch):
+    import fcntl
+    log = FeedbackLog(tmp_path / "log.jsonl")
+    for i in range(12): decide(log, f"PR {i}", NEW, f"o/r#{i}")
+    path = tmp_path / "learning.json"; monkeypatch.setenv(S.ENV, str(path)); S.init(path)
+    S.set_values(path, {"outcomes.enabled": False, "schedule.daily_at": None})
+    with open(tmp_path / "log.jsonl.lock", "a", encoding="utf-8") as held:
+        fcntl.flock(held, fcntl.LOCK_EX)
+        assert loop.tick(log.path, tmp_path / "cal.json", run=NEW) == {"skipped": "another tick runs"}
+    line = loop.tick(log.path, tmp_path / "cal.json", run=NEW)
+    assert line["gate"]["skipped"].startswith("outcomes.enabled is false") and not (tmp_path / "cal.json").exists()
+
+
+def test_flags_are_reserved_validated_and_empty_by_default(tmp_path):
+    assert S.validate({})["flags"] == {}
+    flag = {"question": "sev", "options": ["P0", "P1"], "t": 0.19, "space": "raw", "run": "JohnP1/d1a-e2b-mlx-q8@v0.6", "budget": 0.1,
+            "fitted_on": {"kit": "pr-labels:development", "created_max": "2026-10-02T10:58:00Z", "n": 946}}
+    assert S.validate({"flags": {"p0p1": flag}})["flags"]["p0p1"] == flag
+    for bad in ({**flag, "t": 1.5}, {**flag, "space": "calibrated"}, {**flag, "run": "JohnP1/d1a-e2b-mlx-q8"}, {**flag, "budget": 0.6},
+                {**flag, "fitted_on": {"kit": "x", "created_max": "yesterday", "n": 3}}, {k: v for k, v in flag.items() if k != "t"}, {**flag, "extra": 1}):
+        with pytest.raises(S.SettingsError): S.validate({"flags": {"p0p1": bad}})
+    path = tmp_path / "learning.json"; S.init(path)
+    assert S.set_values(path, {"flags.p0p1": flag}) == [("flags.p0p1", None, flag)]
+    S.set_values(path, {"flags.p0p1": None}); assert S.load(path)[0]["flags"] == {}

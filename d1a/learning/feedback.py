@@ -107,8 +107,14 @@ class FeedbackLog:
                 runs[e["id"]] = e.get("run")
                 if run is None or e.get("run") == run: decisions[e["id"]] = e
             elif srcs is None or e.get("meta", {}).get("src") in srcs: outcomes.setdefault(e["id"], []).append(e)
+        latest = {}   # one replay per original and run: two overlapping replays of a decision must not count it twice
+        for i, d in decisions.items():
+            if d.get("replay_of"):
+                k = (d["replay_of"], d.get("run"))
+                if k not in latest or d["ts"] > decisions[latest[k]]["ts"]: latest[k] = i
         out = []
         for i, d in decisions.items():
+            if d.get("replay_of") and latest[(d["replay_of"], d.get("run"))] != i: continue
             own = outcomes.get(d.get("replay_of") or i)
             if not own: continue
             labels, label_src = {}, {}
@@ -136,7 +142,8 @@ def records(resolved, src="feedback"):
             qs[qid] = {"type": q["type"], "instructions": q.get("instr") or q.get("instructions"), "label": label,
                        "src": d.get("label_src", {}).get(qid) or src,
                        **({"criteria": q["criteria"]} if "criteria" in q else {})}
-        if qs: out.append({"state": d["state"], "questions": qs, "meta": {**d.get("meta", {}), "feedback_id": d["id"], "run": d["run"]}})
+        if qs: out.append({"state": d["state"], "questions": qs, **({"id": d["group"]} if d.get("group") else {}),   # the PR id the mix screens use
+                           "meta": {**d.get("meta", {}), "feedback_id": d.get("replay_of") or d["id"], "run": d["run"]}})
     return out
 
 
@@ -400,6 +407,7 @@ def main(argv=None):
     tr = sub.add_parser("trained", help="the trained manifest of a model: every PR id and state hash in the mixes of its lineage")
     tr.add_argument("--mix", action="append", required=True, help="a training mix (JSONL), once per stage of the model's lineage")
     tr.add_argument("--run", required=True, help="the model these mixes trained, repo@tag as the server reports it"); tr.add_argument("--out", required=True)
+    tr.add_argument("--log", help="the decision log a mix's feedback records were exported from (their PR ids come from its outcome groups)")
     rp = sub.add_parser("replay", help="re-score earlier models' decisions that have outcomes with the model the server runs (fail closed)")
     rp.add_argument("log"); rp.add_argument("--server", required=True); rp.add_argument("--trained", help="the served model's trained manifest")
     rp.add_argument("--cap", type=int); rp.add_argument("--pause", type=float)
@@ -413,8 +421,11 @@ def main(argv=None):
     from d1a.learning import loop, settings as S
     if a.cmd == "config": return _config(a, S)
     if a.cmd == "trained":
-        m = loop.build_manifest(a.mix, a.run); Path(a.out).write_text(json.dumps(m) + "\n", encoding="utf-8")
-        print(f"wrote {a.out}: {a.run}, {len(m['pr_ids'])} PR ids and {len(m['state_sha256'])} states from {len(m['mixes'])} mixes"); return
+        try: m = loop.build_manifest(a.mix, a.run, FeedbackLog(a.log) if a.log else None)
+        except ValueError as e: sys.exit(f"refused: {e}")
+        Path(a.out).write_text(json.dumps(m) + "\n", encoding="utf-8")
+        print(f"wrote {a.out}: {a.run}, {len(m['pr_ids'])} PR ids and {len(m['state_sha256'])} states from {len(m['mixes'])} mixes"
+              + ("" if m["complete"] else f"; INCOMPLETE, replay will refuse it: not found {m['missing_mixes']}")); return
     if a.cmd in ("replay", "tick"):
         key = os.environ.get("D1A_API_KEY")
         if a.cmd == "tick":
@@ -438,6 +449,8 @@ def main(argv=None):
         recs = records(res, a.src or "feedback"); Path(a.out).write_text("".join(json.dumps(x) + "\n" for x in recs), encoding="utf-8")
         print(f"wrote {len(recs)} labelled requests to {a.out}")
     elif a.cmd == "promote":
+        if a.run is None and any(d.get("replay_of") for d in res):
+            sys.exit("refused: the log holds replays, so promote needs --run <served run> (without it a decision and its replays would count twice)")
         st, err, _ = S.load(); p = st["promotion"]
         if err: print(f"settings: {err}; using the last valid ones", file=sys.stderr)
         path = Path(a.calibrator); current = OutcomeCalibrator.load(path) if path.exists() else None
