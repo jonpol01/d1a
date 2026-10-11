@@ -109,6 +109,7 @@ outcomes from one source) and `--run` (only decisions one model made):
 | Command | What it does |
 |---|---|
 | `status <log>` | Counts resolved and pending decisions, per question. |
+| `void <log> --ids <id,...> --src <source> --reason <text>` | Withdraws one source's outcomes on those decisions that arrived before it (outcomes logged in error, e.g. a PR author's own labels taken for a person's correction). The log is only appended to; a later outcome from that source counts again. |
 | `records <log> --out <file>` | Turns resolved decisions into training records for `d1a.training.train --data`. |
 | `calibrate <log> --out <file> [--min-outcomes 20]` | Fits a calibrator on every outcome, with no gate. |
 | `promote <log> --calibrator <file> [--min-outcomes 20] [--held-out 0.3] --run <served run>` | Fits on part of the outcomes, split by group. It gates each question on the rest and rewrites the calibrator only for the questions that pass: log loss better, with a bootstrap interval clear of zero. Flags not given come from the settings file. Each question's report gives `mde`, the smallest log-loss gain its held-out set can detect. |
@@ -122,7 +123,7 @@ The settings file (`D1A_LEARNING`; `config show` prints it). Unset, or a key lef
 | Setting | Default | Allowed | What it does |
 |---|---|---|---|
 | `outcomes.enabled` | `true` | true, false | Whether outcome collectors (the playground's poster) run. |
-| `outcomes.sources` | `null` (all) | a list, e.g. `["reviewer", "human"]` | The outcome sources that count for learning. |
+| `outcomes.sources` | `null` (all) | a list, e.g. `["reviewer", "human"]`, or per question, e.g. `{"sev": ["human"], "*": ["reviewer", "human"]}` (`"*"`: every other question) | The outcome sources that count for learning. Per question, a source can teach one question and not another: a review bot whose severity scale differs from your labellers' teaches change type but not severity. Outcomes that do not count are still logged. |
 | `promotion.auto` | `true` | true, false | `false`: the gate still runs and reports, and never writes the calibrator. |
 | `promotion.questions` | `null` (all) | a list of question ids | The questions that learn. |
 | `promotion.min_outcomes` | `20` | ≥ 10 | Fit outcomes a question needs before it is fitted at all. |

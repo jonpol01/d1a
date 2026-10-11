@@ -170,6 +170,58 @@ def test_a_human_label_beats_a_later_reviewer_label_per_question(tmp_path):
     assert log.resolved("reviewer")[0]["labels"] == {"type": "bug", "blast": "broad"}
 
 
+def _pr_decision(log):
+    return log.decision("pr", {**CQ, "type": {"type": "choice", "instructions": "Change type.", "criteria": {"bug": "fix", "docs": "docs"}}},
+                        {"blast": {"choice": "contained", "probabilities": {"contained": 0.6, "moderate": 0.2, "broad": 0.1, "massive": 0.1}},
+                         "type": {"choice": "bug", "probabilities": {"bug": 0.7, "docs": 0.3}}}, run="r@v0.4")
+
+
+def test_a_void_withdraws_one_sources_outcomes_and_the_next_source_decides(tmp_path):
+    """A PR author's own labels logged as "human" outrank the reviewer; voiding them (with a reason, the log untouched
+    before it) leaves the reviewer's label, and a decision whose only outcome is voided is pending again."""
+    log = FeedbackLog(tmp_path / "f.jsonl")
+    did, alone = _pr_decision(log), _pr_decision(log)
+    log.outcome(did, {"type": "docs", "blast": "contained"}, {"src": "human"})
+    log.outcome(did, {"type": "bug", "blast": "broad"}, {"src": "reviewer"})
+    log.outcome(alone, {"type": "docs"}, {"src": "human"})
+    before = (tmp_path / "f.jsonl").read_text(encoding="utf-8")
+    main(["void", str(tmp_path / "f.jsonl"), "--ids", f"{did},{alone}", "--src", "human", "--reason", "PR-author labels, not corrections"])
+    assert (tmp_path / "f.jsonl").read_text(encoding="utf-8").startswith(before)   # appended, never rewritten
+    (d,) = log.resolved()
+    assert d["labels"] == {"type": "bug", "blast": "broad"} and d["label_src"] == {"type": "reviewer", "blast": "reviewer"}
+    assert [x["id"] for x in log.pending()] == [alone]
+    with pytest.raises(ValueError): log.void([did], "human", "")
+
+
+def test_per_question_sources_keep_the_reviewers_type_but_not_its_severity(tmp_path):
+    """outcomes.sources per question (#252: the review bot's severity scale is not the maintainers'): with {"sev": ["human"],
+    "*": ["reviewer", "human"]} a reviewer outcome teaches type and blast but never severity; a person's severity still counts."""
+    from d1a.learning import settings
+    log = FeedbackLog(tmp_path / "f.jsonl"); did = _pr_decision(log); other = _pr_decision(log)
+    log.outcome(did, {"type": "docs", "blast": "broad", "sev": "P2"}, {"src": "reviewer"})
+    log.outcome(other, {"sev": "P1"}, {"src": "human"})
+    per_q = {"sev": ["human"], "*": ["reviewer", "human"]}
+    a, b = log.resolved(per_q)
+    assert a["labels"] == {"type": "docs", "blast": "broad"} and a["label_src"] == {"type": "reviewer", "blast": "reviewer"}
+    assert b["labels"] == {"sev": "P1"}
+    assert log.resolved()[0]["labels"]["sev"] == "P2"   # unfiltered, the reviewer's severity is still in the log
+    path = tmp_path / "learning.json"; settings.init(path)
+    settings.set_values(path, {"outcomes.sources": per_q})
+    assert settings.load(path)[0]["outcomes"]["sources"] == per_q
+    for bad in ({}, {"sev": []}, {"sev": "human"}, {"sev": ["human", "human"]}):
+        with pytest.raises(ValueError): settings.set_values(path, {"outcomes.sources": bad})
+
+
+def test_an_outcome_after_a_void_counts_again(tmp_path):
+    """A void covers what came before it: a person correcting the same decision later still wins over the reviewer."""
+    log = FeedbackLog(tmp_path / "f.jsonl"); did = _pr_decision(log)
+    log.outcome(did, {"type": "docs"}, {"src": "human"}); log.outcome(did, {"type": "bug"}, {"src": "reviewer"})
+    log.void([did], "human", "PR-author labels")
+    log.outcome(did, {"type": "docs"}, {"src": "human"})
+    (d,) = log.resolved()
+    assert d["labels"]["type"] == "docs" and d["label_src"]["type"] == "human"
+
+
 def test_serve_logs_decisions_accepts_outcomes_and_applies_a_reloaded_calibrator(tmp_path, monkeypatch):
     """d1a.serving.serve's self-learning hooks: with a log, every answer carries a decision_id and POST /v1/feedback records its
     outcome; with a calibrator file, yes/no answers are recalibrated and a rewritten file takes effect on the next answer;

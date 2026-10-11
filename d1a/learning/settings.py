@@ -48,7 +48,9 @@ def _str_list(v): return v is None or (isinstance(v, list) and v and all(isinsta
 
 RULES = {   # key -> (check, what it must be)
     "outcomes.enabled": (lambda v: isinstance(v, bool), "true or false"),
-    "outcomes.sources": (_str_list, "null (every source) or a non-empty list of distinct source names, e.g. [\"reviewer\", \"human\"]"),
+    "outcomes.sources": (lambda v: _str_list(v) or (isinstance(v, dict) and bool(v) and all(isinstance(k, str) and k.strip() and v[k] is not None and _str_list(v[k]) for k in v)),
+                         "null (every source), a non-empty list of distinct source names, e.g. [\"reviewer\", \"human\"], or per question "
+                         "{\"sev\": [\"human\"], \"*\": [\"reviewer\", \"human\"]} (\"*\": every other question)"),
     "promotion.auto": (lambda v: isinstance(v, bool), "true or false (false: the gate runs and reports, and never writes the calibrator)"),
     "promotion.questions": (_str_list, "null (every question) or a non-empty list of distinct question ids"),
     "promotion.min_outcomes": (lambda v: _is_int(v) and v >= 10, "an integer >= 10"),
