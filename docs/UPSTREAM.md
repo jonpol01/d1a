@@ -52,7 +52,8 @@ the Apache License 2.0. This file records where D1A's code came from and what D1
 - **Clients**: D1A's dependency-free clients live in `clients/python` (`d1a-client`, import `d1a_client`) and
   `clients/js` (`d1a-client`), so the name `d1a` belongs to the main package.
 - **Removed** (Kev's research record and its own deployments, not part of D1A; all still in the history): `runs/`,
-  `experiments/` (except `smoke.json`, the Modal smoke plan, and `sft-v1-lengths.json`, the SFT corpus token counts),
+  `experiments/` (except `smoke.json`, the Modal smoke plan; `sft-v1-lengths.json`, the SFT corpus token counts, went
+  in #65: nothing read it),
   `PLAN.md`, `space/` (the Kev Hugging Face Space), `.agents/`, `skills-lock.json`, `skills/` (kev-deploy, kev-finetune),
   Kev's `AGENTS.md` and `docs/autoresearch.md`, `docs/claims.json` + `scripts/verify_claims.py`, Kev's model cards and
   figures, and the release and round read-out scripts (`release_confirm`, `release_numbers`, `round4_deltas`,
@@ -159,6 +160,5 @@ evals/
 .python-version
 LICENSE
 d1a/backends/device.py
-experiments/sft-v1-lengths.json
 experiments/smoke.json
 ```
