@@ -89,9 +89,20 @@ jobs:
           BASE: ${{ github.base_ref }}
           PR: ${{ github.event.pull_request.number }}
           AUTHOR: ${{ github.event.pull_request.user.login }}
+        # the checkers come from the base branch, so a pull request cannot loosen the check it is judged by; its own copy is
+        # used only while the base has no such check yet (the pull request that adds it), with a notice
         run: |
-          git diff --name-status "origin/$BASE...HEAD" | python3 scripts/release_notes.py --check-pr "$PR" --author "$AUTHOR"
-          git diff -U0 "origin/$BASE...HEAD" | python3 scripts/check_hygiene.py paths
+          set -euo pipefail
+          mkdir -p /tmp/trusted/scripts /tmp/trusted/d1a/core && touch /tmp/trusted/d1a/__init__.py /tmp/trusted/d1a/core/__init__.py
+          for f in scripts/release_notes.py scripts/check_hygiene.py d1a/core/hygiene.py; do
+            if git show "origin/$BASE:$f" > "/tmp/trusted/$f" 2>/dev/null && { [ "$f" != scripts/release_notes.py ] || grep -q "def check_pr" "/tmp/trusted/$f"; }; then
+              echo "$f: the base branch's copy"
+            else
+              echo "::notice::$f: the base branch has no such check yet; using this pull request's copy"; cp "$f" "/tmp/trusted/$f"
+            fi
+          done
+          git diff --name-status "origin/$BASE...HEAD" | python3 /tmp/trusted/scripts/release_notes.py --check-pr "$PR" --author "$AUTHOR"
+          git diff -U0 "origin/$BASE...HEAD" | python3 /tmp/trusted/scripts/check_hygiene.py paths
       - uses: astral-sh/setup-uv@v5
       - run: uv build
       # the wheel installs on its own and reports pyproject.toml's version, which CHANGELOG.md must cover

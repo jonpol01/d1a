@@ -13,19 +13,21 @@ jobs:
     name: verified commits
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
       - name: Every commit in the pull request carries a verified signature
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
         run: |
+          set -euo pipefail
           gh api --paginate "repos/$REPO/pulls/$PR/commits" \
             --jq '.[] | "\(.sha[:12]) \(.commit.verification.verified) \(.commit.verification.reason)"' > commits.txt
           cat commits.txt
           [ -s commits.txt ] || { echo "::error::no commits listed for this pull request"; exit 1; }
+          # GitHub lists at most 250 commits per pull request: past that the list is incomplete, so refuse rather than pass
+          [ "$(wc -l < commits.txt)" -lt 250 ] || { echo "::error::250 or more commits: too many to verify; split the pull request"; exit 1; }
           if grep -v " true " commits.txt; then
-            echo "::error::every commit in a pull request must show GitHub's Verified badge (a signed commit; see CONTRIBUTING.md)"
+            echo "::error::every commit in a pull request must show GitHub's Verified badge (a signed commit)"
             exit 1
           fi
       - name: No AI attribution in the commits or the pull request body
@@ -34,5 +36,13 @@ jobs:
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
           BODY: ${{ github.event.pull_request.body }}   # an environment variable, never interpolated into the script
+        # inline, not a script from the pull request's own tree (which the pull request could edit); fails closed
         run: |
-          gh api --paginate "repos/$REPO/pulls/$PR/commits" --jq '.[].commit.message' | python3 scripts/check_hygiene.py attribution
+          set -euo pipefail
+          gh api --paginate "repos/$REPO/pulls/$PR/commits" --jq '.[].commit.message' > messages.txt
+          [ -s messages.txt ] || { echo "::error::no commit messages listed for this pull request"; exit 1; }
+          printf '%s\n' "$BODY" >> messages.txt
+          if grep -Ein '^[[:space:]]*co-authored-by:.*(claude|anthropic)|generated with \[?claude code' messages.txt; then
+            echo "::error::commits and pull requests carry no AI attribution"
+            exit 1
+          fi
