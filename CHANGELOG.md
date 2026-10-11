@@ -37,6 +37,10 @@ model server no longer aborts when photo, voice or video requests overlap other 
 
 ### Added
 
+- `recipes/swe-verifier`: OpenHands runs (nebius/SWE-rebench-openhands-trajectories, CC-BY-4.0) can be scored, through
+  `from_openhands.py` and `zero_shot.py` / `self_improve.py --source openhands` (#248). Also new: `--keep-issue-md` (keep
+  the harness's issue.md diff, to measure that shortcut), `--exclude` (a sample disjoint from an earlier draw) and
+  `--issues`. The default source, the SWE-agent runs, gives the same rows as before.
 - The server serves learned flags (#237, part 2): a flag in the `D1A_LEARNING` file's `flags`, fitted for the served run,
   is added inside its question's answer (`flags.<name>`: `on`, `p`, `t`, `space`), computed on the model's own
   probabilities before the outcome calibrator, and kept in the decision log's meta. The answer never changes, and the file
