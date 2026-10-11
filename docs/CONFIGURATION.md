@@ -136,9 +136,17 @@ The settings file (`D1A_LEARNING`; `config show` prints it). Unset, or a key lef
 | `replay.per_tick_cap`, `replay.pause_s` | `50`, `1.0` | 1 to 500; 0 to 60 s | Replays per tick, and the pause between them. |
 | `reports.webhook_file` | `null` | a path | A file holding a webhook URL (Discord-compatible); the URL itself never goes in the settings. |
 | `reports.notify` | `["promotion", "min_reached"]` | from `promotion`, `min_reached`, `every_gate` | What `tick` posts to the webhook. |
+| `flags.<name>` | none | `{question, options, t, space: "raw", run, budget, fitted_on}` | A learned decision flag (#237): raised when the answer's top option is in `options` or their summed probability reaches `t`, read on the model's own probabilities and served only for `run`. The server adds it inside that question's answer as `flags.<name>` (`on`, `p`, `t`, `space`) and keeps it in the log's meta; the answer itself never changes. Re-read when the file changes. Fit and gate one with `python -m d1a.learning.flags` (below), on labelled kits only, never on the live log. |
 
 A file with an error is never used: jobs keep the last valid one (`<file>.last-valid.json`) and report the error, and
 every accepted change is appended to `<file>.audit.jsonl`.
+
+`python -m d1a.learning.flags` fits and checks a flag offline on `d1a.eval.benchmark` rows (question, keys, label, p):
+
+| Command | What it does |
+|---|---|
+| `fit <rows.json> --name <n> --question <q> --options A,B --budget 0.15 --run <repo@tag> --kit <name> --created-max <ISO time>` | Sets `t` at the flag-rate budget (the 1 − budget quantile of the options' summed probability) and prints the flag to put in `flags.<name>`, with its recall, precision and flag rate. |
+| `gate <rows.json> --flag '<that JSON>'` | On a later, held-out kit: serve it only if it catches more positives than the top answer (95% bootstrap over groups clear of zero) within budget + 0.03. |
 
 How to set it up on your own deployment:
 1. Serve with `D1A_FEEDBACK_LOG=runs/feedback/decisions.jsonl` and `D1A_OUTCOME_CALIBRATOR=runs/feedback/calibrator.json`.
