@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from d1a.learning import loop, settings as S
-from d1a.learning.feedback import FeedbackLog, OutcomeCalibrator, main
+from d1a.learning.feedback import FeedbackLog, main
 
 OLD, NEW = "JohnP1/d1a-e4b-mlx-q8@v0.5", "JohnP1/d1a-e4b-mlx-q8@v0.6"
 Q = {"type": {"type": "choice", "instr": "Primary change type", "criteria": {"bug": None, "docs": None}}}
