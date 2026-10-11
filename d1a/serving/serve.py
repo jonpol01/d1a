@@ -24,7 +24,7 @@ batches, queue depth, batch latency, prefix cache, memory). D1A_PREFIX_CACHE / D
 date preprocessing (api.with_date_facts). Backend and precision follow LoadOptions (D1A_BACKEND, D1A_DTYPE, ...): on Apple
 Silicon the hybrid Qwen3.5 checkpoints run on MLX by default, elsewhere on torch in bf16.
 """
-import argparse, asyncio, atexit, hmac, math, os, queue, random, re, subprocess, sys, threading, time, traceback, uuid
+import argparse, asyncio, atexit, copy, hmac, math, os, queue, random, re, subprocess, sys, threading, time, traceback, uuid
 from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 from d1a.core.settings import get as setting
@@ -40,6 +40,7 @@ from d1a.core.api import SystemOneRequest, to_record, to_answers, output_tokens,
 from d1a.backends.checkpoint import EXPORT_CONFIG, Checkpoint, LoadOptions, fused_available, is_hub_id
 from d1a.backends.device import allocated_bytes, default_device, empty_cache, out_of_memory, sync
 from d1a.learning.feedback import FeedbackLog, OutcomeCalibrator
+from d1a.learning import flags
 from d1a.serving.media import MEDIA_DIR, MediaEncoder, MediaRequest, OnDemand, with_media
 from d1a.core.encoding import SERVE_MAX_BRANCH, SERVE_MAX_STATE, layout
 
@@ -261,7 +262,10 @@ class Server:
     def _body(self, req, meta, ps, m, log=True):
         head = getattr(getattr(self, "model", None), "head", None)   # the temperature the readout used (PointerHead.temperature_for), for the log
         T = head.temperature_for(req.use_case) if hasattr(head, "temperature_for") else None
-        answers, did = LEARNING.decide(req, to_answers(ps, meta), self.checkpoint.requested, T, getattr(head, "temperature", None), log)
+        raw = to_answers(ps, meta)
+        fl = flags.compute(raw, FLAGS.current(), self.checkpoint.requested)   # learned flags (#237), on the model's own answers
+        answers, did = LEARNING.decide(req, raw, self.checkpoint.requested, T, getattr(head, "temperature", None), log, flags=fl)
+        if fl: answers = flags.attach(copy.deepcopy(answers), fl)   # served beside the answers; the log's answers stay the model's
         body = {"model": req.model, "answers": answers, "usage": {"input_tokens": m["tokens"], "output_tokens": output_tokens(self.tok, answers)}, "latency_ms": m["latency_ms"]}
         if did is not None: body["decision_id"] = did
         return body
@@ -286,7 +290,7 @@ class Learning:
             if mtime != self._mtime: self._cal, self._mtime = OutcomeCalibrator.load(self.calibrator_path), mtime
             return self._cal
 
-    def decide(self, req, answers, run, temperature=None, own=None, log=True):
+    def decide(self, req, answers, run, temperature=None, own=None, log=True, flags=None):
         """Answers as served (recalibrated when a calibrator is set), and the decision id when logging is on and `log` is not False. The log keeps the
         model's own answers, which the next `d1a.learning.feedback calibrate` must fit; what was served is kept beside them in meta,
         and so are the request's use case and the temperature its probabilities were read at. The calibrator corrects them
@@ -296,7 +300,8 @@ class Learning:
         if self.log is None or not log: return served, None
         questions = {qid: q.model_dump(exclude_none=True) for qid, q in req.questions.items()}
         replay_of = log.get("replay_of") if isinstance(log, dict) else None   # d1a.learning.loop.replay re-scoring an earlier decision
-        with self._lock: did = self.log.decision(req.state, questions, answers, run=run, meta={"served": served} if served is not answers else None,
+        meta = {**({"served": served} if served is not answers else {}), **({"flags": flags} if flags else {})} or None   # flags: #237
+        with self._lock: did = self.log.decision(req.state, questions, answers, run=run, meta=meta,
                                                  use_case=req.use_case, temperature=temperature, replay_of=replay_of)
         return served, did
 
@@ -310,6 +315,7 @@ class Learning:
 
 
 LEARNING = Learning(FEEDBACK_LOG, OUTCOME_CALIBRATOR)
+FLAGS = flags.Configured()   # the learned flags (#237) in the D1A_LEARNING file, re-read when it changes
 LOG_HEADER = "x-d1a-decision-log"   # "off": answer, but keep the decision out of the log (a demo, a smoke test: no outcome follows)
 REPLAY_HEADER = "x-d1a-replay-of"   # <decision id>: d1a.learning.loop.replay re-scoring that decision with the model served now
 DECISION_ID = re.compile(r"^[0-9a-f]{32}$")

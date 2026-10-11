@@ -85,3 +85,32 @@ def test_gate_refuses_a_flag_over_its_budget():
 def test_rows_for_another_question_are_refused():
     with pytest.raises(ValueError):
         F.measure(rows([(0.1, 0.1, 2, 2)]), {**SEV, "question": "blast"})
+
+
+def test_the_server_serves_a_configured_flag_beside_the_answer_and_logs_it(tmp_path, monkeypatch):
+    """d1a.serving.serve: a flag in the D1A_LEARNING file for the served run is added to that answer and kept in the log's
+    meta; the answer itself and the log's answers are the model's; another run's flag, or no file, changes nothing."""
+    from types import SimpleNamespace
+    from d1a.serving import serve
+    from d1a.core.api import SystemOneRequest, to_record
+    from d1a.learning import settings
+    q = {"sev": {"type": "choice", "instructions": "Severity?", "criteria": {k: None for k in ("P0", "P1", "P2", "P3", "P4")}}}
+    req = SystemOneRequest(state="a pull request", questions=q); _, meta = to_record(req)
+    fake = SimpleNamespace(checkpoint=SimpleNamespace(requested=RUN), tok=None)
+    monkeypatch.setattr(serve, "output_tokens", lambda tok, answers: 0)
+    ps = [[0.2, 0.15, 0.45, 0.15, 0.05]]
+    monkeypatch.setattr(serve, "LEARNING", serve.Learning(tmp_path / "log.jsonl"))
+    monkeypatch.setattr(serve, "FLAGS", serve.flags.Configured(None))
+    plain = serve.Server._body(fake, req, meta, ps, {"tokens": 1, "latency_ms": 1.0})
+    path = tmp_path / "learning.json"; settings.init(path)
+    settings.set_values(path, {"flags.sev_severe": SEV})
+    monkeypatch.setattr(serve, "FLAGS", serve.flags.Configured(path))
+    body = serve.Server._body(fake, req, meta, ps, {"tokens": 1, "latency_ms": 1.0})
+    assert body["answers"]["sev"]["flags"] == {"sev_severe": {"on": True, "p": 0.35, "t": 0.30, "space": "raw"}}
+    assert {k: v for k, v in body["answers"]["sev"].items() if k != "flags"} == plain["answers"]["sev"]
+    logged = [d for d in serve.LEARNING.log.events() if d["kind"] == "decision"][-1]
+    assert "flags" not in logged["answers"]["sev"] and logged["meta"]["flags"]["sev"]["sev_severe"]["on"]
+    settings.set_values(path, {"flags.sev_severe": {**SEV, "run": "JohnP1/d1a-e2b-mlx-q8@v0.6"}})
+    import os; os.utime(path, (os.path.getmtime(path) + 5,) * 2)
+    other = serve.Server._body(fake, req, meta, ps, {"tokens": 1, "latency_ms": 1.0})
+    assert "flags" not in other["answers"]["sev"]
