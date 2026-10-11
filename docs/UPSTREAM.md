@@ -119,6 +119,16 @@ the Apache License 2.0. This file records where D1A's code came from and what D1
 - **Kept as is**: the frozen suites in `evals/` (large partitions still download from Kev's Hub dataset
   `jaredpalmer/kev-suites`), the suite builders in `scripts/`.
 
+## How much is still Kev
+
+`python scripts/kev_share.py` compares each file with its Kev counterpart line by line and reports, per area, the lines
+kept from Kev, changed and new. It counts text, not authorship. A file rewritten from scratch (`d1a/core/api.py`,
+`d1a/eval/metrics.py`, `d1a/eval/suite.py` and the others proven identical by `scripts/equivalence/`) still matches Kev
+wherever a constant, a formula, an argument name or a short idiom is the same by design: the same mask, pointer head and
+metrics must give the same numbers. Those lines stay counted as kept, and the share will not reach 0% while D1A keeps
+Kev's backbone, mask and head. The rest of the kept code is live, or on the Qwen and Qwen3.5 paths D1A keeps (#65,
+2026-10-11: nothing Kev-only was left to prune).
+
 ## Derived files
 
 Files taken from Kev and modified. Each carries the notice "Modified from Kev (...)" and a one-line summary of its
