@@ -16,6 +16,88 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-11
+
+D1A learns from its outcomes on its own: a settings file for the self-learning loop, replay of every earlier outcome
+onto a new model, a scheduled gate, and learned flags served beside the answer. The 0.3 module paths are gone, and the
+model server no longer aborts when photo, voice or video requests overlap other work on Apple Silicon.
+
+### What's new
+
+- **Self-learning you can configure.** `D1A_LEARNING=<file>` holds the loop's settings (`python -m
+  d1a.learning.feedback config init|show|set|validate`); `feedback tick` replays earlier outcomes onto the served model,
+  fail-closed on anything it trained on, and runs the promotion gate after N new outcomes or at a daily time. See
+  docs/CONFIGURATION.md, "Self-learning".
+- **Learned flags in answers.** A flag fitted offline with `python -m d1a.learning.flags` and listed in the settings
+  file is served inside its question's answer (`flags.<name>`), without changing the answer. None is configured by
+  default.
+- **A stable server on Apple Silicon.** Overlapping media and text requests no longer crash the server (#244): a
+  45-minute stress run of 756 media and 2,136 text requests ended with no abort, where 0.4.0 aborted within seconds.
+- **A smaller package surface.** The 27 flat module paths of 0.3 are removed, and new runs are saved without `head.pt`.
+
+### Added
+
+- The server serves learned flags (#237, part 2): a flag in the `D1A_LEARNING` file's `flags`, fitted for the served run,
+  is added inside its question's answer (`flags.<name>`: `on`, `p`, `t`, `space`), computed on the model's own
+  probabilities before the outcome calibrator, and kept in the decision log's meta. The answer never changes, and the file
+  is re-read when it changes, so a flag is served or withdrawn without a restart.
+- Self-learning v2 (#233, #240):
+  - **Settings file.** `D1A_LEARNING=<file>` holds the loop's settings, validated, with a last-valid fallback and an
+    audit log. `python -m d1a.learning.feedback config init|show|set|validate` manages it. Unset, everything behaves as
+    before.
+  - **Replay.** `feedback replay` and `feedback tick` re-score an earlier model's decisions that have outcomes through
+    the live server (header `x-d1a-replay-of`), so a new model starts with every earlier outcome. It is fail-closed: no
+    replay without the served model's complete trained manifest (`feedback trained`), and none for a decision whose PR
+    or state is in that model's training, or that has no PR id. For E4B v0.6, v0.2 run 1's mix is lost, so its subsets
+    are covered by the whole partitions they came from (night2 dates and unknowable, the hard, devtools and documents
+    train partitions): the exclusion is a superset by partition.
+  - **The tick** runs the gate after N new outcomes or at a daily time. Each gate report gives `mde`, the smallest
+    log-loss gain its held-out set can detect, and the gate's interval level is a setting.
+  - `d1a/core/settings.py` lists every `D1A_*` setting with its default and reader, every module reads them through it,
+    and `python -m d1a.serving.serve --show-config` prints them (secrets masked).
+
+### Changed
+
+- A new run is saved without `head.pt` (`d1a_config.json` and `head.safetensors` only), as 0.4 announced. A run from
+  before 0.4 keeps its `head.pt`, rewritten with the new metadata (a recalibration, say), so its two copies never
+  disagree; reading `head.pt` stays.
+
+### Removed
+
+- The flat module paths of D1A 0.3 (`d1a.serve`, `d1a.feedback`, `d1a.train`, and the 24 others; `python -m d1a.<old>`),
+  shims since 0.4: import and run `d1a.serving.serve`, `d1a.learning.feedback`, `d1a.training.train`, ... instead.
+  `d1a/_layout.py` keeps the old-to-new map for the provenance scripts. No caller of ours used an old path.
+
+### Fixed
+
+- The model server could abort on Apple Silicon ("commit an already committed command buffer") when photo, voice or video
+  requests overlapped other work (#244): torch's MPS stream is not thread-safe, yet an MLX model's thread synced it on
+  every batch while the media encoder used it from a request thread. With an MLX model the model thread no longer touches
+  torch's MPS stream (MLX waits for its own work), and the encoder copies its result to the CPU under its lock. Text and
+  media still run side by side.
+
+### Models tested with this release
+
+| Checkpoint | Hugging Face tag |
+|---|---|
+| D1A-E4B v0.6, PyTorch | `JohnP1/d1a-e4b@v0.6` |
+| D1A-E4B v0.6, MLX 8-bit (with photo, voice and video encoders) | `JohnP1/d1a-e4b-mlx-q8@v0.6` |
+| D1A-E4B v0.6, Core ML (text, ≤ 512 tokens) | `JohnP1/d1a-e4b-coreml@v0.6` |
+| D1A-E2B v0.6, PyTorch | `JohnP1/d1a-e2b@v0.6` |
+| D1A-E2B v0.6, MLX 8-bit (with photo, voice and video encoders) | `JohnP1/d1a-e2b-mlx-q8@v0.6` |
+| D1A-E2B v0.6, Core ML (text, ≤ 512 tokens) | `JohnP1/d1a-e2b-coreml@v0.6` |
+
+The Mac mini serves `JohnP1/d1a-e4b-mlx-q8@v0.6` with this code (demo smoke test 145/145), and the quality gate
+on real weights finds no changed answer between 0.4.0 and 0.5.0. Package 0.5.0 serves every model tag from v0.1 to v0.6.
+
+### Upgrade notes (from 0.4.0)
+
+- The 0.3 module paths (`d1a.serve`, `d1a.feedback`, `d1a.train`, ...) are removed: use `d1a.serving.serve`,
+  `d1a.learning.feedback`, `d1a.training.train`, ... (`d1a/_layout.py` lists every old-to-new name).
+- New runs have no `head.pt`, so D1A 0.3 cannot load them; 0.4 and later can. Runs that have a `head.pt` still load.
+- New settings: `D1A_LEARNING` (the self-learning settings file). With it unset, nothing changes.
+- An answer may carry a `flags` field when a flag is configured; clients that read answers strictly should allow it.
+
 ## [0.4.0] - 2026-10-11
 
 D1A on the v0.6 models: a package layout of its own, release rules with statistical gates, use-case temperatures,
@@ -708,6 +790,8 @@ Checkpoints on Hugging Face, newest first. Each version continues training the p
 Retired, kept for reproducibility: JohnP1/d1a-e4b-routing and its MLX build (now part of v0.2), and
 JohnP1/d1a-e4b-pr-labeler-mlx-q8 (now v0.3).
 
-[Unreleased]: https://github.com/jonpol01/d1a/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/jonpol01/d1a/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/jonpol01/d1a/releases/tag/v0.5.0
+[0.4.0]: https://github.com/jonpol01/d1a/releases/tag/v0.4.0
 [0.3.0]: https://github.com/jonpol01/d1a/releases/tag/v0.3.0
 [0.2.0]: https://github.com/jonpol01/d1a/releases/tag/v0.2.0
