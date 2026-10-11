@@ -188,6 +188,17 @@ def choice_pairs(resolved, qid):
     return probs, labels
 
 
+def served_choices(resolved, qid):
+    """The served choice for each pair choice_pairs keeps (the same order): meta.served's when the server changed what it
+    served (a decode rule, d1a.learning.rules), else the logged answer's."""
+    out = []
+    for d in resolved:
+        pr = _choice_probs(d["answers"].get(qid))
+        if pr is not None and d["labels"].get(qid) in pr:
+            out.append((((d.get("meta") or {}).get("served") or {}).get(qid) or d["answers"][qid])["choice"])
+    return out
+
+
 def _rescale(probs, s):
     """{option: p ** s}, renormalised: temperature 1/s, the same order of options."""
     lp = {k: s * math.log(max(v, EPS)) for k, v in probs.items()}; top = max(lp.values())
@@ -474,7 +485,10 @@ def main(argv=None):
             if len(y): print(f"  {qid}: {len(y)} outcomes, {y.mean():.1%} true, mean P {p.mean():.3f}, log loss {log_loss(y, p).mean():.4f}")
             if labels:
                 top = np.mean([max(pr, key=pr.get) == label for pr, label in zip(probs, labels)])
-                print(f"  {qid}: {len(labels)} outcomes, top choice right {top:.1%}, log loss {choice_log_loss(probs, labels).mean():.4f}")
+                sc = served_choices(res, qid); moved = sum(c != max(pr, key=pr.get) for c, pr in zip(sc, probs))   # a decode rule served another choice
+                served = f", served choice right {np.mean([c == label for c, label in zip(sc, labels)]):.1%} ({moved} moved by a rule)" if moved else ""
+                print(f"  {qid}: {len(labels)} outcomes, top choice right {top:.1%}{served}"
+                      + f", log loss {choice_log_loss(probs, labels).mean():.4f}")
     elif a.cmd == "records":
         recs = records(res, a.src or "feedback"); Path(a.out).write_text("".join(json.dumps(x) + "\n" for x in recs), encoding="utf-8")
         print(f"wrote {len(recs)} labelled requests to {a.out}")

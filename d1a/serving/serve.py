@@ -17,6 +17,9 @@ A request may name its use case ("use_case": "routing", d1a.core.api.SystemOneRe
 temperature for it (d1a.training.calibrate --use-case; GET /v1/models lists them under use_case_temperatures), that
 request's probabilities are read at it; otherwise, and for a request without one, at the checkpoint's temperature. Each
 request in a batch keeps its own, and the prefix cache holds states only, so cached requests are read at theirs too.
+The self-learning settings file (D1A_LEARNING, d1a.learning.settings) is re-read when it changes: its learned flags (#237)
+are served beside the answers, and its decode rules (#252, d1a.learning.rules) change the served choice of requests that
+send the rule's use case (the answer then carries "rule"); the log keeps the model's own answers either way.
 
 --idle-unload N drops the model (and the media encoders) after N seconds without a request and loads it again on the
 next one; GET /v1/models answers either way without loading it, and so does GET /metrics (Prometheus text: loaded, requests,
@@ -40,7 +43,7 @@ from d1a.core.api import SystemOneRequest, to_record, to_answers, output_tokens,
 from d1a.backends.checkpoint import EXPORT_CONFIG, Checkpoint, LoadOptions, fused_available, is_hub_id
 from d1a.backends.device import allocated_bytes, default_device, empty_cache, out_of_memory, sync
 from d1a.learning.feedback import FeedbackLog, OutcomeCalibrator
-from d1a.learning import flags
+from d1a.learning import flags, rules
 from d1a.serving.media import MEDIA_DIR, MediaEncoder, MediaRequest, OnDemand, with_media
 from d1a.core.encoding import SERVE_MAX_BRANCH, SERVE_MAX_STATE, layout
 
@@ -268,7 +271,8 @@ class Server:
         T = head.temperature_for(req.use_case) if hasattr(head, "temperature_for") else None
         raw = to_answers(ps, meta)
         fl = flags.compute(raw, FLAGS.current(), self.checkpoint.requested)   # learned flags (#237), on the model's own answers
-        answers, did = LEARNING.decide(req, raw, self.checkpoint.requested, T, getattr(head, "temperature", None), log, flags=fl)
+        fired = rules.compute(raw, RULES.current(), self.checkpoint.requested, req.use_case)   # served decode rules (#252), likewise
+        answers, did = LEARNING.decide(req, raw, self.checkpoint.requested, T, getattr(head, "temperature", None), log, flags=fl, fired=fired)
         if fl: answers = flags.attach(copy.deepcopy(answers), fl)   # served beside the answers; the log's answers stay the model's
         body = {"model": req.model, "answers": answers, "usage": {"input_tokens": m["tokens"], "output_tokens": output_tokens(self.tok, answers)}, "latency_ms": m["latency_ms"]}
         if did is not None: body["decision_id"] = did
@@ -294,17 +298,19 @@ class Learning:
             if mtime != self._mtime: self._cal, self._mtime = OutcomeCalibrator.load(self.calibrator_path), mtime
             return self._cal
 
-    def decide(self, req, answers, run, temperature=None, own=None, log=True, flags=None):
+    def decide(self, req, answers, run, temperature=None, own=None, log=True, flags=None, fired=None):
         """Answers as served (recalibrated when a calibrator is set), and the decision id when logging is on and `log` is not False. The log keeps the
         model's own answers, which the next `d1a.learning.feedback calibrate` must fit; what was served is kept beside them in meta,
         and so are the request's use case and the temperature its probabilities were read at. The calibrator corrects them
-        only with entries fitted at that temperature (OutcomeCalibrator.at; `own`: the checkpoint's)."""
+        only with entries fitted at that temperature (OutcomeCalibrator.at; `own`: the checkpoint's). `fired`: the decode
+        rules that fired on these answers (d1a.learning.rules.compute), applied after the calibrator, which never moves a choice."""
         cal = self.calibrator()
-        served = cal.at(temperature, own).apply(answers) if cal is not None else answers
+        served = rules.apply(cal.at(temperature, own).apply(answers) if cal is not None else answers, fired)
         if self.log is None or not log: return served, None
         questions = {qid: q.model_dump(exclude_none=True) for qid, q in req.questions.items()}
         replay_of = log.get("replay_of") if isinstance(log, dict) else None   # d1a.learning.loop.replay re-scoring an earlier decision
-        meta = {**({"served": served} if served is not answers else {}), **({"flags": flags} if flags else {})} or None   # flags: #237
+        meta = {**({"served": served} if served is not answers else {}), **({"flags": flags} if flags else {}),
+                **({"rules": fired} if fired else {})} or None   # flags: #237; rules: #252
         with self._lock: did = self.log.decision(req.state, questions, answers, run=run, meta=meta,
                                                  use_case=req.use_case, temperature=temperature, replay_of=replay_of)
         return served, did
@@ -320,6 +326,7 @@ class Learning:
 
 LEARNING = Learning(FEEDBACK_LOG, OUTCOME_CALIBRATOR)
 FLAGS = flags.Configured()   # the learned flags (#237) in the D1A_LEARNING file, re-read when it changes
+RULES = rules.Configured()   # the served decode rules (#252) in the same file
 LOG_HEADER = "x-d1a-decision-log"   # "off": answer, but keep the decision out of the log (a demo, a smoke test: no outcome follows)
 REPLAY_HEADER = "x-d1a-replay-of"   # <decision id>: d1a.learning.loop.replay re-scoring that decision with the model served now
 DECISION_ID = re.compile(r"^[0-9a-f]{32}$")

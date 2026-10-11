@@ -30,8 +30,11 @@ DEFAULTS = {
     "replay": {"enabled": True, "on_model_change": True, "exclude_no_pr_id": True, "per_tick_cap": 50, "pause_s": 1.0},
     "reports": {"webhook_file": None, "notify": ["promotion", "min_reached"]},
     "flags": {},   # learned decision thresholds (#237), by name; none by default, so a no-op. Read only by d1a.learning.flags
+    "rules": {},   # served decode rules (#252), by name; none by default, so a no-op. Read only by d1a.learning.rules
 }
 FLAG_KEYS = {"question", "options", "t", "space", "run", "budget", "fitted_on"}
+RULE_KEYS = {"question", "option", "t", "from", "space", "run", "use_case", "fitted_on"}
+NAMED = ("flags", "rules")   # sections of named entries, each checked whole (check_flag, check_rule) rather than key by key
 CI_LEVELS = (0.9, 0.95, 0.99)
 NOTIFY = ("promotion", "min_reached", "every_gate")
 HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
@@ -71,10 +74,10 @@ RULES = {   # key -> (check, what it must be)
 
 
 def flat(d, prefix=""):
-    """{"a": {"b": 1}} -> {"a.b": 1} (one level of sections; `flags` is checked by check_flag, not flattened)."""
+    """{"a": {"b": 1}} -> {"a.b": 1} (one level of sections; `flags` and `rules` are checked by check_flag and check_rule)."""
     out = {}
     for k, v in d.items():
-        if k == "flags": continue
+        if k in NAMED: continue
         if isinstance(v, dict): out.update({f"{prefix}{k}.{kk}": vv for kk, vv in v.items()})
         else: out[f"{prefix}{k}"] = v
     return out
@@ -105,6 +108,29 @@ def check_flag(name, f):
     return p
 
 
+def check_rule(name, r):
+    """A served decode rule (#252): {question, option, t, from, space, run, use_case, fitted_on: {kit, n, tested_on}}. The
+    served choice becomes `option` when the model's choice is in `from` and its raw probability of `option` reaches t, for
+    requests with that use case to `run` only (d1a.learning.rules). Fitted and tested offline, never by tick/promote. -> problems."""
+    if not isinstance(r, dict): return [f"rules.{name}: must be an object"]
+    p = [f"rules.{name}.{k}: unknown setting (known: {sorted(RULE_KEYS)})" for k in r if k not in RULE_KEYS]
+    p += [f"rules.{name}.{k}: missing" for k in sorted(RULE_KEYS) if k not in r]
+    for k in ("question", "option", "use_case"):
+        if k in r and not (isinstance(r[k], str) and r[k].strip()): p.append(f"rules.{name}.{k}: a non-empty string")
+    if "t" in r and not (_is_num(r["t"]) and 0 <= r["t"] <= 1): p.append(f"rules.{name}.t: a number from 0 to 1")
+    if "from" in r and not (_str_list(r["from"]) and r["from"] and r.get("option") not in r["from"]):
+        p.append(f"rules.{name}.from: a non-empty list of distinct option keys, without the rule's option")
+    if "space" in r and r["space"] != "raw": p.append(f"rules.{name}.space: must be \"raw\" (probabilities before the calibrator)")
+    if "run" in r and not (isinstance(r["run"], str) and "@" in r["run"]): p.append(f"rules.{name}.run: the model it was fitted for, repo@tag")
+    if "fitted_on" in r:
+        fo = r["fitted_on"]
+        if not (isinstance(fo, dict) and set(fo) == {"kit", "n", "tested_on"}): p.append(f"rules.{name}.fitted_on: {{kit, n, tested_on}}")
+        else:
+            if not all(isinstance(fo[k], str) and fo[k].strip() for k in ("kit", "tested_on")): p.append(f"rules.{name}.fitted_on: kit and tested_on name the kits")
+            if not (_is_int(fo["n"]) and fo["n"] >= 1): p.append(f"rules.{name}.fitted_on.n: an integer >= 1")
+    return p
+
+
 def validate(data):
     """-> the settings with defaults filled in; raises SettingsError listing every problem (unknown keys included)."""
     if not isinstance(data, dict): raise SettingsError("the settings file must hold a JSON object")
@@ -117,11 +143,19 @@ def validate(data):
         if section == "flags":
             for name, f in v.items(): problems += check_flag(name, f)
             continue
+        if section == "rules":
+            for name, r in v.items(): problems += check_rule(name, r)
+            per_q = {}
+            for name, r in v.items():
+                if isinstance(r, dict) and isinstance(r.get("question"), str): per_q.setdefault((r["question"], r.get("use_case")), []).append(name)
+            problems += [f"rules: {', '.join(sorted(n))} all decode {q!r} for use case {uc!r}; one rule per question and use case"
+                         for (q, uc), n in per_q.items() if len(n) > 1]
+            continue
         for key in v:
             if key not in DEFAULTS[section]: problems.append(f"{section}.{key}: unknown setting (known: {sorted(DEFAULTS[section])})")
     out = copy.deepcopy(DEFAULTS)
     for section, v in data.items():
-        if section == "flags" and isinstance(v, dict): out["flags"] = copy.deepcopy(v)
+        if section in NAMED and isinstance(v, dict): out[section] = copy.deepcopy(v)
         elif section in DEFAULTS and isinstance(v, dict) and section != "version":
             out[section].update({k: x for k, x in v.items() if k in DEFAULTS[section]})
     for key, value in flat(out).items():
@@ -190,10 +224,10 @@ def set_values(path, assignments, source="cli"):
     new = copy.deepcopy(current); changes = []
     for key, value in assignments.items():
         section, _, name = key.partition(".")
-        if section == "flags" and name:   # flags.<name>={...} sets one flag, flags.<name>=null removes it
-            old = new.get("flags", {}).get(name)
-            if value is None: new.setdefault("flags", {}).pop(name, None)
-            else: new.setdefault("flags", {})[name] = value
+        if section in NAMED and name:   # flags.<name>={...} sets one flag, flags.<name>=null removes it; rules.<name> alike
+            old = new.get(section, {}).get(name)
+            if value is None: new.setdefault(section, {}).pop(name, None)
+            else: new.setdefault(section, {})[name] = value
             if old != value: changes.append((key, old, value))
             continue
         if not name or section not in DEFAULTS or section == "version" or name not in DEFAULTS[section]:

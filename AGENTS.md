@@ -70,7 +70,9 @@ stripped off, and new features come with their tests.
     example (`--playground <d1a-playground checkout>`) and the labeler replay (`runs/labeler-replay`, private, never
     committed), with flips, max |dp| and latency against a base/base floor, plus frozen suites with `--suites`. A change
     to how a request field is served also runs with the field sent: `--use-case routing` for the use-case temperature
-    path (the routing requests carry `"use_case"`, both servers get the same requests). For a
+    path (the routing requests carry `"use_case"`, both servers get the same requests). A decode rule (`rules` in the
+    `D1A_LEARNING` file) runs with `--head-learning <file> --labeler-use-case pr-labeler --expect-flips <question>`:
+    flips on that question only, max |dp| 0 everywhere, and 0 flips without the file. For a
     torch-only path, also `scripts/equivalence/real_weights.py --interleave`;
   - **the `quality-gate` check: off by default (John, 2026-10-06), turned on on demand,** for a pull request whose
     severity calls for it, and only when the local machine is free to run the gate (no training, scoring or other GPU
