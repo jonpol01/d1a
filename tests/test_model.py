@@ -82,7 +82,7 @@ def test_prefix_cache_matches_full_pass(smoke_run):
         a = torch.cat(m.probs_with_prefix(enc, prefix)); b = torch.cat(m.probs_with_prefix(enc, prefix))   # reuse twice: crop() must restore the cache
         assert (full - a).abs().max() < 1e-4 and (a - b).abs().max() < 1e-6
         p2, prefix2 = m.probs_and_prefix(enc)                                                               # single-pass miss path
-        assert (torch.cat(p2) - full).abs().max() < 1e-5 and prefix2[0] == prefix[0] and (prefix2[2] - prefix[2]).abs().max() < 1e-3 * prefix[2].abs().max()
+        assert (torch.cat(p2) - full).abs().max() < 1e-5 and prefix2[0] == prefix[0] and prefix2[2] is None and prefix[2] is None   # a prefix keeps no state hidden states (no readout reads them)
         assert (torch.cat(m.probs_with_prefix(enc, prefix2)) - full).abs().max() < 1e-4
         # a different question set on the same state also reuses the prefix
         r2 = {**r, "questions": r["questions"][:1]}; enc2 = m.encode(tok, r2)

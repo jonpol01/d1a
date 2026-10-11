@@ -172,3 +172,31 @@ def test_a_batch_mask_is_each_sequence_mask_padded_and_pad_rows_see_no_question(
     short = batch[1, 0] == 0
     for pad in range(len(segs[1]), batch.shape[-1]):
         assert short[pad, pad] and not any(short[pad, j] for j in range(len(segs[1])) if segs[1][j] != 0)
+
+
+def _mask_before_q_start(segs, dtype=torch.float32, length=None):
+    """branch_mask_batch as it was before q_start: every query row."""
+    L = max(max(len(s) for s in segs), length or 0)
+    s = torch.full((len(segs), L), -1)
+    for b, seg in enumerate(segs):
+        s[b, : len(seg)] = torch.tensor(seg)
+    causal = torch.tril(torch.ones(L, L, dtype=torch.bool))
+    same = (s[:, None, :] == s[:, :, None]) | (s[:, None, :] == 0)
+    allow = (causal[None] & same & (s != -1)[:, None, :]) | torch.eye(L, dtype=torch.bool)[None]
+    return torch.zeros(len(segs), L, L, dtype=dtype).masked_fill(~allow, torch.finfo(dtype).min)[:, None]
+
+
+def test_a_hit_mask_is_the_full_mask_from_its_first_query_row_on():
+    """A cache hit runs only the tokens after its state, so it builds only their query rows (q_start): exactly the full
+    mask's rows from q_start on, for the plain and the sliding-window mask, and q_start=0 is the full mask as before."""
+    segs = [[0, 0, 0, 0, 1, 1, 1, 2, 2, 3, 3, 3], [0, 0, 1, 1, 2, 2]]
+    for dtype in (torch.float32, torch.bfloat16):
+        full = branch_mask_batch(segs, "cpu", dtype=dtype)
+        assert torch.equal(full, _mask_before_q_start(segs, dtype))
+        for q in (0, 1, 4, 11):
+            assert torch.equal(branch_mask_batch(segs, "cpu", dtype=dtype, q_start=q), full[:, :, q:, :])
+    encs = [{"seg": [0, 0, 0, 1, 1, 1, 2, 2], "pos": [0, 1, 2, 3, 4, 5, 3, 4]}]
+    full = branch_masks(encs, "cpu", torch.float32, window=2)
+    for q in (0, 3, 6):
+        tail = branch_masks(encs, "cpu", torch.float32, window=2, q_start=q)
+        assert all(torch.equal(tail[k], full[k][:, :, q:, :]) for k in full)
