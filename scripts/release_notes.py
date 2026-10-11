@@ -5,6 +5,7 @@
     python scripts/release_notes.py --check-fragments        # every file in changes/ parses
     python scripts/release_notes.py assemble 0.4.0 [--date YYYY-MM-DD] [--write]   # the version's section from changes/
     python scripts/release_notes.py --release-check v0.4.0   # --check, and no fragment left unassembled (release.yml)
+    git diff --name-status origin/main...HEAD | python scripts/release_notes.py --check-pr 123 --author <login>   # (CI)
 
 Each change adds one fragment, changes/<PR number>-<slug>.md, instead of editing CHANGELOG.md, so pull requests never
 conflict on its Unreleased lines. A fragment is `### Section` headings (Added, Changed, Deprecated, Removed, Fixed,
@@ -118,6 +119,20 @@ def render(sections):
     return "\n\n".join(f"### {s}\n\n" + "\n".join(sections[s]) for s in SECTIONS if sections.get(s))
 
 
+def check_pr(number, author, name_status):
+    """A pull request's changes fragment, from `git diff --name-status base...HEAD`: it adds or edits at least one
+    changes/<number>-<slug>.md and adds no fragment without a number. Exempt: Dependabot's dependency bumps, and a release
+    (it deletes the assembled fragments). -> problems ([] when fine)."""
+    rows = [l.split("\t") for l in name_status.splitlines() if l.strip()]
+    frags = [(r[0][0], r[-1]) for r in rows if r[-1].startswith("changes/") and r[-1].endswith(".md") and r[-1] != "changes/README.md"]
+    if author == "dependabot[bot]" or any(status == "D" for status, _ in frags):
+        return []
+    mine = [f for s, f in frags if s in "AMR" and re.fullmatch(rf"changes/{number}-[a-z0-9][a-z0-9-]*\.md", f)]
+    loose = [f for s, f in frags if s in "AR" and not re.fullmatch(r"changes/\d+-[a-z0-9][a-z0-9-]*\.md", f)]
+    problems = [f"add a changes fragment named changes/{number}-<slug>.md (one per pull request; see changes/README.md)"] if not mine else []
+    return problems + [f"{f}: name the fragment changes/{number}-<slug>.md" for f in loose]
+
+
 def assemble(version, date, text, frags):
     """CHANGELOG text with the Unreleased section's items and every fragment's moved into a new `## [version] - date`
     section under `## [Unreleased]`, which is left empty. -> (new text, the new section's body)."""
@@ -142,6 +157,14 @@ def release_check(tag):
 
 
 if __name__ == "__main__":
+    if sys.argv[1:2] == ["--check-pr"]:
+        import argparse
+        ap = argparse.ArgumentParser(prog="release_notes.py --check-pr")
+        ap.add_argument("--check-pr", type=int, required=True); ap.add_argument("--author", required=True)
+        a = ap.parse_args(sys.argv[1:])
+        problems = check_pr(a.check_pr, a.author, sys.stdin.read())
+        print("\n".join(problems) or f"pull request #{a.check_pr}: its changes fragment is in place")
+        sys.exit(1 if problems else 0)
     if sys.argv[1:2] == ["--check-fragments"]:
         frags, errors = fragments()
         print("\n".join(errors) or f"{len(frags)} fragments in changes/ parse")

@@ -11,6 +11,14 @@ an SSH or GPG key registered on your GitHub account (`git config commit.gpgsign 
 `verified commits` check, the CI tests (Python 3.12, 3.13 and Apple Silicon), `lint`, `package builds and installs`, and
 `license`. CodeQL also blocks high-severity alerts.
 
+Inside those checks:
+- `verified commits` also refuses AI attribution in any commit message or in the pull request's body (a
+  `Co-Authored-By:` line naming Claude or Anthropic, or "Generated with Claude Code"). Editing the body re-runs it.
+- `package builds and installs` refuses a pull request without its changes fragment, `changes/<PR number>-<slug>.md`
+  (Dependabot's bumps and releases are exempt), and any added line holding a local machine path (`d1a/core/hygiene.py`).
+  The same path check runs before `d1a.training.study publish` and `scripts/golden_vectors.py --upload` send files to
+  the Hugging Face Hub.
+
 ## License and provenance
 
 D1A is built on [Kev](https://github.com/jaredpalmer/kev) by Jared Palmer (Apache-2.0), and Apache-2.0 §4 requires that

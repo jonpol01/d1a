@@ -14,7 +14,7 @@ import pytest
 # requests that each add a test file never edit the same line (they did when CI named every file, #136 and #138).
 OUTSIDE_UNIT_TESTS = {
     "tests/test_model.py": "needs real weights and the smoke checkpoint",
-    "tests/test_mlx.py": "needs MLX and real weights; its weight-free tests run in the Apple Silicon job",
+    "tests/test_mlx.py": "needs MLX and real weights; its weight-free test (-k merge_lora) runs in the Apple Silicon job",
 }
 ROOT = Path(__file__).resolve().parents[1]
 

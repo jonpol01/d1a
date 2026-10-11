@@ -144,6 +144,8 @@ def publish(out, to, allow_in_distribution=False, api=None):
     if api is None:
         from huggingface_hub import HfApi
         api = HfApi()
+    from d1a.core.hygiene import refuse_local_paths
+    refuse_local_paths(ckpt); refuse_local_paths(out / "study")   # before anything reaches the Hub
     api.create_repo(repo, private=True, exist_ok=True)
     api.upload_folder(folder_path=str(ckpt), path_in_repo=f"{prefix}/checkpoint", repo_id=repo, commit_message=f"{prefix}: checkpoint",
                       ignore_patterns=["resume/*"])

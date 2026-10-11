@@ -2,9 +2,10 @@ name: verified-commits
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, edited]   # edited: a changed pull request body is checked again
 
 permissions:
-  contents: read        # every step only reads the pull request's commits
+  contents: read        # every step only reads the pull request's commits and body
   pull-requests: read
 
 jobs:
@@ -12,6 +13,7 @@ jobs:
     name: verified commits
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - name: Every commit in the pull request carries a verified signature
         env:
           GH_TOKEN: ${{ github.token }}
@@ -26,3 +28,11 @@ jobs:
             echo "::error::every commit in a pull request must show GitHub's Verified badge (a signed commit; see CONTRIBUTING.md)"
             exit 1
           fi
+      - name: No AI attribution in the commits or the pull request body
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          BODY: ${{ github.event.pull_request.body }}   # an environment variable, never interpolated into the script
+        run: |
+          gh api --paginate "repos/$REPO/pulls/$PR/commits" --jq '.[].commit.message' | python3 scripts/check_hygiene.py attribution

@@ -65,7 +65,7 @@ jobs:
         timeout-minutes: 15
         env:
           D1A_TEST_MLX_DEVICE: cpu
-        run: uv run python -m pytest tests/test_mlx_export.py tests/test_unit.py -k "mlx or ple_on_flash" -v
+        run: uv run python -m pytest tests/test_mlx_export.py tests/test_unit.py -k "mlx or ple_on_flash" -v && uv run python -m pytest tests/test_mlx.py -k merge_lora -v
 
   lint:
     runs-on: ubuntu-latest
@@ -80,6 +80,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # the pull-request checks below diff against the base branch
+      # every pull request carries its changes fragment, and adds no local machine path (scripts/release_notes.py, d1a/core/hygiene.py)
+      - name: Pull request hygiene
+        if: github.event_name == 'pull_request'
+        env:
+          BASE: ${{ github.base_ref }}
+          PR: ${{ github.event.pull_request.number }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          git diff --name-status "origin/$BASE...HEAD" | python3 scripts/release_notes.py --check-pr "$PR" --author "$AUTHOR"
+          git diff -U0 "origin/$BASE...HEAD" | python3 scripts/check_hygiene.py paths
       - uses: astral-sh/setup-uv@v5
       - run: uv build
       # the wheel installs on its own and reports pyproject.toml's version, which CHANGELOG.md must cover
