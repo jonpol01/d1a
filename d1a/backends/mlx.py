@@ -398,13 +398,13 @@ def export_mlx(ck, out, bits=None, group_size=64, embeddings=True, per_layer_bit
     from mlx_lm.utils import quantize_model, save_config, save_model
     from safetensors.torch import save_file
 
-    from d1a.backends.checkpoint import EXPORT_CONFIG, EXPORT_HEAD, export_config, resolve_run
+    from d1a.backends.checkpoint import EXPORT_CONFIG, EXPORT_HEAD, base_dir, export_config
     from d1a.core.encoding import layout, load_tokenizer, pad_id
 
     if ck.export is not None: raise ValueError(f"{ck.path} is already an MLX export")
     meta, out = ck.meta, Path(out)
     tok = load_tokenizer(meta.base, revision=meta.base_revision)
-    lm, config = load_mlx_lm(resolve_run(f"{meta.base}@{meta.base_revision or ''}"))
+    lm, config = load_mlx_lm(base_dir(meta))
     merge_lora(lm, ck.path)
     quantization = None
     if bits:

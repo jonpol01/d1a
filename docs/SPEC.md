@@ -164,4 +164,6 @@ version 1): 40 requests and 154 questions, each record with its System One `requ
 its token `ids`, and per question the `qid`, `type`, `keys` and fp32 CPU `probs`. A conforming implementation must produce
 the token ids exactly and every probability within 1e-5. `tests/test_conformance.py` checks this through the model,
 through `d1a.serving.serve`, and through `scripts/golden_vectors.py compare`, which compares any two answer sets (another backend,
-another port) the same way.
+another port) the same way. The MLX backend passes the same vectors (`tests/test_conformance_mlx.py`, Apple Silicon): the
+LoRA checkpoint and its export folder within 1e-5, an 8-bit export with the same ids and no flip on a question the
+reference decides; the photo and voice towers, which mlx-lm drops on load, are not part of conformance.

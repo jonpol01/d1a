@@ -65,7 +65,7 @@ jobs:
         timeout-minutes: 15
         env:
           D1A_TEST_MLX_DEVICE: cpu
-        run: uv run python -m pytest tests/test_mlx_export.py tests/test_unit.py -k "mlx or ple_on_flash" -v && uv run python -m pytest tests/test_mlx.py -k merge_lora -v
+        run: uv run python -m pytest tests/test_mlx_export.py tests/test_unit.py -k "mlx or ple_on_flash" -v && uv run python -m pytest tests/test_mlx.py -k merge_lora -v && uv run python -m pytest tests/test_conformance_mlx.py -v
 
   lint:
     runs-on: ubuntu-latest

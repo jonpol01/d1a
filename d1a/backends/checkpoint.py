@@ -52,6 +52,12 @@ def is_hub_id(run):
     return not os.path.isdir(run) and HUB_ID.fullmatch(str(run)) is not None
 
 
+def base_dir(meta):
+    """The base model's local directory: `meta.base` itself when it is one (as the torch path reads it), else the Hub
+    snapshot of base@base_revision (the one the torch path already cached)."""
+    return meta.base if os.path.isdir(meta.base) else resolve_run(f"{meta.base}@{meta.base_revision or ''}")
+
+
 def resolve_run(run):
     """A local directory as given, or a Hub repo ("owner/name@revision", the revision optional) downloaded to the HF cache.
     -> the path as a str. An MLX export's photo and voice encoders (media/, ~1 GB) are left for d1a.serving.serve to fetch on the
@@ -435,8 +441,7 @@ class Checkpoint:
             return MLXDecisionModel(self.path, pad_id(tok), head_dim=self.meta.head_dim, ple_flash=flash)
         if not self.mlx_base():
             raise ValueError(f"the MLX backend is for the hybrid (Qwen3.5) and Gemma 4 bases; {self.meta.base} is another attention-only base and runs on MPS with backend=torch")
-        base_dir = resolve_run(f"{self.meta.base}@{self.meta.base_revision or ''}")   # the snapshot the torch path already cached
-        model = MLXDecisionModel(base_dir, pad_id(tok), head_dim=self.meta.head_dim, ple_flash=flash)
+        model = MLXDecisionModel(base_dir(self.meta), pad_id(tok), head_dim=self.meta.head_dim, ple_flash=flash)
         merge_lora(model.lm, self.path, opts.lora_scale)
         return model
 

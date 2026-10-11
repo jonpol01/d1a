@@ -1,0 +1,110 @@
+"""MLX conformance (#64): the tiny Gemma 4 fixture (tests/golden/tiny-gemma4) through the MLX backend must give golden.json's
+token ids exactly and its fp32 probabilities within FP32_TOLERANCE, both as a LoRA checkpoint (the adapter merged at load)
+and as an export folder (d1a.backends.mlx.export_mlx, the path of every served build); an 8-bit export keeps the ids and
+flips no answer the reference decides by more than twice its largest error (measured 10-11: max |dp| 0.064, mean 0.0076
+over 154 questions). mlx-lm's Gemma 4 model is the text model under a multimodal wrapper whose photo and voice towers it
+drops on load, so the fixture gets that wrapper here (key names and config only) and runs through the same code as the
+served exports. The MLX tests need Apple Silicon; the base_dir test runs anywhere.
+    uv run python -m pytest tests/test_conformance_mlx.py -v
+"""
+import json
+import shutil
+from pathlib import Path
+
+import pytest
+import torch
+
+from d1a.backends.checkpoint import Meta, base_dir, mlx_available, read_meta, write_meta
+
+ROOT = Path(__file__).resolve().parents[1]
+FIXTURE = ROOT / "tests" / "golden" / "tiny-gemma4"
+FP32_TOLERANCE = 1e-5   # the torch bar; measured 3.0e-6 on the CPU and 2.6e-6 on Metal (10-11)
+needs_mlx = pytest.mark.skipif(not mlx_available(), reason="the MLX backend needs mlx-lm on Apple Silicon")
+
+
+def test_a_local_base_directory_is_used_as_it_is(tmp_path, monkeypatch):
+    from d1a.backends import checkpoint
+    calls = []
+    monkeypatch.setattr(checkpoint, "resolve_run", lambda run: calls.append(run) or "/hub/snapshot")
+    assert base_dir(Meta(base=str(tmp_path), base_revision="abc")) == str(tmp_path) and not calls
+    assert base_dir(Meta(base="google/gemma-4-E4B", base_revision="abc")) == "/hub/snapshot"
+    assert calls == ["google/gemma-4-E4B@abc"]
+
+
+@pytest.fixture(scope="module")
+def checkpoint(tmp_path_factory):
+    """The fixture's checkpoint, its base given the multimodal Gemma 4 layout (model.language_model.*, a text_config)."""
+    from safetensors.numpy import load_file, save_file
+    tmp = tmp_path_factory.mktemp("mlx-conformance")
+    base, ck = tmp / "base", tmp / "checkpoint"
+    base.mkdir()
+    weights = load_file(str(FIXTURE / "base" / "model.safetensors"))
+    save_file({k.replace("model.", "model.language_model.", 1): v for k, v in weights.items()}, str(base / "model.safetensors"))
+    text = json.loads((FIXTURE / "base" / "config.json").read_text(encoding="utf-8"))
+    # transformers sizes the full-attention heads from the weights when the config leaves global_head_dim out; mlx-lm
+    # defaults it to 512, so it is written here from the first full-attention layer's query projection
+    full = text["layer_types"].index("full_attention")
+    text = {"global_head_dim": weights[f"model.layers.{full}.self_attn.q_proj.weight"].shape[0] // text["num_attention_heads"], **text}
+    config = {"architectures": ["Gemma4ForConditionalGeneration"], "model_type": "gemma4", "vocab_size": text["vocab_size"], "text_config": text}
+    (base / "config.json").write_text(json.dumps(config), encoding="utf-8")
+    for name in ("generation_config.json", "tokenizer.json", "tokenizer_config.json"):
+        shutil.copyfile(FIXTURE / "base" / name, base / name)
+    shutil.copytree(FIXTURE / "checkpoint", ck)
+    meta = read_meta(ck)
+    meta.base = str(base)   # absolute, where the committed checkpoint names its base relative to the repository
+    write_meta(ck, meta)
+    return ck
+
+
+@pytest.fixture(scope="module")
+def golden():
+    return json.loads((FIXTURE / "golden.json").read_text(encoding="utf-8"))
+
+
+def answers(run, golden):
+    """Load `run` on the MLX backend; -> [(record id, golden question, probabilities)] over every question, after checking
+    the token ids."""
+    from d1a.backends.checkpoint import LoadOptions, load
+    from d1a.backends.torch import SERVE_MAX_BRANCH, SERVE_MAX_STATE
+    from d1a.core.api import SystemOneRequest, to_record
+    tok, model = load(str(run), "mps", LoadOptions(backend="mlx"))
+    out = []
+    for record in golden["records"]:
+        rec, _ = to_record(SystemOneRequest.model_validate(record["request"]))
+        enc = model.encode(tok, rec, max_state=SERVE_MAX_STATE, max_branch=SERVE_MAX_BRANCH)
+        assert enc["ids"] == record["ids"], record["id"]
+        out += [(record["id"], q, p.float().cpu()) for p, q in zip(model.probs(enc), record["questions"], strict=True)]
+    return out
+
+
+def worst(found):
+    return max((p - torch.tensor(q["probs"])).abs().max().item() for _, q, p in found)
+
+
+@needs_mlx
+def test_a_lora_checkpoint_matches_the_golden_vectors(checkpoint, golden):
+    err = worst(answers(checkpoint, golden))
+    assert err < FP32_TOLERANCE, err
+
+
+@needs_mlx
+def test_an_export_folder_matches_the_golden_vectors(checkpoint, golden, tmp_path):
+    from d1a.backends.checkpoint import Checkpoint
+    from d1a.backends.mlx import export_mlx
+    export_mlx(Checkpoint(checkpoint), tmp_path / "export")
+    err = worst(answers(tmp_path / "export", golden))
+    assert err < FP32_TOLERANCE, err
+
+
+@needs_mlx
+def test_an_8bit_export_keeps_the_ids_and_every_decided_answer(checkpoint, golden, tmp_path):
+    """The tiny model's 32-wide random weights quantize far worse than real ones (the README's parity table holds the
+    real-weight numbers), so the bar here is ids and decided answers, with the error measured, not a fixed bound."""
+    from d1a.backends.checkpoint import Checkpoint
+    from d1a.backends.mlx import export_mlx
+    export_mlx(Checkpoint(checkpoint), tmp_path / "q8", bits=8, group_size=32, embeddings=False)   # 32: the tiny hidden size
+    found = answers(tmp_path / "q8", golden); err = worst(found)
+    for rid, q, p in found:
+        ref = torch.tensor(q["probs"])
+        if ref.numel() > 1 and float(ref.topk(2).values.diff().abs()) > 2 * err:   # decided: the top-2 margin exceeds twice the error
+            assert int(p.argmax()) == int(ref.argmax()), (rid, q["qid"], err)
