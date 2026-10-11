@@ -1,7 +1,7 @@
 """Where each top-level module of D1A 0.3 lives since #60 (old module -> new dotted path under d1a).
 
-The shims (d1a/<old>.py) use it for one release; scripts/kev_share.py and scripts/check_license.py use it for good, to
-compare each file with Kev's file of the old name."""
+The one-release shims at the old paths were removed in 0.5; scripts/kev_share.py and scripts/check_license.py use this map
+for good, to compare each file with Kev's file of the old name."""
 MOVED = {'api': 'core.api',
          'versions': 'core.versions',
          'backbone': 'backends.backbone',
