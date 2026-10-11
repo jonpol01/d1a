@@ -109,12 +109,14 @@ class FeedbackLog:
 
     def resolved(self, src=None, run=None, events=None):
         """Decisions with an outcome, oldest first. Each question's label comes from the outcomes of the most trusted source
-        (PREFER), the latest of them; `src` (a source, or a list of them) keeps only outcomes from those sources. label_src
+        (PREFER), the latest of them; `src` (a source, or a list of them) keeps only outcomes from those sources, or, as
+        {question: [sources]} with "*" for the other questions, keeps per question only the labels of its sources. label_src
         says where each label came from. `run` keeps only the decisions that model made (repo@tag, as logged): a calibrator
         corrects one model's probabilities, and fitted across a model switch it would correct the new model by the old one's
         errors. A replay (a decision with replay_of, see replay()) takes the outcomes of the decision it re-scores, and
         says which model made that one in replayed_from."""
-        srcs = None if src is None else {src} if isinstance(src, str) else set(src)
+        per_q = src if isinstance(src, dict) else None
+        srcs = None if src is None or per_q is not None else {src} if isinstance(src, str) else set(src)
         events = self.events() if events is None else events
         decisions, outcomes, runs = {}, {}, {}
         for e in events:
@@ -122,7 +124,11 @@ class FeedbackLog:
                 runs[e["id"]] = e.get("run")
                 if run is None or e.get("run") == run: decisions[e["id"]] = e
         for e in self._outcomes(events):
-            if srcs is None or e.get("meta", {}).get("src") in srcs: outcomes.setdefault(e["id"], []).append(e)
+            s = e.get("meta", {}).get("src")
+            if per_q is not None:   # a source can be trusted for one question and not another (a reviewer's severity scale, #252)
+                keep = {q: v for q, v in e["labels"].items() if s in per_q.get(q, per_q.get("*", [s]))}
+                if keep: outcomes.setdefault(e["id"], []).append({**e, "labels": keep})
+            elif srcs is None or s in srcs: outcomes.setdefault(e["id"], []).append(e)
         latest = {}   # one replay per original and run: two overlapping replays of a decision must not count it twice
         for i, d in decisions.items():
             if d.get("replay_of"):

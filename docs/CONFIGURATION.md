@@ -123,7 +123,7 @@ The settings file (`D1A_LEARNING`; `config show` prints it). Unset, or a key lef
 | Setting | Default | Allowed | What it does |
 |---|---|---|---|
 | `outcomes.enabled` | `true` | true, false | Whether outcome collectors (the playground's poster) run. |
-| `outcomes.sources` | `null` (all) | a list, e.g. `["reviewer", "human"]` | The outcome sources that count for learning. |
+| `outcomes.sources` | `null` (all) | a list, e.g. `["reviewer", "human"]`, or per question, e.g. `{"sev": ["human"], "*": ["reviewer", "human"]}` (`"*"`: every other question) | The outcome sources that count for learning. Per question, a source can teach one question and not another: a review bot whose severity scale differs from your labellers' teaches change type but not severity. Outcomes that do not count are still logged. |
 | `promotion.auto` | `true` | true, false | `false`: the gate still runs and reports, and never writes the calibrator. |
 | `promotion.questions` | `null` (all) | a list of question ids | The questions that learn. |
 | `promotion.min_outcomes` | `20` | ≥ 10 | Fit outcomes a question needs before it is fitted at all. |

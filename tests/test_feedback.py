@@ -193,6 +193,25 @@ def test_a_void_withdraws_one_sources_outcomes_and_the_next_source_decides(tmp_p
     with pytest.raises(ValueError): log.void([did], "human", "")
 
 
+def test_per_question_sources_keep_the_reviewers_type_but_not_its_severity(tmp_path):
+    """outcomes.sources per question (#252: the review bot's severity scale is not the maintainers'): with {"sev": ["human"],
+    "*": ["reviewer", "human"]} a reviewer outcome teaches type and blast but never severity; a person's severity still counts."""
+    from d1a.learning import settings
+    log = FeedbackLog(tmp_path / "f.jsonl"); did = _pr_decision(log); other = _pr_decision(log)
+    log.outcome(did, {"type": "docs", "blast": "broad", "sev": "P2"}, {"src": "reviewer"})
+    log.outcome(other, {"sev": "P1"}, {"src": "human"})
+    per_q = {"sev": ["human"], "*": ["reviewer", "human"]}
+    a, b = log.resolved(per_q)
+    assert a["labels"] == {"type": "docs", "blast": "broad"} and a["label_src"] == {"type": "reviewer", "blast": "reviewer"}
+    assert b["labels"] == {"sev": "P1"}
+    assert log.resolved()[0]["labels"]["sev"] == "P2"   # unfiltered, the reviewer's severity is still in the log
+    path = tmp_path / "learning.json"; settings.init(path)
+    settings.set_values(path, {"outcomes.sources": per_q})
+    assert settings.load(path)[0]["outcomes"]["sources"] == per_q
+    for bad in ({}, {"sev": []}, {"sev": "human"}, {"sev": ["human", "human"]}):
+        with pytest.raises(ValueError): settings.set_values(path, {"outcomes.sources": bad})
+
+
 def test_an_outcome_after_a_void_counts_again(tmp_path):
     """A void covers what came before it: a person correcting the same decision later still wins over the reviewer."""
     log = FeedbackLog(tmp_path / "f.jsonl"); did = _pr_decision(log)
