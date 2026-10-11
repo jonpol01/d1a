@@ -72,6 +72,41 @@ def nll_at_temperature(row, temperature=1.0):
     return -math.log(max(float(probabilities_at_temperature(row, temperature)[row["label"]]), EPSILON))
 
 
+def nll_on_grid(rows, grid):
+    """nll_at_temperature(row, t) for every row at every t of `grid`, bit for bit: shape (len(grid), len(rows)), each grid
+    point's losses contiguous. Rows are taken in blocks of one option count, so the per-row arithmetic runs once per block
+    and temperature instead of once per row (a calibration fit over thousands of rows: seconds instead of a minute)."""
+    grid = [float(t) for t in grid]
+    for t in grid:
+        require_temperature(t)
+    out = np.empty((len(grid), len(rows)))
+    blocks = defaultdict(list)
+    for i, row in enumerate(rows):
+        shifted_logits(row, 1.0)   # the per-row path's checks, with its messages
+        blocks[("logits" in row, len(row["p"]))].append(i)
+    for (has_logits, _), idx in blocks.items():
+        idx = np.asarray(idx)
+        labels, pick = np.asarray([rows[i]["label"] for i in idx]), np.arange(len(idx))
+        if has_logits:
+            z = np.asarray([rows[i]["logits"] for i in idx], dtype=float)
+        else:
+            p = np.asarray([rows[i]["p"] for i in idx], dtype=float)
+            z = np.log(np.maximum(p, EPSILON))
+        z = z - z.max(axis=1, keepdims=True)
+        for j, t in enumerate(grid):
+            zt = z / t
+            if has_logits:
+                out[j, idx] = np.log(np.exp(zt).sum(axis=1)) - zt[pick, labels]
+                continue
+            if t == 1:   # probabilities_at_temperature returns the row's own "p" at 1
+                q = p[pick, labels]
+            else:
+                w = np.exp(zt)
+                q = w[pick, labels] / w.sum(axis=1)
+            out[j, idx] = [-math.log(max(float(x), EPSILON)) for x in q]
+    return out
+
+
 def brier(p, label):
     return float(((p - np.eye(len(p))[label]) ** 2).sum())
 
@@ -344,7 +379,7 @@ def fit_temperature(rows, aggregation="macro", points=81):
         for row in rows:
             per_task[row["task"]] += 1
         weight = np.asarray([1.0 / per_task[row["task"]] for row in rows])
-    loss = [np.average([nll_at_temperature(row, float(t)) for row in rows], weights=weight) for t in grid]
+    loss = [np.average(per_t, weights=weight) for per_t in nll_on_grid(rows, grid)]
     return float(grid[int(np.argmin(loss))])
 
 
