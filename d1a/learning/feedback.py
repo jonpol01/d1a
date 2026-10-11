@@ -25,9 +25,11 @@ The loop has three steps, cheapest first:
 Every calibrator entry belongs to the temperature its decisions were read at (the log records it; a request's use case
 can select another, #209): fit, promote and serving keep the temperatures apart, so answers read at one are never corrected
 by outcomes of answers read at another.
-The log is append-only JSONL (one "decision" or "outcome" event per line), so it can be written by several processes and
-replayed. An outcome may name its source in meta["src"] (e.g. "human" for a person's correction, "reviewer" for another
-model's judgment); each question keeps the label from the most trusted source (PREFER), then the latest.
+The log is append-only JSONL (one "decision", "outcome" or "void" event per line), so it can be written by several
+processes and replayed. An outcome may name its source in meta["src"] (e.g. "human" for a person's correction, "reviewer"
+for another model's judgment); each question keeps the label from the most trusted source (PREFER), then the latest. A
+void (`feedback void`) withdraws one source's outcomes on the decisions it names that arrived before it, with a reason,
+without rewriting the log; a later outcome of that source counts again.
 """
 import argparse
 import hashlib
@@ -88,6 +90,19 @@ class FeedbackLog:
         """Record what actually happened for decision `did`: {question id: label} (bool for yes/no, option key for choice)."""
         self._append({"kind": "outcome", "id": did, "ts": time.time(), "labels": labels, "meta": meta or {}})
 
+    def void(self, ids, src, reason):
+        """Withdraw source `src`'s outcomes so far on decisions `ids` (recorded in error, e.g. not what that source means)."""
+        if not ids or not src or not reason: raise ValueError("a void names decisions, a source and a reason")
+        self._append({"kind": "void", "ids": sorted(set(ids)), "src": src, "reason": reason, "ts": time.time()})
+
+    def _outcomes(self, events):
+        """The outcome events that stand: a void drops its source's outcomes on its decisions that came before it."""
+        voided = {}
+        for e in events:
+            if e["kind"] == "void":
+                for i in e["ids"]: voided[(i, e["src"])] = max(voided.get((i, e["src"]), 0), e["ts"])
+        return [e for e in events if e["kind"] == "outcome" and e["ts"] >= voided.get((e["id"], e.get("meta", {}).get("src")), 0)]
+
     def events(self):
         if not self.path.exists(): return []
         return [json.loads(l) for l in self.path.read_text(encoding="utf-8").splitlines() if l.strip()]
@@ -106,7 +121,8 @@ class FeedbackLog:
             if e["kind"] == "decision":
                 runs[e["id"]] = e.get("run")
                 if run is None or e.get("run") == run: decisions[e["id"]] = e
-            elif srcs is None or e.get("meta", {}).get("src") in srcs: outcomes.setdefault(e["id"], []).append(e)
+        for e in self._outcomes(events):
+            if srcs is None or e.get("meta", {}).get("src") in srcs: outcomes.setdefault(e["id"], []).append(e)
         latest = {}   # one replay per original and run: two overlapping replays of a decision must not count it twice
         for i, d in decisions.items():
             if d.get("replay_of"):
@@ -127,8 +143,8 @@ class FeedbackLog:
 
     def pending(self):
         """Decisions still waiting for an outcome. Replays never are: they take their original's outcomes."""
-        done = {e["id"] for e in self.events() if e["kind"] == "outcome"}
-        return [e for e in self.events() if e["kind"] == "decision" and e["id"] not in done and not e.get("replay_of")]
+        events = self.events(); done = {e["id"] for e in self._outcomes(events)}
+        return [e for e in events if e["kind"] == "decision" and e["id"] not in done and not e.get("replay_of")]
 
 
 def records(resolved, src="feedback"):
@@ -395,6 +411,9 @@ def mde(se, level=0.95, power=0.8):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0]); sub = ap.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("status"); s.add_argument("log")
+    v = sub.add_parser("void", help="withdraw one source's outcomes on some decisions, with a reason (the log is never rewritten)")
+    v.add_argument("log"); v.add_argument("--ids", required=True, help="comma-separated decision ids")
+    v.add_argument("--src", required=True); v.add_argument("--reason", required=True)
     r = sub.add_parser("records"); r.add_argument("log"); r.add_argument("--out", required=True)
     c = sub.add_parser("calibrate"); c.add_argument("log"); c.add_argument("--out", required=True); c.add_argument("--min-outcomes", type=int, default=20)
     pr = sub.add_parser("promote", help="fit on part of the log, gate on the rest, and update the served calibrator only where it passes")
@@ -421,6 +440,9 @@ def main(argv=None):
     a = ap.parse_args(argv)
     from d1a.learning import loop, settings as S
     if a.cmd == "config": return _config(a, S)
+    if a.cmd == "void":
+        ids = [i for i in a.ids.split(",") if i]; FeedbackLog(a.log).void(ids, a.src, a.reason)
+        print(f"voided {a.src} outcomes on {len(set(ids))} decisions: {a.reason}"); return
     if a.cmd == "trained":
         try: m = loop.build_manifest(a.mix, a.run, FeedbackLog(a.log) if a.log else None)
         except ValueError as e: sys.exit(f"refused: {e}")

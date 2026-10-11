@@ -170,6 +170,39 @@ def test_a_human_label_beats_a_later_reviewer_label_per_question(tmp_path):
     assert log.resolved("reviewer")[0]["labels"] == {"type": "bug", "blast": "broad"}
 
 
+def _pr_decision(log):
+    return log.decision("pr", {**CQ, "type": {"type": "choice", "instructions": "Change type.", "criteria": {"bug": "fix", "docs": "docs"}}},
+                        {"blast": {"choice": "contained", "probabilities": {"contained": 0.6, "moderate": 0.2, "broad": 0.1, "massive": 0.1}},
+                         "type": {"choice": "bug", "probabilities": {"bug": 0.7, "docs": 0.3}}}, run="r@v0.4")
+
+
+def test_a_void_withdraws_one_sources_outcomes_and_the_next_source_decides(tmp_path):
+    """A PR author's own labels logged as "human" outrank the reviewer; voiding them (with a reason, the log untouched
+    before it) leaves the reviewer's label, and a decision whose only outcome is voided is pending again."""
+    log = FeedbackLog(tmp_path / "f.jsonl")
+    did, alone = _pr_decision(log), _pr_decision(log)
+    log.outcome(did, {"type": "docs", "blast": "contained"}, {"src": "human"})
+    log.outcome(did, {"type": "bug", "blast": "broad"}, {"src": "reviewer"})
+    log.outcome(alone, {"type": "docs"}, {"src": "human"})
+    before = (tmp_path / "f.jsonl").read_text(encoding="utf-8")
+    main(["void", str(tmp_path / "f.jsonl"), "--ids", f"{did},{alone}", "--src", "human", "--reason", "PR-author labels, not corrections"])
+    assert (tmp_path / "f.jsonl").read_text(encoding="utf-8").startswith(before)   # appended, never rewritten
+    (d,) = log.resolved()
+    assert d["labels"] == {"type": "bug", "blast": "broad"} and d["label_src"] == {"type": "reviewer", "blast": "reviewer"}
+    assert [x["id"] for x in log.pending()] == [alone]
+    with pytest.raises(ValueError): log.void([did], "human", "")
+
+
+def test_an_outcome_after_a_void_counts_again(tmp_path):
+    """A void covers what came before it: a person correcting the same decision later still wins over the reviewer."""
+    log = FeedbackLog(tmp_path / "f.jsonl"); did = _pr_decision(log)
+    log.outcome(did, {"type": "docs"}, {"src": "human"}); log.outcome(did, {"type": "bug"}, {"src": "reviewer"})
+    log.void([did], "human", "PR-author labels")
+    log.outcome(did, {"type": "docs"}, {"src": "human"})
+    (d,) = log.resolved()
+    assert d["labels"]["type"] == "docs" and d["label_src"]["type"] == "human"
+
+
 def test_serve_logs_decisions_accepts_outcomes_and_applies_a_reloaded_calibrator(tmp_path, monkeypatch):
     """d1a.serving.serve's self-learning hooks: with a log, every answer carries a decision_id and POST /v1/feedback records its
     outcome; with a calibrator file, yes/no answers are recalibrated and a rewritten file takes effect on the next answer;
