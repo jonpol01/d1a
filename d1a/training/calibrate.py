@@ -1,4 +1,4 @@
-"""Calibrate a checkpoint: fit one temperature on held-out scored rows and write it into the checkpoint (d1a_config.json, and the head.pt D1A 0.3 reads), so
+"""Calibrate a checkpoint: fit one temperature on held-out scored rows and write it into the checkpoint (d1a_config.json, and its head.pt if a run from before 0.4 has one), so
 every loader serves calibrated probabilities. Argmax never changes, so accuracy is the same before and after.
 
     python -m d1a.training.calibrate --run runs/new --rows runs/cal/rows.json --rows runs/calpr/rows.json:src_a,src_b
@@ -459,7 +459,7 @@ def write_manual(run, temperature, reason, use_case=None):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--run", required=True, help="checkpoint directory (its metadata is rewritten: d1a_config.json, and head.pt)")
+    ap.add_argument("--run", required=True, help="checkpoint directory (its metadata is rewritten: d1a_config.json, and its head.pt if it has one)")
     ap.add_argument("--rows", action="append", default=[], help="fit set: a rows.json, optionally path:source,...; repeat to pool")
     ap.add_argument("--exclude_rows", action="append", default=[], help="rows.json whose record ids are dropped from the fit set; repeatable")
     ap.add_argument("--transfer", help="out-of-domain rows.json, reported before and after (never fitted)")

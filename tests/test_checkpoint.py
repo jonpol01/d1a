@@ -77,6 +77,20 @@ def same(a, b):
         dataclasses.replace(a, head=None) == dataclasses.replace(b, head=None)
 
 
+def test_a_new_run_gets_no_head_pt_and_an_old_one_keeps_it_in_step(tmp_path):
+    """D1A 0.5 stopped writing head.pt: a run saved without one stays without one. A run from before 0.4 still has its
+    head.pt, which write_meta rewrites with the new metadata, so read_meta never finds the two copies disagreeing (a
+    recalibration, say)."""
+    legacy = read_meta(FIXTURE + "/checkpoint")
+    new = tmp_path / "new"; new.mkdir()
+    write_meta(new, legacy)
+    assert not (new / "head.pt").exists() and same(read_meta(new), legacy)
+    old = copy_of_fixture(tmp_path) / "checkpoint"
+    hotter = dataclasses.replace(legacy, temperature=legacy.temperature + 0.5)
+    write_meta(old, hotter)
+    assert (old / "head.pt").exists() and same(read_meta(old), hotter)
+
+
 def test_every_reader_path(at_root, tmp_path, monkeypatch):
     import json
     legacy = read_meta(FIXTURE + "/checkpoint")                                    # head.pt alone

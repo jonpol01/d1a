@@ -5,8 +5,8 @@ backbone + LoRA runs one prefill pass under a block-causal mask; a pointer head 
 the question's `<decide>` token. README.md is the user guide; docs/UPSTREAM.md records what came from Kev.
 
 ## Layout
-- `d1a/` the package, by subpackage (#60; the old flat module paths are one-release shims, removed in 0.5;
-  `d1a/_layout.py` maps them):
+- `d1a/` the package, by subpackage (#60; the old flat module paths were removed in 0.5, and `d1a/_layout.py` still maps
+  them for scripts/kev_share.py and scripts/check_license.py):
   - `core/`: `api.py` (the System One request and answer schema), `encoding.py` (how a request is packed into tokens, the
     context limits, rows), `head.py` (the pointer head), `versions.py`;
   - `backends/`: `torch.py` (DecisionModel, masks; re-exports encoding and the head), `mlx.py` (Apple Silicon backend for Qwen3.5
