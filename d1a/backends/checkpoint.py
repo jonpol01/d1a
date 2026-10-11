@@ -4,8 +4,9 @@ Two layouts, told apart by their files:
 - a training run (a local directory or a Hub repo, `owner/name@revision`): a LoRA adapter (adapter_config.json,
   adapter_model.safetensors) for the base its metadata names (`meta.base` at `meta.base_revision`, whose tokenizer it
   uses), the pointer head and the run's metadata (Meta). A run is saved as d1a_config.json (format "d1a-torch",
-  versioned; the metadata, read without unpickling anything) with head.safetensors (the head), and, for D1A 0.4 only,
-  also as the head.pt older versions read; runs saved before 0.4 have head.pt alone, which stays readable;
+  versioned; the metadata, read without unpickling anything) with head.safetensors (the head). Runs saved before 0.4
+  have head.pt alone, which stays readable; D1A 0.4 also wrote head.pt beside the new files, and from 0.5 a new run gets
+  none while a run that has one keeps it in step;
 - an MLX export (d1a_config.json, written by scripts/export_mlx.py): the adapter already merged into the base and saved
   by mlx-lm (config.json + model*.safetensors, perhaps quantized), the head in fp32 in head.safetensors and the
   tokenizer. It needs neither the base nor the adapter and runs on the MLX backend only.
@@ -39,7 +40,7 @@ HUB_ID = re.compile(r"[\w.-]+/[\w.-]+(@[\w.-]+)?")
 EXPORT_CONFIG, EXPORT_HEAD = "d1a_config.json", "head.safetensors"   # an MLX export folder's two D1A files, and a training run's
 EXPORT_FORMAT, EXPORT_VERSION = "d1a-mlx", 1
 TORCH_FORMAT, TORCH_VERSION = "d1a-torch", 1
-HEAD_PT_LAST_WRITTEN = "0.4"   # the last release that also writes head.pt (CHANGELOG, Deprecated); reading it has no end
+HEAD_PT_LAST_WRITTEN = "0.4"   # the last release that wrote head.pt for a new run (CHANGELOG); reading it has no end
 USE_CASE_TEMPERATURES, USE_CASE_FITS = "use_case_temperatures", "use_case_temperature_fits"   # Meta.extra keys (#209)
 CALIBRATION = ("temperature_fit", USE_CASE_TEMPERATURES, USE_CASE_FITS)   # the extra fields an MLX export carries over
 
@@ -180,14 +181,16 @@ def torch_config(meta):
 
 
 def write_meta(run, meta):
-    """Save a run's metadata and head: d1a_config.json and head.safetensors, and head.pt for D1A <= 0.3 readers (written
-    through HEAD_PT_LAST_WRITTEN). Everything is checked before any file is written."""
+    """Save a run's metadata and head: d1a_config.json and head.safetensors. A new run gets no head.pt (D1A 0.5 stopped
+    writing it); a run saved before 0.4 keeps its head.pt in step, since read_meta refuses a run whose two copies
+    disagree. Everything is checked before any file is written."""
     from safetensors.torch import save_file
     cfg = torch_config(meta)
     if meta.head is not None:
         save_file({k: v.contiguous() for k, v in meta.head.items()}, str(Path(run) / EXPORT_HEAD))
     (Path(run) / EXPORT_CONFIG).write_text(json.dumps(cfg, indent=1) + "\n", encoding="utf-8")
-    torch.save(meta.to_dict(), f"{run}/head.pt")
+    if (Path(run) / "head.pt").exists():
+        torch.save(meta.to_dict(), f"{run}/head.pt")
 
 
 def weight_shards(path):
