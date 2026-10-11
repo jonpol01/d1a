@@ -132,6 +132,10 @@ class Server:
 
     def __post_init__(self):
         self.release_date = self.release_date or self.checkpoint.release_date()
+        # the device the model thread syncs and frees through torch: none for an MLX model (mx.eval already waits), so
+        # torch's MPS stream is used by one thread only, the media encoder's; it is not thread-safe, and a sync here racing
+        # an encode aborted the process with "commit an already committed command buffer" (#244)
+        self.torch_device = "cpu" if getattr(self.model, "backend", None) == "mlx" else self.device
         self.prefix_cache = PrefixCache(PREFIX_CACHE_SIZE, int(PREFIX_MIN_TOKENS) if PREFIX_MIN_TOKENS else self.model.prefix_min_tokens)
         self.queue, self.stopping = queue.Queue(), threading.Event()
         # the model thread gives up the GIL at every CUDA sync and waits to get it back while the event loop parses and
@@ -199,7 +203,7 @@ class Server:
         """One batch through model.probs_batch, with the prefix cache. -> per request (probs, stats). A pass out of device
         memory while states are cached drops the cache and runs once more: the cache only saves time, and kept resident
         it failed every later batch of that size (#75, @vtxyer)."""
-        sync(self.device); t = time.time()
+        sync(self.torch_device); t = time.time()
         for retry in (False, True):
             keys, cached, keep = self.prefix_cache.plan(encs)
             self.prefix_cache.make_room(keys, cached, keep)
@@ -208,8 +212,8 @@ class Server:
                 held = self.prefix_cache.entries or any(c is not None for c in cached)
                 if retry or not held or not out_of_memory(e): raise
             cached = None; self.prefix_cache.clear(); self.prefix_cache.oom_retries += 1   # after the except: its traceback holds the failed pass's tensors
-            empty_cache(self.device)
-        sync(self.device); dt = round((time.time() - t) * 1000, 1)
+            empty_cache(self.torch_device)
+        sync(self.torch_device); dt = round((time.time() - t) * 1000, 1)
         self.batch_ms.append(dt)
         self.prefix_cache.store(keys, cached, prefixes)
         self.batches += 1; self.batched_requests += len(encs)

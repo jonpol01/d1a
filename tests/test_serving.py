@@ -302,3 +302,21 @@ def test_each_pass_of_rows_gets_its_own_copy_of_the_cached_state(monkeypatch):
     assert (attention.keys == 1).all() and (attention.values == 2).all()
     assert (deltanet.conv_states[0] == 1).all() and (deltanet.recurrent_states[0] == 3).all()
     assert deltanet.has_previous_state[0] and len(cache.layers) == 2
+
+
+def test_an_mlx_model_thread_never_touches_torchs_mps_stream(monkeypatch):
+    """#244: torch's MPS stream is not thread-safe, and the media encoder uses it from a request thread. With an MLX model
+    (mx.eval already waits) the model thread must never sync or free torch's MPS, even on a Mac whose server device is
+    "mps": a sync there racing an encode aborted the Mac mini's server ("commit an already committed command buffer")."""
+    from d1a.serving import serve
+    seen = []
+    monkeypatch.setattr(serve, "sync", lambda device: seen.append(("sync", device)))
+    monkeypatch.setattr(serve, "empty_cache", lambda device: seen.append(("empty_cache", device)))
+    model = StandInModel(); model.backend = "mlx"
+    server = Server(SimpleNamespace(release_date=lambda: "2026-01-01"), None, model, "mps")
+    try:
+        server.probs(packed("abc", branch=1))
+        model.fail = "cached"; server.probs(packed("abc", branch=1))   # the out-of-memory retry frees through empty_cache too
+    finally:
+        server.close()
+    assert seen and all(device != "mps" for _, device in seen), seen
