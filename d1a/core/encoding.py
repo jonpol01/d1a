@@ -8,8 +8,6 @@ A request is packed as [leading ids (Gemma's <bos>)] <state> state, then per que
 import functools
 import re
 
-from transformers import AutoTokenizer
-
 # The five delimiters (state, q, opt, /opt, decide) are existing, rarely used special tokens, so no embedding rows are
 # added; LoRA adapts their meaning. Qwen's fill-in-the-middle and box tokens; Gemma 4 has none of those (they would be
 # <unk>), but its reserved <unusedN> rows are distinct unit-norm embeddings caller text cannot produce.
@@ -60,6 +58,7 @@ class ContextOverflow(ValueError):
 
 
 def load_tokenizer(name, revision=None):
+    from transformers import AutoTokenizer   # here, not at module top: importing transformers takes seconds and most users of this module never load a tokenizer
     return AutoTokenizer.from_pretrained(name, revision=revision)
 
 

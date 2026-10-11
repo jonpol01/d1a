@@ -18,8 +18,6 @@ import json
 import random
 from pathlib import Path
 
-from datasets import load_dataset
-
 from d1a.core.api import SystemOneRequest, to_record
 
 REPOS = {"banking77": "legacy-datasets/banking77", "boolq": "google/boolq", "agnews": "fancyzhx/ag_news",
@@ -48,6 +46,7 @@ class Source(random.Random):
 
 def _dataset(repo, split, src):
     """A dataset split; `repo` is "owner/name" or "owner/name:config", and the revision is the Source's."""
+    from datasets import load_dataset   # here, not at module top: importing datasets takes seconds, and only building from public datasets needs it
     name, _, config = repo.partition(":")
     return load_dataset(name, config or None, split=split, revision=src.revision)
 
