@@ -231,8 +231,9 @@ class MediaEncoder:
             else:
                 out = self._audio(input_features=dev("input_features").to(torch.bfloat16), input_features_mask=dev("input_features_mask"))
                 feats = out.pooler_output[out.attention_mask]
+            feats = feats.float().cpu()   # under the lock: the copy runs a kernel and waits on torch's MPS stream (#244)
         if feats.shape[0] != len(at): raise ValueError(f"{len(at)} media placeholders but {feats.shape[0]} soft tokens")
-        return ids, at, feats.float().cpu().numpy()
+        return ids, at, feats.numpy()
 
 
 def with_media(enc, n_head, ids, at, embeds):
