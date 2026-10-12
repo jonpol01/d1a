@@ -1,15 +1,27 @@
-# D1A
+<p align="center">
+  <img src="docs/d1a-avatar.png" width="220" alt="D1A: an anime girl with silver-white and dark purple hair, round glasses and headphones on a round enamel badge reading #D1A">
+</p>
 
-[![ci](https://github.com/jonpol01/d1a/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/jonpol01/d1a/actions/workflows/ci.yml)
-[![license check](https://github.com/jonpol01/d1a/actions/workflows/license.yml/badge.svg?branch=main)](https://github.com/jonpol01/d1a/actions/workflows/license.yml)
-[![release](https://img.shields.io/github/v/release/jonpol01/d1a)](https://github.com/jonpol01/d1a/releases)
-[![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
-[![python](https://img.shields.io/badge/python-3.12%20%7C%203.13-blue)](pyproject.toml)
-[![model](https://img.shields.io/badge/%F0%9F%A4%97%20model-JohnP1%2Fd1a--e4b-yellow)](https://huggingface.co/JohnP1/d1a-e4b)
-[![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-MLX-black)](https://huggingface.co/JohnP1/d1a-e4b-mlx-q8)
-[![demos](https://img.shields.io/badge/demos-d1a--playground-7c3aed)](https://github.com/jonpol01/d1a-playground)
+<h1 align="center">D1A</h1>
 
-**A small decision model on Gemma 4.** One document and a set of typed questions in, a calibrated probability for every option out, in one forward pass. No text generation.
+<p align="center"><b>A small decision model on Gemma 4.</b> One document and a set of typed questions in, a calibrated probability for every option out, in one forward pass. No text generation.</p>
+
+<p align="center">
+  <a href="https://github.com/jonpol01/d1a/actions/workflows/ci.yml"><img src="https://github.com/jonpol01/d1a/actions/workflows/ci.yml/badge.svg?branch=main" alt="ci"></a>
+  <a href="https://github.com/jonpol01/d1a/actions/workflows/license.yml"><img src="https://github.com/jonpol01/d1a/actions/workflows/license.yml/badge.svg?branch=main" alt="license check"></a>
+  <a href="https://github.com/jonpol01/d1a/releases"><img src="https://img.shields.io/github/v/release/jonpol01/d1a" alt="release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="license"></a>
+  <a href="pyproject.toml"><img src="https://img.shields.io/badge/python-3.12%20%7C%203.13-blue" alt="python"></a>
+</p>
+<p align="center">
+  <a href="https://huggingface.co/google/gemma-4-E4B"><img src="https://img.shields.io/badge/base-Gemma%204%20E2B%20%7C%20E4B-4285F4" alt="base model: Gemma 4 E2B and E4B"></a>
+  <a href="https://huggingface.co/JohnP1/d1a-e4b"><img src="https://img.shields.io/badge/%F0%9F%A4%97%20model-JohnP1%2Fd1a--e4b-yellow" alt="model"></a>
+  <a href="https://huggingface.co/collections/JohnP1/d1a-for-pytorch-cuda-cpu-non-mac"><img src="https://img.shields.io/badge/PyTorch-CUDA%20%7C%20CPU-ee4c2c" alt="PyTorch collection"></a>
+  <a href="https://huggingface.co/collections/JohnP1/d1a-for-mlx-apple-silicon-gpu"><img src="https://img.shields.io/badge/Apple%20Silicon-MLX-black" alt="MLX collection"></a>
+  <a href="https://huggingface.co/collections/JohnP1/d1a-for-core-ml-apple-neural-engine"><img src="https://img.shields.io/badge/Neural%20Engine-Core%20ML%20preview-555555" alt="Core ML collection"></a>
+  <a href="https://huggingface.co/mlx-community/d1a-e4b-8bit"><img src="https://img.shields.io/badge/mlx--community-8bit-black" alt="mlx-community mirror"></a>
+  <a href="https://github.com/jonpol01/d1a-playground"><img src="https://img.shields.io/badge/demos-d1a--playground-7c3aed" alt="demos"></a>
+</p>
 
 > **Built on Kev.** D1A is built on [Kev](https://github.com/jaredpalmer/kev) by Jared Palmer, licensed under the [Apache License 2.0](LICENSE). The model code, trainer, benchmark and frozen evaluation suites here started as a copy of Kev (upstream commit `0fe8fc9`); [docs/UPSTREAM.md](docs/UPSTREAM.md) lists every file taken from Kev and what D1A changed. D1A is an independent project. It is not affiliated with, sponsored by or endorsed by Jared Palmer or the Kev authors.
 
