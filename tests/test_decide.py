@@ -1,6 +1,7 @@
 """scripts/decide.py, the one-scorecard rule (#202), on synthetic gate folders shaped like quality_gate.py's --out and a
 synthetic labeler kit and dump: the BETTER paths, every INCOMPLETE check, each veto, the null and near-miss cases and the
 distinct-source rule. No weights and no private text."""
+import hashlib
 import importlib.util
 import json
 import math
@@ -32,6 +33,27 @@ def noise(*used):
 def fewer_samples(monkeypatch):
     """200 bootstrap samples per suite CI instead of 2,000 (the rule is the same; the suites here are built with margin)."""
     monkeypatch.setattr(decide, "SAMPLES", 200)
+
+
+_REAL_PAIRED, _PAIRED = decide.paired, {}
+
+
+def _paired_key(head, base, metric):
+    """Every input decide.paired's bootstrap can read: both sides' rows whole (ids, questions, variants, options, labels,
+    sources, groups, tasks, types, probabilities, logits), the metric and the sample count."""
+    return hashlib.sha256(json.dumps([head, base, metric, decide.SAMPLES], sort_keys=True, default=repr).encode()).hexdigest()
+
+
+@pytest.fixture(autouse=True)
+def memo_paired(monkeypatch):
+    """The scorecards here bootstrap the same synthetic suites again and again (about 58 calls per test), so each distinct
+    input is bootstrapped once per session; a call whose inputs differ in anything gets its own result."""
+    def memo(head, base, metric="acc"):
+        key = _paired_key(head, base, metric)
+        if key not in _PAIRED:
+            _PAIRED[key] = _REAL_PAIRED(head, base, metric)
+        return dict(_PAIRED[key])
+    monkeypatch.setattr(decide, "paired", memo)
 
 
 # --- synthetic inputs ---------------------------------------------------------------------------------------------------
@@ -394,3 +416,18 @@ def test_the_cli_prints_the_verdict_and_writes_only_with_out(tmp_path, kit, caps
     assert "VERDICT: NOT BETTER" in capsys.readouterr().out and sorted(p.name for p in gate.iterdir()) == ["report.json", "suites"]
     decide.main([*args, "--out", str(tmp_path / "card.json")])
     assert json.loads((tmp_path / "card.json").read_text(encoding="utf-8"))["verdict"].startswith("NOT BETTER")
+
+
+def test_the_paired_memo_never_shares_a_result_between_different_inputs():
+    """Two suites with the same ids, questions and answers but different clusters (group) have different intervals, and the
+    memo returns each its own, equal to the bootstrap run directly."""
+    rows = suite_rows("hard-v1", 60)
+    base_right = [i % 2 == 0 for i in range(len(rows))]
+    head_right = changed(rows, base_right, (12, 4))
+    pairs = []
+    for groups in ([f"g{i}" for i in range(len(rows))], [f"g{i % 3}" for i in range(len(rows))]):   # spread vs lumped clusters
+        regroup = lambda answers: [{**a, "group": g} for a, g in zip(answers, groups)]
+        pairs.append((regroup([answer(r, ok) for r, ok in zip(rows, head_right)]), regroup([answer(r, ok) for r, ok in zip(rows, base_right)])))
+    got = [decide.paired(h, b) for h, b in pairs]
+    want = [_REAL_PAIRED(h, b) for h, b in pairs]
+    assert got == want and (got[0]["lo"], got[0]["hi"]) != (got[1]["lo"], got[1]["hi"])
