@@ -76,6 +76,8 @@ def cpu_quota():
 
 def upload(a, path, backend, dtype, partial=False):
     from huggingface_hub import HfApi
+    from d1a.core.hygiene import refuse_local_paths
+    refuse_local_paths(path)   # before anything reaches the Hub
     api = HfApi()
     api.create_repo(a.upload, repo_type="dataset", private=True, exist_ok=True)
     name = a.run.replace("/", "--").replace("@", "--")
