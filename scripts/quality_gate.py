@@ -96,6 +96,23 @@ def compare(records, tol, changes=None, expected=None):
     return dict(groups), failures
 
 
+def missed_flips(records, reqs, rules, run):
+    """--expect-flips with --head-learning: every request a decode rule applies to must flip, not only the flips seen be
+    eligible. A rule applies when the request sends its use case, the head serves its run and the base's answer (the
+    model's own: base reads no learning settings) has its choice in `from` and p(option) >= t. -> failures (#259)."""
+    out = []
+    for r, (_, _, _, body) in zip(records, reqs):
+        for name, rule in (rules or {}).items():
+            b, h = (r["base"] or {}).get(rule["question"]), (r["head"] or {}).get(rule["question"])
+            if (body.get("use_case") != rule["use_case"] or rule["run"] != run or rule["space"] != "raw" or not b or not h
+                    or b.get("type") != "choice" or b["choice"] not in rule["from"] or b["probabilities"].get(rule["option"], 0.0) < rule["t"]):
+                continue
+            if h["choice"] != rule["option"]:
+                out.append(f"{r['group']} | {r['name']} / {rule['question']}: rule {name} applies (p {b['probabilities'][rule['option']]:.4f} >= "
+                           f"{rule['t']}) but the head answered {h['choice']}")
+    return out
+
+
 def paired_ratio(pairs, seed=0, draws=2000):
     """Median of head/base per request, with a bootstrap 95% interval; pairs: [(base_ms, head_ms)]."""
     if not pairs:
@@ -458,7 +475,8 @@ def main():
     ap.add_argument("--head-learning", metavar="FILE", help="the head server reads this self-learning settings file (D1A_LEARNING: "
                     "its flags and decode rules); base reads none, and neither side logs or recalibrates")
     ap.add_argument("--expect-flips", metavar="QUESTION", help="comma-separated questions whose choice is meant to change (a decode "
-                    "rule in --head-learning): their flips are listed, not failed, at least one must flip, and their probabilities must not move")
+                    "rule in --head-learning): their flips are listed, not failed, at least one must flip, every request a rule applies to must "
+                    "flip, and their probabilities must not move")
     ap.add_argument("--tol", type=float, default=1e-6, help="largest probability move allowed (default 1e-6)")
     ap.add_argument("--ports", default="8101,8102")
     ap.add_argument("--out", default=str(ROOT / "runs/quality-gate"))
@@ -511,6 +529,8 @@ def main():
         changes = [] if a.head_run else None
         groups, failures = compare(records, a.tol, changes, expected)
         failures += [f"--expect-flips {q}: no request's {q} changed; the head's decode rule did not fire" for q, f in (expected or {}).items() if not f]
+        if expected is not None and a.head_learning:   # and every request a rule applies to flipped
+            failures += missed_flips(records, reqs, json.loads(Path(a.head_learning).read_text(encoding="utf-8")).get("rules"), a.head_run or a.run)
         lat = latency(records)
         failures += [f for f in [latency_failure(lat["all text"], floor["all text"])] if f]
         report |= {"groups": groups, "latency": lat, "floor": floor}
