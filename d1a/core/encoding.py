@@ -72,6 +72,8 @@ def layout(tok):
     pattern for its special tokens not of the `<|name|>` form user_tokens already escapes (Gemma's <bos>, <pad>, <|turn>
     ...; None for Qwen)."""
     leading = tok("", add_special_tokens=True).input_ids
+    if not leading and getattr(tok, "bos_token_id", None) is not None:   # Gemma 4 -it's tokenizer stops adding the <bos> its model was trained with (#227)
+        leading = [tok.bos_token_id]
     others = sorted({t for t in getattr(tok, "all_special_tokens", []) if not _SPECIAL_RE.fullmatch(t)}, key=len, reverse=True)
     escape = re.compile("|".join(map(re.escape, others))) if others else None
     unk = getattr(tok, "unk_token_id", None)
