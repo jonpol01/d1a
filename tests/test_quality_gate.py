@@ -248,3 +248,20 @@ def test_use_case_goes_only_with_the_routing_requests(tmp_path, monkeypatch):
     (tmp_path / "l").mkdir(); _, sent = gate_requests(tmp_path / "l", monkeypatch, "--labeler-use-case", "pr-labeler")
     assert [(g, b.get("use_case")) for g, _, _, b in sent if "use_case" in b] == [("labeler-replay", "pr-labeler")]
     assert [{k: v for k, v in b.items() if k != "use_case"} for _, _, _, b in sent[:len(demos)]] == [d["body"] for d in demos]
+
+
+def test_every_request_a_rule_applies_to_must_flip():
+    """--expect-flips with --head-learning (#259): a request the decode rule applies to (its use case, the run, the base's
+    choice in `from`, p(option) >= t) that the head did not flip fails; requests it does not apply to never do."""
+    rule = {"question": "sev", "option": "P2", "t": 0.20, "from": ["P3", "P4"], "space": "raw", "run": "r@v1", "use_case": "pr-labeler",
+            "fitted_on": {"kit": "k", "n": 1, "tested_on": "k2"}}
+    sev = lambda top, p2: {"sev": {"type": "choice", "choice": top, "probabilities": {"P2": p2, "P3": 1 - p2}}}
+    req = lambda use_case=None: ("labeler-replay", "s", "/v1/systemone", {"state": "pr", **({"use_case": use_case} if use_case else {})})
+    records = [record(sev("P3", 0.25), sev("P2", 0.25), "labeler-replay", "flipped"),
+               record(sev("P3", 0.25), sev("P3", 0.25), "labeler-replay", "missed"),
+               record(sev("P3", 0.15), sev("P3", 0.15), "labeler-replay", "below t"),
+               record(sev("P3", 0.25), sev("P3", 0.25), "labeler-replay", "no use case")]
+    reqs = [req("pr-labeler"), req("pr-labeler"), req("pr-labeler"), req()]
+    assert gate.missed_flips(records, reqs, {"sev_p2": rule}, "r@v1") == [
+        "labeler-replay | missed / sev: rule sev_p2 applies (p 0.2500 >= 0.2) but the head answered P3"]
+    assert gate.missed_flips(records, reqs, {"sev_p2": rule}, "other@v1") == [] and gate.missed_flips(records, reqs, {}, "r@v1") == []

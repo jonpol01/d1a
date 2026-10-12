@@ -72,7 +72,8 @@ stripped off, and new features come with their tests.
     to how a request field is served also runs with the field sent: `--use-case routing` for the use-case temperature
     path (the routing requests carry `"use_case"`, both servers get the same requests). A decode rule (`rules` in the
     `D1A_LEARNING` file) runs with `--head-learning <file> --labeler-use-case pr-labeler --expect-flips <question>`:
-    flips on that question only, max |dp| 0 everywhere, and 0 flips without the file. For a
+    flips on that question only, every request the rule applies to flipped, max |dp| 0 everywhere, and 0 flips without
+    the file. For a
     torch-only path, also `scripts/equivalence/real_weights.py --interleave`;
   - **the `quality-gate` check: off by default (John, 2026-10-06), turned on on demand,** for a pull request whose
     severity calls for it, and only when the local machine is free to run the gate (no training, scoring or other GPU
