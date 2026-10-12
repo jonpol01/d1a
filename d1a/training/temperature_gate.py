@@ -20,7 +20,7 @@ import json
 
 import numpy as np
 
-from d1a.eval.metrics import TEMPERATURE_FIT, brier, cluster_resamples, ece, nll_at_temperature, probabilities_at_temperature
+from d1a.eval.metrics import TEMPERATURE_FIT, brier, cluster_resamples, ece, nll_on_grid, probabilities_at_temperature
 
 GRID = np.exp(np.linspace(np.log(0.25), np.log(4), TEMPERATURE_FIT["points"]))   # fit_temperature's grid for TEMPERATURE_FIT
 TOLERANCE = 0.005   # round 28: how far a panel's ECE (judge, guard) or a locked panel's Brier may rise under the new temperature
@@ -38,7 +38,7 @@ def interval(rows, samples=SAMPLES, level=0.9):
     """The percentile interval of the temperature fitted (TEMPERATURE_FIT's grid and objective) on cluster resamples of
     raw scored rows. Each question's NLL on the grid is computed once; a resample's fit is the grid point with the least
     mean NLL over its questions."""
-    nll = np.asarray([[nll_at_temperature(row, float(t)) for t in GRID] for row in rows])
+    nll = np.ascontiguousarray(nll_on_grid(rows, GRID).T) if rows else np.asarray([])   # rows x grid, as the per-row loop built it
     fits = [GRID[int(np.argmin(nll[idx].mean(axis=0)))] for idx in cluster_resamples(rows, samples, SEED)]
     lower, upper = np.quantile(fits, [(1 - level) / 2, 1 - (1 - level) / 2])
     return {"level": level, "samples": samples, "seed": SEED, "lower": float(lower), "upper": float(upper), "questions": len(rows)}
