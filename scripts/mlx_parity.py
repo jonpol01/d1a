@@ -7,7 +7,7 @@
 
 For n clean development records of decision-v7: probabilities from MLX (full pass, prefix pass, each question alone) vs
 the torch fp32 path (probs(): the state once, as served; max |dp|, argmax flips, calibrated), and median latency of each path. Writes a JSON report
-(runs/<name>/report.json is kept by .gitignore; runs/mlx-parity-{4b,0.8b} hold the numbers the README quotes).
+(runs/<name>/report.json is kept by .gitignore; runs/mlx-parity-{4b,0.8b} hold the numbers docs/APPLE.md quotes).
 """
 import argparse, gc, json, statistics, time
 

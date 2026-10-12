@@ -92,7 +92,7 @@ Library code passes `LoadOptions(...)` instead. Without a setting, the server pi
 ## Self-learning
 
 The loop: log each decision → report its real outcome → fit a calibrator on the outcomes → promote it only through
-a statistical gate. Details are in README "Self-Learning" and in the `d1a.learning.feedback` docstring.
+a statistical gate. Details are in [SELF_LEARNING.md](SELF_LEARNING.md) and in the `d1a.learning.feedback` docstring.
 
 | Setting | Default | What it does |
 |---|---|---|

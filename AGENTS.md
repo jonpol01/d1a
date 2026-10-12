@@ -2,7 +2,7 @@
 
 D1A is a small decision model on Gemma 4, built on Kev (https://github.com/jaredpalmer/kev, Apache-2.0). A causal LM
 backbone + LoRA runs one prefill pass under a block-causal mask; a pointer head scores each option's end token against
-the question's `<decide>` token. README.md is the user guide; docs/UPSTREAM.md records what came from Kev.
+the question's `<decide>` token. README.md is the front page and docs/ is the user guide; docs/UPSTREAM.md records what came from Kev.
 
 ## Layout
 - `d1a/` the package, by subpackage (#60; the old flat module paths were removed in 0.5, and `d1a/_layout.py` still maps

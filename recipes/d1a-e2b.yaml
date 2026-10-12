@@ -1,4 +1,4 @@
-# The D1A recipe on Gemma 4 E2B (README, Training): one L4 is enough, about 15 GB peak with a bf16 backbone.
+# The D1A recipe on Gemma 4 E2B (docs/TRAINING.md): one L4 is enough, about 15 GB peak with a bf16 backbone.
 #   python -m d1a.recipe run recipes/d1a-e2b.yaml --out runs/d1a-e2b --device cuda
 format: d1a-recipe
 version: 1
