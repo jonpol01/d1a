@@ -92,6 +92,8 @@ the same for the starting model as `before-test.json`, then `python compare.py .
 
 ## History
 
+- Calibration (D1A-E4B v0.3, 953 held-out PRs): 93% of the labels it gave at p ≥ 0.7 were right, and those were 57% of all labels.
+
 How the labeler got here: the first 17 PRs, then v0.3 and v0.4.
 
 D1A's first everyday job: a scheduled job labels every open pull request in jonpol01's repositories with D1A on a Mac mini. One request per PR (title, description, stats and changed files) answers three typed questions at once: change type (7), blast radius (4) and severity (P0–P4). Answers below p 0.7 add `review:needs-human`.
