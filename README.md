@@ -15,7 +15,7 @@
 
 ## Proven at
 
-- PR labeling on a Mac mini, daily since 2026-10-05: one request per PR, about 1.6 s, free, local.
+- PR labeling in daily use on a Mac mini: one request per PR, median 0.63 s per PR on an M4 (p95 0.89 s), free, local.
 - D1A-E4B v0.6 on 487 PRs newer than all its training: severity 79% and change type 91%.
 - The data, training job, scores and history: [recipes/pr-labeler](recipes/pr-labeler/README.md).
 

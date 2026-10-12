@@ -1,4 +1,4 @@
-"""Writes the README's architecture diagrams as animated SVGs, one light and one dark file each.
+"""Writes the architecture diagrams in README.md and docs/ARCHITECTURE.md as animated SVGs, one light and one dark file each.
 
     python docs/arch/make_svgs.py
 

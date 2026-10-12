@@ -92,15 +92,16 @@ the same for the starting model as `before-test.json`, then `python compare.py .
 
 ## History
 
-- Calibration (D1A-E4B v0.3, 953 held-out PRs): 93% of the labels it gave at p ≥ 0.7 were right, and those were 57% of all labels.
-
 How the labeler got here: the first 17 PRs, then v0.3 and v0.4.
 
 D1A's first everyday job: a scheduled job labels every open pull request in jonpol01's repositories with D1A on a Mac mini. One request per PR (title, description, stats and changed files) answers three typed questions at once: change type (7), blast radius (4) and severity (P0–P4). Answers below p 0.7 add `review:needs-human`.
 
-On the same 17 PRs and the same input, D1A-E4B got 63% of the labels right against 51% for Gemma 4 E4B chat (39% for the Gemma 4 E2B setup it replaced), answered every question where the chat models' JSON dropped some, and took 1.6 s per PR. Above p 0.7 it was right 87% of the time. Since then D1A-E4B **v0.3** has been fine-tuned for the job on 3,500 English and 768 Japanese pull requests labeled with the same taxonomy (one L4 GPU, $2.34), and the Mac mini now serves it. On 953 held-out PRs it gets 78% of the labels right (v0.2: 50%), and 93% of those it gives at p ≥ 0.7, which is 57% of them; on 92 Japanese PRs 70% (v0.2: 40%). Blast radius stays the weak label (54%). A second round, **v0.4** (4,063 more English PRs and 2,185 more with a blast-radius label, $3.77), raised that to 81% (severity 70% → 78%, Japanese 74%, the 17 real PRs 61% → 69%), confident on 65% of labels, at a cost of 1–3 points on D1A's other skills; the Mac mini now serves v0.4. The data steps, training job and scoring scripts are in [`recipes/pr-labeler`](.). Try it in the [playground](https://github.com/jonpol01/d1a-playground) (demo 12).
+On the same 17 PRs and the same input, D1A-E4B got 63% of the labels right against 51% for Gemma 4 E4B chat (39% for the Gemma 4 E2B setup it replaced), answered every question where the chat models' JSON dropped some, and took 1.6 s per PR. Above p 0.7 it was right 87% of the time. Since then D1A-E4B **v0.3** has been fine-tuned for the job on 3,500 English and 768 Japanese pull requests labeled with the same taxonomy (one L4 GPU, $2.34), and the Mac mini then served it. On 953 held-out PRs it gets 78% of the labels right (v0.2: 50%), and 93% of those it gives at p ≥ 0.7, which is 57% of them; on 92 Japanese PRs 70% (v0.2: 40%). Blast radius stays the weak label (54%). A second round, **v0.4** (4,063 more English PRs and 2,185 more with a blast-radius label, $3.77), raised that to 81% (severity 70% → 78%, Japanese 74%, the 17 real PRs 61% → 69%), confident on 65% of labels, at a cost of 1–3 points on D1A's other skills; the Mac mini served v0.4 until v0.6. The data steps, training job and scoring scripts are in [`recipes/pr-labeler`](.). Try it in the [playground](https://github.com/jonpol01/d1a-playground) (demo 12).
 
 <img src="../../docs/reports/2026-10-pr-labeler.png" alt="Infographic: D1A labels pull requests; 63% correct vs 51% for Gemma 4 E4B chat; 87% correct above p 0.7" width="100%">
+
+v0.5 and v0.6 followed ([docs/MODELS.md](../../docs/MODELS.md)); the Mac mini serves v0.6 since 2026-10-10.
+
 
 ## One checkpoint, every device
 
