@@ -31,6 +31,12 @@ def test_answers_must_match():
     assert "moved" in fails({"urgent": {"type": "noul", "noul": 0.21}})[0]                    # same side, beyond --tol
     assert "different options" in fails({"route": choice({"small": 0.7, "medium": 0.3})})[0]
     assert gate.compare([record(same, None)], 1e-6)[1] == ["demo:routing | en: Quick fact: answered by one side only"]
+    ruled = {**same, "route": {**same["route"], "choice": "large"}}   # --expect-flips: a decode rule moved the choice only
+    expected = {"route": []}
+    assert gate.compare([record(same, ruled)], 1e-6, None, expected)[1] == [] and expected["route"] == ["demo:routing | en: Quick fact / route: small -> large (p 0.3000)"]
+    assert "moved" in gate.compare([record(same, {**same, "route": choice({"small": 0.4, "large": 0.6})})], 1e-6, None, {"route": []})[1][0]
+    assert gate.compare([record(same, {**same, "urgent": {"type": "noul", "noul": 0.51}})], 1e-6, None, {"route": []})[1] == [
+        "demo:routing | en: Quick fact / urgent: false -> true"]                                  # another question still fails
     score = {"type": "score", "score": 1.2, "probabilities": {"0": 0.1, "1": 0.6, "2": 0.3}}
     assert gate.pick(score) == ("1", score["probabilities"])
 
@@ -164,14 +170,15 @@ def test_the_head_server_loads_the_new_checkpoint(monkeypatch):
     started = []
 
     @contextmanager
-    def fake_server(path, port, run, log):
-        started.append((path, run)); yield
+    def fake_server(path, port, run, log, learning=None):
+        started.append((path, run, learning)); yield
 
     monkeypatch.setattr(gate, "server", fake_server)
     monkeypatch.setattr(gate, "interleave", lambda reqs, p0, p1: [])
     gate.run_pair("base", "head", [], "old", [1, 2], "x", head_run="new")
-    gate.run_pair("base", "head", [], "old", [1, 2], "y")
-    assert started == [("base", "old"), ("head", "new"), ("base", "old"), ("head", "old")]
+    gate.run_pair("base", "head", [], "old", [1, 2], "y", head_learning="learning.json")
+    assert started == [("base", "old", None), ("head", "new", None), ("base", "old", None), ("head", "old", "learning.json")]
+    assert "D1A_LEARNING" in gate.LEARNING_ENV   # a shell's own settings file reaches neither side
 
 
 def test_each_checkout_runs_its_own_module_paths(tmp_path):
@@ -238,4 +245,6 @@ def test_use_case_goes_only_with_the_routing_requests(tmp_path, monkeypatch):
     carry = [(g, n) for g, n, _, b in sent if "use_case" in b]
     assert carry == [("demo:routing", "en: Quick fact"), ("demo:routing", "ja: 簡単な事実"), ("demo:agents", "intake"), ("demo:photo", "cat")]
     assert all(b["use_case"] == "routing" for _, _, _, b in sent if "use_case" in b)
+    (tmp_path / "l").mkdir(); _, sent = gate_requests(tmp_path / "l", monkeypatch, "--labeler-use-case", "pr-labeler")
+    assert [(g, b.get("use_case")) for g, _, _, b in sent if "use_case" in b] == [("labeler-replay", "pr-labeler")]
     assert [{k: v for k, v in b.items() if k != "use_case"} for _, _, _, b in sent[:len(demos)]] == [d["body"] for d in demos]

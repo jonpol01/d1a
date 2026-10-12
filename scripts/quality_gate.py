@@ -18,6 +18,9 @@ accuracy drops or whose calibration (ECE, NLL) gets worse. Exit 0 PASS, 1 FAIL, 
     python scripts/quality_gate.py --base <old pin> --head <new pin> --playground . --post-status jonpol01/d1a-playground@<pr head>
     python scripts/quality_gate.py --base origin/main --head <pr branch> --playground ../d1a-playground --use-case routing
         # the routing requests also carry "use_case": "routing", as d1a.agents.presets' clients send them
+    python scripts/quality_gate.py --base origin/main --head <pr branch> --playground ../d1a-playground \
+        --head-learning learning.json --labeler-use-case pr-labeler --expect-flips sev
+        # a decode rule (#252): the head serves with that settings file; sev's choice must change somewhere, nothing else may
 
 --post-status sets the required `quality-gate` commit status (CI leaves it pending on a pull request that needs the gate,
 .github/workflows/quality-gate.yml) to the verdict, on the exact commit tested: the head checkout's commit, which must
@@ -47,7 +50,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CARD_SUITES = ("v7/decision-v7", "v4/transfer-v4", "hard-v1", "devtools-v1", "documents-v1")   # Kev-4B's card suites we can score (#58, #167)
 SERVER_EXTRAS = ("serve", "mlx", "media")   # what the gate's two servers import
 MEDIA_GROUPS = ("demo:photo", "demo:voice", "demo:video")   # left out of the overall latency: a few slow requests each
-LEARNING_ENV = ("D1A_FEEDBACK_LOG", "D1A_OUTCOME_CALIBRATOR", "D1A_OUTCOME_MEMORY")
+LEARNING_ENV = ("D1A_FEEDBACK_LOG", "D1A_OUTCOME_CALIBRATOR", "D1A_OUTCOME_MEMORY", "D1A_LEARNING")
 
 
 # --- the rules (tests/test_quality_gate.py) -----------------------------------------------------------------------------
@@ -61,10 +64,12 @@ def pick(answer):
     return (answer["choice"] if answer["type"] == "choice" else max(probs, key=probs.get)), probs
 
 
-def compare(records, tol, changes=None):
+def compare(records, tol, changes=None, expected=None):
     """records: [{"group", "name", "base": answers | None, "head": answers | None}] -> per-group counts and the failures.
     With a `changes` list (a new checkpoint, whose answers are meant to move), choice flips and probability moves go there
-    instead of the failures; a request one side does not answer, or answers with other questions or options, still fails."""
+    instead of the failures; a request one side does not answer, or answers with other questions or options, still fails.
+    `expected`: {question: []} for --expect-flips (a decode rule, #252): that question's choice flips are collected there
+    with the head's probability of its new choice, and its probabilities must still not move."""
     groups, failures = defaultdict(lambda: {"requests": 0, "questions": 0, "flips": 0, "max_dp": 0.0}), []
     for r in records:
         g, name = groups[r["group"]], f"{r['group']} | {r['name']}"
@@ -81,7 +86,10 @@ def compare(records, tol, changes=None):
             dp = max(abs(pb[k] - ph[k]) for k in pb)
             g["max_dp"] = max(g["max_dp"], dp)
             out = failures if changes is None else changes
-            if side_b != side_h:
+            if side_b != side_h and expected is not None and q in expected:
+                g["flips"] += 1; expected[q].append(f"{name} / {q}: {side_b} -> {side_h} (p {ph[side_h]:.4f})")
+                if dp > tol: out.append(f"{name} / {q}: a probability moved {dp:.2e} (> {tol:g})")
+            elif side_b != side_h:
                 g["flips"] += 1; out.append(f"{name} / {q}: {side_b} -> {side_h}")
             elif dp > tol:
                 out.append(f"{name} / {q}: a probability moved {dp:.2e} (> {tol:g})")
@@ -180,6 +188,14 @@ def presets(root=ROOT):
     return list(mod.PRESETS.values())
 
 
+LABELER_GROUPS = ("labeler-replay",)   # the PR labeler's states, replayed
+
+
+def with_labeler_use_case(reqs, use_case):
+    """--labeler-use-case: `"use_case": use_case` added to the labeler replay requests, as the PR labeler sends it (#252)."""
+    return [(g, n, path, {**body, "use_case": use_case} if use_case and g in LABELER_GROUPS else body) for g, n, path, body in reqs]
+
+
 def with_use_case(reqs, use_case, routing=None):
     """--use-case: `"use_case": use_case` added to the routing requests, the ones a client sends with a preset's use case
     (d1a.agents.presets maps every preset to the routing use case): a request whose questions are a preset's, or one in
@@ -260,10 +276,11 @@ def module(path, name):
 
 
 @contextmanager
-def server(path, port, run, log):
+def server(path, port, run, log, learning=None):
     """d1a.serving.serve from `path` (its own d1a first on sys.path). Load options from this shell (D1A_BACKEND, D1A_DTYPE, ...)
-    apply to both sides alike; the learning settings are dropped, so no answer is logged or recalibrated."""
-    env = {k: v for k, v in os.environ.items() if k not in LEARNING_ENV}
+    apply to both sides alike; the learning settings are dropped, so no answer is logged or recalibrated. `learning`: a
+    self-learning settings file this server reads (D1A_LEARNING: its flags and decode rules), --head-learning's."""
+    env = {k: v for k, v in os.environ.items() if k not in LEARNING_ENV} | ({"D1A_LEARNING": str(learning)} if learning else {})
     with open(log, "w", encoding="utf-8") as out:
         proc = subprocess.Popen([sys.executable, "-m", module(path, "serve"), "--run", run, "--port", str(port)], cwd=path, env=env, stdout=out, stderr=subprocess.STDOUT)
     try:
@@ -306,9 +323,10 @@ def interleave(reqs, base_port, head_port):
     return records
 
 
-def run_pair(base_dir, head_dir, reqs, run, ports, logs, head_run=None):
-    """Both servers answer every request, interleaved; the head server loads `head_run` when given (a new checkpoint)."""
-    with server(base_dir, ports[0], run, f"{logs}.base.log"), server(head_dir, ports[1], head_run or run, f"{logs}.head.log"):
+def run_pair(base_dir, head_dir, reqs, run, ports, logs, head_run=None, head_learning=None):
+    """Both servers answer every request, interleaved; the head server loads `head_run` when given (a new checkpoint) and
+    reads `head_learning` (a settings file) when given."""
+    with server(base_dir, ports[0], run, f"{logs}.base.log"), server(head_dir, ports[1], head_run or run, f"{logs}.head.log", head_learning):
         return interleave(reqs, ports[0], ports[1])
 
 
@@ -404,7 +422,8 @@ def status_description(report, base_commit):
         text = f"FAIL: {len(report['failures'])} failures, e.g. {report['failures'][0]}"
     else:
         groups, lat, floor = report["groups"].values(), report["latency"]["all text"], report["floor"]["all text"]
-        text = (f"PASS vs {base_commit[:8]}: {report['requests']} requests, {sum(g['flips'] for g in groups)} flips, "
+        text = (f"PASS vs {base_commit[:8]}: {report['requests']} requests, {sum(g['flips'] for g in groups)} flips"
+                + (f" (expected on {','.join(report['expected_flips'])})" if report.get("expected_flips") else "") + ", "
                 f"max dp {max(g['max_dp'] for g in groups):.0e}, latency {lat['ratio']:.3f} (floor {floor['ratio']:.3f})"
                 + (f", {len(report['suites'])} suites" if report.get("suites") else ""))
     return text if len(text) <= 140 else text[:139] + "…"
@@ -434,12 +453,22 @@ def main():
     ap.add_argument("--use-case", metavar="NAME", help="send `\"use_case\": NAME` with the routing requests (the routing demo and any "
                     "request asking a d1a.agents.presets question set), to both servers; not with --suites. Gates a serving change "
                     "to the use-case temperature path (#214); absent, every request goes out as before")
+    ap.add_argument("--labeler-use-case", metavar="NAME", help="send `\"use_case\": NAME` with the labeler replay requests, as the "
+                    "PR labeler does (pr-labeler, for a decode rule scoped to it, #252)")
+    ap.add_argument("--head-learning", metavar="FILE", help="the head server reads this self-learning settings file (D1A_LEARNING: "
+                    "its flags and decode rules); base reads none, and neither side logs or recalibrates")
+    ap.add_argument("--expect-flips", metavar="QUESTION", help="comma-separated questions whose choice is meant to change (a decode "
+                    "rule in --head-learning): their flips are listed, not failed, at least one must flip, and their probabilities must not move")
     ap.add_argument("--tol", type=float, default=1e-6, help="largest probability move allowed (default 1e-6)")
     ap.add_argument("--ports", default="8101,8102")
     ap.add_argument("--out", default=str(ROOT / "runs/quality-gate"))
     ap.add_argument("--post-status", nargs="?", const="", metavar="OWNER/REPO@COMMIT",
                     help="set the required quality-gate status to the verdict: on the head's commit (no value), or on that commit")
     a = ap.parse_args()
+    if a.head_learning:   # the server runs in its checkout, so a relative path would name another file there
+        a.head_learning = str(Path(a.head_learning).resolve())
+        try: json.loads(Path(a.head_learning).read_text(encoding="utf-8"))
+        except (OSError, ValueError) as e: raise SystemExit(f"--head-learning: {e}") from None
     out, ports = Path(a.out), [int(p) for p in a.ports.split(",")]
     out.mkdir(parents=True, exist_ok=True)
     demos, replay = demo_requests(a.playground, a.demo_requests), replay_requests(a.replay)
@@ -449,12 +478,16 @@ def main():
     if a.use_case:
         reqs = with_use_case(reqs, a.use_case)
         print(f"use_case {a.use_case!r} on {sum('use_case' in r[3] for r in reqs)} routing requests", flush=True)
+    if a.labeler_use_case:
+        reqs = with_labeler_use_case(reqs, a.labeler_use_case)
+        print(f"use_case {a.labeler_use_case!r} on {sum(r[0] in LABELER_GROUPS for r in reqs)} labeler requests", flush=True)
     if not reqs:
         raise SystemExit("no requests: give --playground or --demo-requests, and/or --replay")
     report, failures = {"base": a.base, "head": a.head, "run": a.run, "requests": len(reqs)}, []
     if a.use_case:
         report["use_case"] = a.use_case
-    changes = None
+    report |= {k: v for k, v in (("labeler_use_case", a.labeler_use_case), ("head_learning", a.head_learning)) if v}
+    changes, expected = None, ({q: [] for q in a.expect_flips.split(",")} if a.expect_flips else None)
     with ExitStack() as stack:
         base_dir, head_dir = stack.enter_context(checkout(a.base)), stack.enter_context(checkout(a.head))
         missing = {side: unmet(requirements(d)) for side, d in (("base", base_dir), ("head", head_dir))}
@@ -474,9 +507,10 @@ def main():
                 if pinned(mini) != head_commit:
                     raise SystemExit(f"--post-status: {target[0]}@{target[1][:8]} pins {pinned(mini)}, not the head {head_commit}")
         floor = latency(run_pair(base_dir, base_dir, reqs, a.run, ports, out / "floor"))
-        records = run_pair(base_dir, head_dir, reqs, a.run, ports, out / "gate", head_run=a.head_run)
+        records = run_pair(base_dir, head_dir, reqs, a.run, ports, out / "gate", head_run=a.head_run, head_learning=a.head_learning)
         changes = [] if a.head_run else None
-        groups, failures = compare(records, a.tol, changes)
+        groups, failures = compare(records, a.tol, changes, expected)
+        failures += [f"--expect-flips {q}: no request's {q} changed; the head's decode rule did not fire" for q, f in (expected or {}).items() if not f]
         lat = latency(records)
         failures += [f for f in [latency_failure(lat["all text"], floor["all text"])] if f]
         report |= {"groups": groups, "latency": lat, "floor": floor}
@@ -491,6 +525,8 @@ def main():
     report["failures"] = failures
     if a.head_run:
         report |= {"head_run": a.head_run, "changes": changes}
+    if expected is not None:
+        report["expected_flips"] = expected
     report["verdict"] = "FAIL" if failures else "PASS"
     (out / "report.json").write_text(json.dumps(report, indent=1) + "\n", encoding="utf-8")
 
@@ -506,6 +542,10 @@ def main():
         print(f"changes against {a.run} (expected for a new checkpoint, not failures): {len(changes)}")
         for c in changes[:30]:
             print(f"CHANGE {c}")
+    for q, fl in (expected or {}).items():   # a decode rule's flips, with the probability that crossed its threshold
+        print(f"expected flips on {q}: {len(fl)}")
+        for x in fl:
+            print(f"FLIP {x}")
     for f in failures[:50]:
         print(f"FAIL {f}")
     print(f"quality gate: {report['verdict']} ({len(failures)} failures; {out / 'report.json'})")

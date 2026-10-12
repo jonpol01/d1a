@@ -63,6 +63,7 @@ def annotate(answers, raw_answers, flags, run):
 class Configured:
     """The flags in force for a server: d1a.learning.settings' "flags" (the file D1A_LEARNING names), re-read when the
     file changes, so a fitted flag is served or withdrawn without a restart. No file, or no flags: none."""
+    SECTION = "flags"
 
     def __init__(self, path=None):
         from d1a.learning import settings
@@ -74,7 +75,7 @@ class Configured:
         try: mtime = self.path.stat().st_mtime
         except OSError: return {}
         if mtime != self._mtime:
-            self._flags, self._mtime = self._settings.load(self.path)[0].get("flags") or {}, mtime
+            self._flags, self._mtime = self._settings.load(self.path)[0].get(self.SECTION) or {}, mtime
         return self._flags
 
 
