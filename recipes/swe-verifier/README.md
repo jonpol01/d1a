@@ -47,3 +47,11 @@ runs/swe-verifier/
 Every result records the `repo@tag` it ran with (`d1a.core.versions.latest`). Nothing from this study is written to the
 released model repositories (`JohnP1/d1a-e4b`, `-e2b` and their MLX builds) or their tags; a checkpoint that has to be
 on the Hub goes to its own private repository first.
+
+## Reproducing the paper's tables
+
+`reproduce.sh` downloads the r1 adapter (`JohnP1/d1a-swe-verifier-r1`) and the scored rows
+(`JohnP1/d1a-swe-verifier-eval`) at one pinned revision, checks them against the dataset's manifest, reruns the scripts
+that wrote each output and compares every one byte for byte (CPU only, about 12 minutes). Both repositories are private
+at the time of writing: request access on their Hugging Face pages, or set `MODEL_REPO` / `DATA_REPO` to a copy you hold.
+Without access the script stops with that message (exit 2).

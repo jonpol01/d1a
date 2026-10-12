@@ -5,7 +5,9 @@
 #     recipes/swe-verifier/reproduce.sh                          # the repos' main
 #     REVISION=<tag or commit> recipes/swe-verifier/reproduce.sh  # a fixed release (MODEL_REVISION / DATA_REVISION override it per repo)
 #
-# The two repos are private until the release; REVISION pins both to one tag or commit, so a run is reproducible.
+# The two repos are private at the time of writing (access on request at https://huggingface.co/JohnP1/d1a-swe-verifier-r1 and
+# https://huggingface.co/datasets/JohnP1/d1a-swe-verifier-eval, or point MODEL_REPO / DATA_REPO at a copy you hold); REVISION
+# pins both to one tag or commit, so a run is reproducible.
 # Downloads JohnP1/d1a-swe-verifier-r1 (the r1 adapter) and JohnP1/d1a-swe-verifier-eval (the scored rows) into a fresh
 # temporary directory (WORK to choose it), checks the dataset against its MANIFEST.json, reruns the scripts that wrote
 # each output, and compares every regenerated output with the released one. Exit status 1 if any differs.
@@ -32,8 +34,13 @@ M=$WORK/model; D=$WORK/data; O=$WORK/out; E=$D/eval
 mkdir -p "$O"
 echo "work directory: $WORK"
 
-hf download "$MODEL_REPO" --revision "${MODEL_REVISION:-$REVISION}" --local-dir "$M" > /dev/null
-hf download "$DATA_REPO" --repo-type dataset --revision "${DATA_REVISION:-$REVISION}" --local-dir "$D" > /dev/null
+no_access() {   # a private repo answers 401/404 to anyone without access: say so instead of the bare hf error
+  echo "reproduce.sh: could not download $1 at the pinned revision. It is private at the time of writing: request access at" >&2
+  echo "https://huggingface.co/$1 (then \`hf auth login\`), or set MODEL_REPO / DATA_REPO to a copy you hold." >&2
+  exit 2
+}
+hf download "$MODEL_REPO" --revision "${MODEL_REVISION:-$REVISION}" --local-dir "$M" > /dev/null || no_access "$MODEL_REPO"
+hf download "$DATA_REPO" --repo-type dataset --revision "${DATA_REVISION:-$REVISION}" --local-dir "$D" > /dev/null || no_access "datasets/$DATA_REPO"
 for f in adapter_config.json adapter_model.safetensors head.pt; do [ -s "$M/$f" ] || { echo "model: $f missing" >&2; exit 1; }; done
 
 # The download matches the manifest: every listed file with its sha256 and size, and no file left out of it.
