@@ -134,7 +134,14 @@ adviser, each reading the definitions; "silver"):
 - Blast: `labeler_spec.py` words blast by code structure ("one module", "shared helper"), while hermes-agent's definitions
   measure how many users a mistake reaches.
 
-**For the next training round** (nothing served changes before it):
+**Served now** (jonpol01/d1a#259): for requests that send `"use_case": "pr-labeler"`, D1A-E4B v0.6's severity is decoded by
+one rule, `rules.sev_p2` in the server's `D1A_LEARNING` settings: a P3 or P4 answer is served as P2 when p(P2) ≥ 0.20. On a
+second silver set the threshold was not fitted on (87 PRs), served severity matched the definitions 70.1% of the time, against
+59.8% for v0.6's top answer and 58.6% for the maintainers' labels (+10.3 points over the top answer, 95% CI +2.3 to +18.4).
+The rule only ever raises P3/P4 to P2, so P0 and P1 stay the model's; the probabilities and the decision log stay the model's,
+and the served answer names the rule.
+
+**For the next training round** (the rule stands in until then):
 - the severity instructions get one tie-break: *a bug fix is P2 when the defect took away or degraded something users
   rely on, even with a workaround; P3 only when it was cosmetic, a convenience, or hit almost nobody. A new feature is P3
   unless it unblocks a P1 or P2 problem*;
