@@ -103,6 +103,52 @@ own training run:
 
 Retrain only to teach something new (a new language, another project's labels), never to move to a new device.
 
+## The label standard
+
+D1A uses hermes-agent's label set only: `type/*` (7), `P0`–`P4`, and blast radius (hermes-agent's `sweeper:blast-*`, named
+`review:blast-*` here). No other labels.
+
+**Labels are used by their written definitions, not by the habits of whoever labelled the training PRs** (John, 2026-10-12,
+jonpol01/d1a#252). The definitions are hermes-agent's own label descriptions:
+
+| Label | Definition |
+|---|---|
+| P0 | Critical — data loss, security, crash loop |
+| P1 | High — major feature broken, no workaround |
+| P2 | Medium — degraded but workaround exists |
+| P3 | Low — cosmetic, nice to have |
+| P4 | Best-effort: we will get to it when we get to it (no commitment) |
+| blast contained | one narrow path / opt-in / few users |
+| blast moderate | a subsystem or single platform |
+| blast broad | a core path most sessions hit |
+| blast massive | everyone, every turn (invariant surface) |
+
+The labeler's own rules stay: Dependabot lockfile bumps without a CVE are P4, docs-only is P4, CI or test infrastructure
+that can block main is P2.
+
+What #252 measured on hermes-agent PRs D1A never trained on, using two judges that agree (the review bot and the Fable
+adviser, each reading the definitions; "silver"):
+- Change type: the maintainers' labels match the definitions (98.5%) and so does D1A v0.6 (95.6%).
+- Severity: the maintainers' labels match the definitions on only about 60% of rows, mostly bug fixes labelled P3 that
+  the text makes P2, and D1A, trained on them, copies that (56.5%).
+- Blast: `labeler_spec.py` words blast by code structure ("one module", "shared helper"), while hermes-agent's definitions
+  measure how many users a mistake reaches.
+
+**Served now** (jonpol01/d1a#259): for requests that send `"use_case": "pr-labeler"`, D1A-E4B v0.6's severity is decoded by
+one rule, `rules.sev_p2` in the server's `D1A_LEARNING` settings: a P3 or P4 answer is served as P2 when p(P2) ≥ 0.20. On a
+second silver set the threshold was not fitted on (87 PRs), served severity matched the definitions 70.1% of the time, against
+59.8% for v0.6's top answer and 58.6% for the maintainers' labels (+10.3 points over the top answer, 95% CI +2.3 to +18.4).
+The rule only ever raises P3/P4 to P2, so P0 and P1 stay the model's; the probabilities and the decision log stay the model's,
+and the served answer names the rule.
+
+**For the next training round** (the rule stands in until then):
+- the severity instructions get one tie-break: *a bug fix is P2 when the defect took away or degraded something users
+  rely on, even with a workaround; P3 only when it was cosmetic, a convenience, or hit almost nobody. A new feature is P3
+  unless it unblocks a P1 or P2 problem*;
+- the blast wording in `labeler_spec.py` follows hermes-agent's definitions above;
+- severity training rows that conflict with the definitions are relabelled where both judges agree, or dropped;
+- severity is scored against the silver rows; agreement with the maintainers' labels is reported but may fall, by design.
+
 ## Credits
 
 Pull-request data from NousResearch/hermes-agent (MIT). Japanese replay data derived from JGLUE (CC BY-SA 4.0).
