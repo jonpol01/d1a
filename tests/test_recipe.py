@@ -27,7 +27,7 @@ stages:
 
 
 def test_the_shipped_recipe_is_the_readme_command():
-    """recipes/d1a-e2b.yaml gives the command README's Training section documents (base pinned as the trainer's default)."""
+    """recipes/d1a-e2b.yaml gives the command docs/TRAINING.md documents (base pinned as the trainer's default)."""
     recipe, _ = R.load(ROOT / "recipes/d1a-e2b.yaml")
     [(name, argv)] = R.commands(recipe, "runs/d1a-e2b", {"device": "cuda"})
     assert name == "base" and argv == [
