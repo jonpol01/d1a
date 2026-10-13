@@ -1,0 +1,44 @@
+# Repository hygiene on every pull request, adapted from NousResearch/hermes-agent (MIT): blob-size-check, history-check
+# and uv-lockfile-check. Each job is cheap and runs on every pull request (no path filter), so it can become a required
+# check without leaving unrelated pull requests waiting for it.
+name: repo hygiene
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  blob-size:
+    name: blob size
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: python3 scripts/check_blob_size.py "origin/${{ github.base_ref }}"
+  history:
+    name: shared history
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # A branch with no common ancestor would graft a second root onto main and collapse `git blame` (hermes-agent #25045).
+      - run: |
+          if ! base=$(git merge-base "origin/${{ github.base_ref }}" HEAD 2>/dev/null) || [ -z "$base" ]; then
+            echo "::error::this branch shares no history with ${{ github.base_ref }}: rebase the changes onto it"; exit 1
+          fi
+          echo "shares history with ${{ github.base_ref }} at ${base:0:8}"
+  lockfile:
+    name: uv.lock in sync
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.11.16"   # the uv that wrote uv.lock: another resolver version can rewrite markers and fail the check by itself
+      # The merged state (refs/pull/N/merge): a pull request that edits pyproject.toml without `uv lock` fails here,
+      # not later in `uv sync`.
+      - run: uv lock --check

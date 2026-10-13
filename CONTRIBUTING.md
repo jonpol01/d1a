@@ -11,6 +11,9 @@ an SSH or GPG key registered on your GitHub account (`git config commit.gpgsign 
 `verified commits` check, the CI tests (Python 3.12, 3.13 and Apple Silicon), `lint`, `package builds and installs`, and
 `license`. CodeQL also blocks high-severity alerts.
 
+Every pull request also runs `repo hygiene` (`blob size`, `shared history`, `uv.lock in sync`; not required yet), and
+OSV-Scanner checks `uv.lock` weekly. Run `python scripts/check_blob_size.py origin/main` and `uv lock --check` locally.
+
 Inside those checks:
 - `verified commits` also refuses AI attribution in any commit message or in the pull request's body (a
   `Co-Authored-By:` line naming Claude or Anthropic, or "Generated with Claude Code"). Editing the body re-runs it.

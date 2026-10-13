@@ -1,0 +1,4 @@
+# Paths exempt from scripts/check_blob_size.py (fnmatch; `*` spans directories). Keep this list short: everything here
+# is in every clone forever.
+# The frozen evaluation suites: large text, hashed and versioned with the code that scores them.
+evals/*.jsonl
