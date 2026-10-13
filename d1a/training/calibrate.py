@@ -410,7 +410,7 @@ def calibrate(run, rows, exclude=(), transfer=None, allow_in_distribution=False,
     T = fit_temperature(fit, **TEMPERATURE_FIT)
     print(report_line("fit rows", fit, T))
     if edge := grid_edge(T): print(f"!!! GRID EDGE: {edge}", flush=True)
-    if transfer: print(report_line("transfer", [r for r in read_json(transfer) if r["variant"] == "clean"], T))
+    if transfer: print(report_line("transfer", [raw_row(recorded(r)) for r in read_json(transfer) if r["variant"] == "clean"], T))
     units = [r for path, srcs in reads for r in panel(path, srcs, exclude)]
     cv = cross_validated_temperature(units, folds=folds, seed=seed, **TEMPERATURE_FIT)
     ci = cv["ece_ci95"]

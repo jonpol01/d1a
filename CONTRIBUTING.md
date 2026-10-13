@@ -43,6 +43,11 @@ Face tags. To release:
 2. Set `version = "X.Y.Z"` in `pyproject.toml` (a unit test fails while the version has no changelog section).
 3. Merge, then tag the merge commit and push the tag: `git tag vX.Y.Z && git push origin vX.Y.Z`.
 
+A model release (a new Hugging Face tag) also fits its per-use-case temperatures before it ships: for each use case
+the checkpoint serves with a suite of held-out rows (routing today), run `python -m d1a.training.calibrate --run <checkpoint>
+--use-case <name> --rows <held-out rows> --transfer <another partition's rows>` and ship the `use_case_temperatures` it
+writes in `d1a_config.json`, or record why not. v0.6 shipped without its routing temperature because this step was missing (#264).
+
 The release workflow checks that the tag, `pyproject.toml` and `CHANGELOG.md` agree and that no fragment is left in
 `changes/`, runs the unit tests, builds the wheel and sdist, and publishes a GitHub release whose text is that version's
 changelog section.

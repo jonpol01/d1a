@@ -781,12 +781,14 @@ Checkpoints on Hugging Face, newest first. Each version continues training the p
 
 | Model | Tag | What it adds | Older tag name |
 |---|---|---|---|
+| JohnP1/d1a-e4b | `v0.6.1` | v0.6's weights with a routing temperature: requests sent with `"use_case": "routing"` are served at T 1.18 (every other request keeps v0.6's 1.95). Factory routing calibration error 0.093 → 0.026 [ΔECE −0.068, 95% CI −0.080 to −0.030], answered at ≥ 0.9 confidence 50% → 76%, no answer changed (#264) | |
 | JohnP1/d1a-e4b | `v0.6` | current pull-request labels (hermes-agent PRs of 2026-10-02 to 10-05): on 487 newer PRs severity +4.3 and change type +3.9 against v0.5, P1 recall 0.22 → 0.35; documents-v1 +2.0, factory routing +3.4. Released as an explicit exception to decide.py's veto V1 (hard-v1 −2.7; older PR test set change type −4.1): pin `v0.5` for hard-v1-style reasoning or the older PR-label conventions. No use-case temperatures yet (routing: v0.6.1) | |
 | JohnP1/d1a-e4b | `v0.5` | Kev's skills back on top of v0.4's pull-request labeling: hard-v1 +16, devtools-v1 +6, transfer-v4 +2.7, JGLUE +1.1, PR change type +2; PR severity −2 and blast radius on the owner's repositories lower than v0.4 | |
 | JohnP1/d1a-e4b | `v0.4` | pull-request labeling round 2: severity, Japanese, a blast-radius answer no longer biased to "broad"; earlier skills 1–3 points lower than v0.3 | |
 | JohnP1/d1a-e4b | `v0.3` | pull-request labeling (type, blast radius, severity), English and Japanese | |
 | JohnP1/d1a-e4b | `v0.2` | Kev's later stages (dates, missing evidence, hard, tool-use and long-document decisions), Japanese (JGLUE), agent routing | `v0.2-hybrid` |
 | JohnP1/d1a-e4b | `v0.1` | general decisions (decision-v7, 2 epochs, calibrated) | `v0.1.1-2epoch-calibrated` |
+| JohnP1/d1a-e2b | `v0.6.1` | v0.6's weights with a routing temperature: `"use_case": "routing"` is served at T 0.95 (others keep 1.45). Factory routing calibration error 0.091 → 0.035 [ΔECE −0.056, 95% CI −0.075 to −0.021], answered at ≥ 0.9 confidence 34% → 55%, no answer changed (#264) | |
 | JohnP1/d1a-e2b | `v0.6` | every later D1A skill in one run from v0.2.1 (PR labels with the 479 current hermes-agent PRs, hard-v1, devtools-v1, documents-v1, JGLUE, routing; 23,427 records): hard-v1 31.4% → 62.1%, devtools-v1 +14.9, documents-v1 +13.6, PR change type 40.0% → 84.5%; on 487 newer PRs severity 77.2% and type 87.5% (E4B v0.6: 79.1%, 90.6%), but P0/P1 recall 0/30. Released as an explicit exception to its pre-registered bar (#229: decision-v7 −1.4 [−2.8, +0.1] against a −1 limit); MLX build with photo, voice and video encoders (T 1.45) | |
 | JohnP1/d1a-e2b | `v0.2` | general decisions, 2 epochs, calibrated | `v0.2.1-2epoch-calibrated` |
 | JohnP1/d1a-e2b | `v0.1` | general decisions, 1 epoch | `v0.1-1epoch` |

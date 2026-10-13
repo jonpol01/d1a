@@ -29,6 +29,13 @@ class Noul(BaseModel):
     instructions: JSONContent = None
     criteria: dict[str, JSONContent] | None = None   # optional descriptions of "true" and "false"
 
+    @field_validator("criteria")
+    @classmethod
+    def _true_false_only(cls, criteria):   # any other key (e.g. "yes"/"no") was dropped unseen, and with it the criteria (#265)
+        if criteria and (unknown := sorted(set(criteria) - {"true", "false"})):
+            raise ValueError(f"a noul question's criteria take only the keys 'true' and 'false', not {unknown}")
+        return criteria
+
 
 class Choice(BaseModel):
     type: Literal["choice"]

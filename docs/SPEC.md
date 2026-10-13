@@ -16,7 +16,7 @@ A question is one of:
 
 | type | fields | options, in this order | reported under the keys |
 |---|---|---|---|
-| `noul` (yes/no) | `instructions`, optional `criteria` `{"true": ..., "false": ...}` | `no`, `yes` | `false`, `true` |
+| `noul` (yes/no) | `instructions`, optional `criteria` `{"true": ..., "false": ...}` (no other keys: a request with one is refused) | `no`, `yes` | `false`, `true` |
 | `choice` | `instructions`, `criteria`: key → description (1 to 255) | one per criteria key, in the object's order | the criteria keys |
 | `score` | `instructions`, `criteria`: a list of levels (1 to 255) | one per level, in order | `"0"`, `"1"`, ... |
 
