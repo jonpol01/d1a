@@ -131,6 +131,40 @@ def ple_on_flash(lm, files):
     return True
 
 
+def unified_classes(config):
+    """mlx-lm builds no Gemma 4 unified model (the 12B: google/gemma-4-12B-it-qat-*), but its text stack is the E-series
+    one with per-layer embeddings and KV-shared layers off, which mlx-lm's gemma4 / gemma4_text already read from the
+    config. So a unified checkpoint loads through those classes; the multimodal one also drops the unified vision
+    embedder, as mlx-lm's gemma4 drops the E-series towers. -> (model class, args class), or None for any other model."""
+    kind = config.get("model_type")
+    if kind not in ("gemma4_unified", "gemma4_unified_text"):
+        return None
+    from mlx_lm.models import gemma4, gemma4_text
+    # transformers' unified config has no per-layer-embedding or KV-sharing fields (a config it saves leaves them out), and
+    # mlx-lm's defaults are the E-series' (256-wide per-layer inputs, 20 shared layers): the unified model has neither
+    unified = {"hidden_size_per_layer_input": 0, "vocab_size_per_layer_input": 0, "num_kv_shared_layers": 0}
+
+    class TextArgs(gemma4_text.ModelArgs):
+        @classmethod
+        def from_dict(cls, params):
+            return super().from_dict({**unified, **params})
+
+    if kind == "gemma4_unified_text":
+        return gemma4_text.Model, TextArgs
+
+    class Args(gemma4.ModelArgs):
+        @classmethod
+        def from_dict(cls, params):
+            args = super().from_dict(params)
+            args.text_config = {**unified, **(args.text_config or {})}
+            return args
+
+    class Unified(gemma4.Model):
+        def sanitize(self, weights):
+            return super().sanitize({k: v for k, v in weights.items() if not k.startswith("model.vision_embedder.")})
+    return Unified, Args
+
+
 def load_mlx_lm(path, lazy=False):
     """mlx-lm's load_model, strict except for one known gap: Gemma 4 checkpoints store key/value projections for the
     KV-shared layers, which read an earlier layer's keys and never use their own (transformers does not build them, so no
@@ -138,7 +172,8 @@ def load_mlx_lm(path, lazy=False):
     non-strict and this checks what strict would: every parameter is in the file, and the only file tensors left over are
     those projections of layers the model shares. -> (model, config)"""
     path = Path(path)
-    lm, config = load_model(path, lazy=lazy, strict=False)
+    classes = unified_classes(json.loads((path / "config.json").read_text(encoding="utf-8")))
+    lm, config = load_model(path, lazy=lazy, strict=False, **({"get_model_classes": lambda config: classes} if classes else {}))
     stored = {}
     for f in weight_shards(path): stored.update(mx.load(str(f)))
     stored = set(lm.sanitize(stored) if hasattr(lm, "sanitize") else stored)
