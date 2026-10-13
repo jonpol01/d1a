@@ -83,7 +83,7 @@ class Gemma4(Attention):
     @property
     def mlx(self):
         """Gemma 4 only: d1a.backends.mlx reads its per-layer embeddings and KV-shared layers, which another sliding family lacks."""
-        return self.config.model_type == "gemma4_text"
+        return self.config.model_type in ("gemma4_text", "gemma4_unified_text")   # the 12B: see d1a.backends.mlx.unified_classes
 
     def picked_hidden(self, lm, ids, pos, mask, picks):
         """Gemma 4's last num_kv_shared_layers layers take their keys and values from earlier layers (transformers'

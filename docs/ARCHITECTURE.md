@@ -31,7 +31,7 @@ A causal LM backbone with a LoRA adapter runs one prefill pass over the document
   <img src="arch/forms-light.svg" alt="Packed form with a block-causal mask, and rows over a cached document" width="100%">
 </picture>
 
-**4. Where it runs.** `d1a.serving.serve` speaks the System One API, on MLX on Apple Silicon and on PyTorch elsewhere. The same server and the same model answer about a photo, a voice note or a video: Gemma 4's own vision and audio encoders turn the media into tokens the model reads, so there is no captioning or speech-to-text step, and `--idle-unload` frees the memory when nobody is asking ([Photos, Voice and Video](USAGE.md#photos-voice-and-video)).
+**4. Where it runs.** `d1a.serving.serve` speaks the System One API, on MLX on Apple Silicon and on PyTorch elsewhere. The backbones it runs are Gemma 4 E2B and E4B, Gemma 4 12B (the unified model: the E-series text stack without per-layer embeddings or KV-shared layers, loaded on MLX through mlx-lm's Gemma 4 classes by `d1a.backends.mlx.unified_classes`) and Qwen3.5. The same server and the same model answer about a photo, a voice note or a video: Gemma 4's own vision and audio encoders turn the media into tokens the model reads, so there is no captioning or speech-to-text step, and `--idle-unload` frees the memory when nobody is asking ([Photos, Voice and Video](USAGE.md#photos-voice-and-video)).
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="arch/serving-dark.svg">
