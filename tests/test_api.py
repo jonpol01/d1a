@@ -199,6 +199,13 @@ def test_a_malformed_request_is_refused_with_422(api, questions):
     ask(api, "Anything.", questions, status=422)
 
 
+def test_noul_criteria_with_keys_other_than_true_and_false_are_refused_not_dropped(api):
+    """#265: "yes"/"no" criteria used to validate and be ignored, so the question was answered without them."""
+    body = ask(api, "Anything.", {"q": {"type": "noul", "instructions": "Is it vague?", "criteria": {"yes": "says nothing", "no": "names a thing"}}}, status=422)
+    assert "'true' and 'false'" in str(body) and "['no', 'yes']" in str(body)
+    ask(api, "Anything.", {"q": {"type": "noul", "instructions": "Is it vague?", "criteria": {"true": "says nothing"}}})
+
+
 # --- branch isolation ---------------------------------------------------------------------------------------------------
 
 def test_a_question_answers_the_same_with_or_without_its_siblings(api):
