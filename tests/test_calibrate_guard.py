@@ -1,6 +1,8 @@
 """d1a.training.calibrate's held-out guard on D1A suite partitions and on a run trained on a mix (#196), and its grid-edge
 warning. No model is loaded: the rows are written here, as d1a.eval.benchmark writes them."""
 import json
+import math
+from pathlib import Path
 
 import pytest
 
@@ -98,3 +100,22 @@ def test_a_fit_on_the_grid_edge_is_warned_and_recorded(tmp_path, capsys):
     assert read_meta(run).extra["temperature_fit"]["grid_edge"]["temperature"] == pytest.approx(0.25)
     calibrate.main(["--run", str(run), "--rows", scored(tmp_path / "inside", {}), "--allow-in-distribution"])   # p 0.73, 73% right: T near 1
     assert "GRID EDGE" not in capsys.readouterr().out and "grid_edge" not in read_meta(run).extra["temperature_fit"]
+
+
+def test_transfer_rows_saved_at_a_served_temperature_are_reported_from_their_raw_logits(tmp_path, capsys):
+    """--transfer rows a Hub checkpoint served at T 2 report what the same rows saved raw report: the fitted T applies to
+    raw logits, not on top of the served one (#264: factory routing read ECE 0.091 -> 0.120 at an effective T 2.30)."""
+    run = tmp_path / "run"; run.mkdir()
+    write_meta(run, Meta(base="b"))
+    fit = scored(tmp_path / "fit", {})
+    raw = scored(tmp_path / "raw", {}, correct=0.9)
+    p = math.exp(1) / (math.exp(1) + 1)   # the fixture's p 0.73, exactly as its logits [1, 0] give it
+    Path(raw).write_text(json.dumps([{**r, "p": [p, 1 - p]} for r in json.loads(Path(raw).read_text(encoding="utf-8"))]), encoding="utf-8")
+    served = tmp_path / "served" / "rows.json"; served.parent.mkdir()
+    halved = [{**r, "logits": [z / 2 for z in r["logits"]], "inference_temperature": 2.0} for r in json.loads(Path(raw).read_text(encoding="utf-8"))]
+    served.write_text(json.dumps(halved), encoding="utf-8")
+    lines = []
+    for transfer in (raw, str(served)):
+        calibrate.main(["--run", str(run), "--rows", fit, "--transfer", transfer, "--allow-in-distribution"])
+        lines.append(next(l for l in capsys.readouterr().out.splitlines() if l.startswith("transfer")))
+    assert lines[0] == lines[1]
