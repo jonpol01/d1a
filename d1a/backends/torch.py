@@ -35,34 +35,37 @@ def branch_mask(seg, device, dtype=torch.float32):
     return branch_mask_batch([seg], device, dtype)
 
 
-def branch_mask_batch(segs, device, dtype=torch.float32, length=None):
-    """The block-causal mask of right-padded records, additive [B, 1, L, L]. Pad keys are masked for every query; a pad
-    query keeps its diagonal so no row is fully masked (finfo.min, not -inf, so softmax stays finite). Real tokens never
-    see pads: pads come after them (causal) and belong to no segment (-1)."""
+def branch_mask_batch(segs, device, dtype=torch.float32, length=None, q_start=0):
+    """The block-causal mask of right-padded records, additive [B, 1, L - q_start, L]: the queries from q_start on (a cache
+    hit runs only the tokens after its cached state, so it needs only their rows: 9x less memory at 8k tokens) against
+    every key. Pad keys are masked for every query; a pad query keeps its diagonal so no row is fully masked (finfo.min,
+    not -inf, so softmax stays finite). Real tokens never see pads: pads come after them (causal) and belong to no
+    segment (-1)."""
     L = max(max(len(s) for s in segs), length or 0)
     s = torch.full((len(segs), L), -1, device=device)
     for b, seg in enumerate(segs):
         s[b, : len(seg)] = torch.tensor(seg, device=device)
-    causal = torch.tril(torch.ones(L, L, dtype=torch.bool, device=device))
-    same = (s[:, None, :] == s[:, :, None]) | (s[:, None, :] == 0)
+    q = torch.arange(q_start, L, device=device)[:, None]; k = torch.arange(L, device=device)[None, :]
+    same = (s[:, None, :] == s[:, q_start:, None]) | (s[:, None, :] == 0)
     valid_key = (s != -1)[:, None, :]
-    allow = causal[None] & same & valid_key
-    allow = allow | torch.eye(L, dtype=torch.bool, device=device)[None]
-    return torch.zeros(len(segs), L, L, dtype=dtype, device=device).masked_fill(~allow, torch.finfo(dtype).min)[:, None]
+    allow = (k <= q)[None] & same & valid_key
+    allow = allow | (q == k)[None]
+    return torch.zeros(len(segs), L - q_start, L, dtype=dtype, device=device).masked_fill(~allow, torch.finfo(dtype).min)[:, None]
 
 
-def branch_masks(encs, device, dtype, window, length=None):
+def branch_masks(encs, device, dtype, window, length=None, q_start=0):
     """A backbone's packed mask: branch_mask_batch, and for one with sliding layers (`window`) a {layer type: mask} whose
     sliding entry also drops keys `window` or more positions back. Distances are in position ids, which restart per
     branch after the state, so each question sees exactly the keys it would as its own causal row (rows_of)."""
-    mask = branch_mask_batch([e["seg"] for e in encs], device, dtype=dtype, length=length)
+    mask = branch_mask_batch([e["seg"] for e in encs], device, dtype=dtype, length=length, q_start=q_start)
     if window is None:
         return mask
     L = mask.shape[-1]
     p = torch.zeros((len(encs), L), dtype=torch.long, device=device)
     for b, e in enumerate(encs):
         p[b, : len(e["pos"])] = torch.tensor(e["pos"], device=device)
-    far = (p[:, :, None] - p[:, None, :] >= window) & ~torch.eye(L, dtype=torch.bool, device=device)[None]
+    q = torch.arange(q_start, L, device=device)[:, None]
+    far = (p[:, q_start:, None] - p[:, None, :] >= window) & ~(q == torch.arange(L, device=device)[None, :])[None]
     return {"full_attention": mask, "sliding_attention": mask.masked_fill(far[:, None], torch.finfo(dtype).min)}
 
 
@@ -177,8 +180,8 @@ class DecisionModel(nn.Module):
         h = self.lm(input_ids=ids, position_ids=pos, attention_mask=mask).last_hidden_state.float()   # the head stays fp32
         return h if picks is None else h.gather(1, picks[..., None].expand(-1, -1, h.shape[-1]))
 
-    def _packed_mask(self, encs, length=None):
-        return branch_masks(encs, self.device, next(self.lm.parameters()).dtype, self.sliding_window, length=length)
+    def _packed_mask(self, encs, length=None, q_start=0):
+        return branch_masks(encs, self.device, next(self.lm.parameters()).dtype, self.sliding_window, length=length, q_start=q_start)
 
     def _new_cache(self):
         """An empty cache for a state prefix. Hybrid backbones need the layer types (each DeltaNet layer's recurrent and
@@ -186,9 +189,12 @@ class DecisionModel(nn.Module):
         packed branch pass hands those layers the full-length mask (branch_masks), so every layer caches the whole state."""
         return self.backbone.new_cache()
 
-    def _readout(self, h, enc):
+    def _readout(self, h, enc, offset=0):
+        """The head over each question's decide and option tokens; `offset`: the number of leading tokens `h` lacks (a cache
+        hit's hidden states start after its state, and every readout index is in a branch, past it)."""
         t = temperature_of(self, enc)
-        return [self.head(h[d], h[torch.tensor(oi, device=self.device)], t) for d, oi in zip(enc["decide_idx"], enc["opt_idx"])]
+        return [self.head(h[d - offset], h[torch.tensor([o - offset for o in oi], device=self.device)], t)
+                for d, oi in zip(enc["decide_idx"], enc["opt_idx"])]
 
     def rows_form(self, encs):
         """Whether these records run as causal rows: always on a hybrid backbone (its recurrent layers cannot honour the
@@ -294,52 +300,50 @@ class DecisionModel(nn.Module):
 
     @torch.no_grad()
     def prefix(self, enc):
-        """Run the state alone. -> (state tokens, its cache, its hidden states [Ls, d] in fp32 or None). Only the packed pass
-        (probs_with_prefix) reads the hidden states, so a hybrid backbone, which always runs rows, keeps None, as the graphed
-        prefixes do (an fp32 copy is 160 MiB for 8k tokens on Kev-27B); an attention-only one keeps them even when this
-        record runs as rows, since the same state with fewer questions may be packed."""
+        """Run the state alone. -> (state tokens, its cache, None). The third slot held the state's hidden states, but no
+        readout ever reads a state position (every decide and option token is in a branch), so a prefix keeps only its
+        cache, as the graphed prefixes do: 6 KiB per cached state token less on E2B (384 MiB at the 64k-token cache)."""
         Ls = enc["seg"].count(0)
         ids = torch.tensor([enc["ids"][:Ls]], device=self.device)
         pos = torch.tensor([enc["pos"][:Ls]], device=self.device)
         out = self.lm(input_ids=ids, position_ids=pos, past_key_values=self._new_cache(), use_cache=True)
-        return Ls, out.past_key_values, None if self.hybrid else out.last_hidden_state[0].float()
+        return Ls, out.past_key_values, None
 
     @torch.no_grad()
     def probs_and_prefix(self, enc):
-        """One full pass that also returns the state prefix (the cache cropped to the state, and the state's hidden states
-        or None, as prefix() keeps them), so a cache miss costs one pass, not two."""
+        """One full pass that also returns the state prefix (the cache cropped to the state, as prefix() keeps it), so a
+        cache miss costs one pass, not two."""
         Ls = enc["seg"].count(0)
         if self.rows_form([enc]):
             # recurrent layers cannot be cropped back to the state (and an over-long packed pass is what rows avoid), so a
             # miss here is a state pass, kept as the prefix, plus the branch rows
-            Ls, cache, h_state = self.prefix(enc)
-            return self._branch_rows_from_prefix(enc, cache), (Ls, cache, h_state)
+            prefix = self.prefix(enc)
+            return self._branch_rows_from_prefix(enc, prefix[1]), prefix
         ids = torch.tensor([enc["ids"]], device=self.device)
         pos = torch.tensor([enc["pos"]], device=self.device)
         out = self.lm(input_ids=ids, position_ids=pos, attention_mask=self._packed_mask([enc]), past_key_values=self._new_cache(), use_cache=True)
         h = out.last_hidden_state[0].float()
         out.past_key_values.crop(-(len(enc["ids"]) - Ls))   # keep the state only (a negative crop drops that many trailing tokens)
-        return [F.softmax(z, -1).cpu() for z in self._readout(h, enc)], (Ls, out.past_key_values, h[:Ls].clone())
+        return [F.softmax(z, -1).cpu() for z in self._readout(h, enc)], (Ls, out.past_key_values, None)
 
     @torch.no_grad()
     def probs_with_prefix(self, enc, prefix):
         """probs() for a record whose state equals the cached prefix's: only the branches run, and the cache is cropped
         back to the state afterwards so it can be used again."""
-        Ls, cache, h_state = prefix
+        Ls, cache, _ = prefix
         if enc["seg"].count(0) != Ls:
             raise ValueError("prefix does not match this record's state")
         if self.rows_form([enc]):
             return self._branch_rows_from_prefix(enc, cache)
         ids = torch.tensor([enc["ids"][Ls:]], device=self.device)
         pos = torch.tensor([enc["pos"][Ls:]], device=self.device)
-        mask = self._packed_mask([enc])
-        mask = {k: m[:, :, Ls:, :] for k, m in mask.items()} if isinstance(mask, dict) else mask[:, :, Ls:, :]
+        mask = self._packed_mask([enc], q_start=Ls)   # the branch queries' rows only
         try:
             out = self.lm(input_ids=ids, position_ids=pos, past_key_values=cache, attention_mask=mask, use_cache=True)
-            h = torch.cat([h_state, out.last_hidden_state[0].float()], 0)
+            h = out.last_hidden_state[0].float()
         finally:
             cache.crop(-(len(enc["ids"]) - Ls))
-        return [F.softmax(z, -1).cpu() for z in self._readout(h, enc)]
+        return [F.softmax(z, -1).cpu() for z in self._readout(h, enc, offset=Ls)]
 
     @torch.no_grad()
     def probs_batch(self, encs, prefixes, keep):

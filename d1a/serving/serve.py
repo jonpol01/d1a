@@ -47,7 +47,7 @@ from d1a.learning import flags, rules
 from d1a.serving.media import MEDIA_DIR, MediaEncoder, MediaRequest, OnDemand, with_media
 from d1a.core.encoding import SERVE_MAX_BRANCH, SERVE_MAX_STATE, layout
 
-PREFIX_CACHE_SIZE = int(setting("D1A_PREFIX_CACHE"))          # states kept (KV + DeltaNet states; attention-only backbones also the state's hidden states); 0 disables
+PREFIX_CACHE_SIZE = int(setting("D1A_PREFIX_CACHE"))          # states kept (KV + DeltaNet states); 0 disables
 PREFIX_MIN_TOKENS = setting("D1A_PREFIX_MIN_TOKENS")               # states shorter than this are not cached; default = the model's prefix_min_tokens (0 for hybrid backbones and MLX, 384 for attention-only torch models)
 PREFIX_MAX_TOKENS = int(setting("D1A_PREFIX_MAX_TOKENS"))  # state tokens the cache holds in all (least recently used evicted first); a longer state is not cached.
                                                                          # One 64k state (Kev-27B: ~1.3 GB of keys, values and DeltaNet states), or four 16k ones, not four 64k ones

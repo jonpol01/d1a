@@ -188,7 +188,7 @@ def no_sliding_window(mp):
     """The sliding layers get the full mask."""
     import d1a.backends.torch as M
     real = M.branch_masks
-    mp.setattr(M, "branch_masks", lambda encs, device, dtype, window, length=None: real(encs, device, dtype, None, length=length))
+    mp.setattr(M, "branch_masks", lambda encs, device, dtype, window, length=None, q_start=0: real(encs, device, dtype, None, length=length, q_start=q_start))
 
 
 def positions_continue(mp):
