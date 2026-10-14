@@ -108,3 +108,27 @@ def test_an_8bit_export_keeps_the_ids_and_every_decided_answer(checkpoint, golde
         ref = torch.tensor(q["probs"])
         if ref.numel() > 1 and float(ref.topk(2).values.diff().abs()) > 2 * err:   # decided: the top-2 margin exceeds twice the error
             assert int(p.argmax()) == int(ref.argmax()), (rid, q["qid"], err)
+
+
+@needs_mlx
+def test_a_q4_0_export_holds_llama_cpps_q4_0_grid_exactly(checkpoint, golden, tmp_path):
+    """--q4-0 (#270): every quantized weight stores Q4_0 of the unquantized export's weight exactly (its 4-bit values,
+    scale d and bias -8 d), and the export loads and answers with the golden token ids."""
+    import mlx.core as mx
+    import numpy as np
+    from d1a.backends.checkpoint import Checkpoint
+    from d1a.backends.mlx import export_mlx
+    from d1a.backends.q4_0 import q4_0, unpack
+    export_mlx(Checkpoint(checkpoint), tmp_path / "bf16")
+    cfg = export_mlx(Checkpoint(checkpoint), tmp_path / "q4", q4_0_grid=True)
+    assert cfg["quantization"]["grid"] == "q4_0" and cfg["quantization"]["bits"] == 4 and cfg["quantization"]["group_size"] == 32
+    plain, quant = mx.load(str(tmp_path / "bf16" / "model.safetensors")), mx.load(str(tmp_path / "q4" / "model.safetensors"))
+    keys = [k.removesuffix(".scales") for k in quant if k.endswith(".scales")]
+    assert keys
+    for k in keys:
+        w = plain[k + ".weight"]
+        q, d = q4_0(np.array(w.astype(mx.float32)))
+        assert np.array_equal(unpack(np.array(quant[k + ".weight"])), q), k
+        assert np.array_equal(np.array(quant[k + ".scales"].astype(mx.float32)), np.array(mx.array(d).astype(w.dtype).astype(mx.float32))), k
+        assert np.array_equal(np.array(quant[k + ".biases"].astype(mx.float32)), np.array(mx.array(-8 * d).astype(w.dtype).astype(mx.float32))), k
+    answers(tmp_path / "q4", golden)   # checks every record's token ids

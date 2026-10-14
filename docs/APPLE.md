@@ -9,8 +9,11 @@ On Apple Silicon `d1a.serving.serve` runs Gemma 4 checkpoints through MLX (`d1a/
 ```bash
 uv run --extra mlx python scripts/export_mlx.py --run JohnP1/d1a-e2b --out runs/exports/d1a-e2b-mlx-bf16
 uv run --extra mlx python scripts/export_mlx.py --run JohnP1/d1a-e2b --q-bits 4 --q-group-size 64 --out runs/exports/d1a-e2b-mlx-4bit
+uv run --extra mlx python scripts/export_mlx.py --run <a Gemma 4 12B-it QAT checkpoint> --q4-0 --out runs/exports/d1a-12b-mlx-q4_0   # Q4_0 grid
 uv run --extra serve python -m d1a.serving.serve --run runs/exports/d1a-e2b-mlx-4bit --port 8009
 ```
+
+`--q4-0` writes 4 bits in groups of 32 on llama.cpp's Q4_0 grid (scale = d, bias = −8·d) instead of mlx-lm's min/max scales, for a base trained for Q4_0 such as `google/gemma-4-12B-it-qat-q4_0-unquantized`: on that checkpoint Q4_0's weight error is about 20% below mlx-lm's 4-bit group 32 and 30% below group 64 (#270).
 
 Parity is measured against golden vectors from the fp32 PyTorch path (`scripts/golden_vectors.py`: 209 records, 274 questions: decision-v7 development records, the playground presets and three long-state records). For JohnP1/d1a-e2b on an M1 Max, |Δp| being the largest change of any option's probability in a question:
 

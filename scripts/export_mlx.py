@@ -26,13 +26,14 @@ def main():
     ap.add_argument("--q-group-size", type=int, default=64)
     ap.add_argument("--q-per-layer-bits", type=int, default=0, help="bits for Gemma 4's per-layer embeddings; 0 = the same as --q-bits")
     ap.add_argument("--no-quantize-embeddings", action="store_true")
+    ap.add_argument("--q4-0", action="store_true", help="4 bits in groups of 32 on llama.cpp's Q4_0 grid, for a base trained for Q4_0 (Gemma 4 12B-it QAT)")
     ap.add_argument("--media", action="store_true", help="also write media/: the base's vision and audio encoders (Gemma 4)")
     ap.add_argument("--media-only", action="store_true", help="only add media/ to an existing export folder --out")
     a = ap.parse_args()
     t = time.time()
     if not a.media_only:
         cfg = export_mlx(Checkpoint(a.run), a.out, bits=a.q_bits or None, group_size=a.q_group_size, embeddings=not a.no_quantize_embeddings,
-                         per_layer_bits=a.q_per_layer_bits or None)
+                         per_layer_bits=a.q_per_layer_bits or None, q4_0_grid=a.q4_0)
         print(json.dumps(cfg, indent=2))
     if a.media or a.media_only:
         from d1a.serving.media import export_media
