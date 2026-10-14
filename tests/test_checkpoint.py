@@ -213,7 +213,7 @@ def test_mlx_refusals(at_root, tmp_path):
               '"temperature": 1.0, "head": "head.safetensors", "source": "src/run"}')
     (export / "d1a_config.json").write_text(config, encoding="utf-8")
     ck = Checkpoint(export)
-    with pytest.raises(ValueError, match="always merges"):
+    with pytest.raises(ValueError, match="holds merged weights; D1A_MERGE=0 needs an unmerged export"):   # a merged export cannot unmerge (#274)
         ck._load_mlx(None, LoadOptions(merge=False))
     with pytest.raises(ValueError, match="lora_scale needs its source checkpoint src/run"):
         ck._load_mlx(None, LoadOptions(lora_scale=0.5))

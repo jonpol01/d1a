@@ -132,3 +132,38 @@ def test_a_q4_0_export_holds_llama_cpps_q4_0_grid_exactly(checkpoint, golden, tm
         assert np.array_equal(np.array(quant[k + ".scales"].astype(mx.float32)), np.array(mx.array(d).astype(w.dtype).astype(mx.float32))), k
         assert np.array_equal(np.array(quant[k + ".biases"].astype(mx.float32)), np.array(mx.array(-8 * d).astype(w.dtype).astype(mx.float32))), k
     answers(tmp_path / "q4", golden)   # checks every record's token ids
+
+
+@needs_mlx
+def test_an_unmerged_export_answers_like_the_merged_one_and_switches_back_to_the_base(checkpoint, golden, tmp_path):
+    """#274: export_mlx(unmerged=True) keeps the adapter beside the base. With it on, the golden answers hold within the
+    fp32 bar, as the merged export's do; with it off (adapter(False), the chat path) the hidden states are the base
+    model's exactly; on again, they are unchanged."""
+    import mlx.core as mx
+    from d1a.backends.checkpoint import Checkpoint, LoadOptions, base_dir, load
+    from d1a.backends.mlx import export_mlx, load_mlx_lm
+    cfg = export_mlx(Checkpoint(checkpoint), tmp_path / "unmerged", unmerged=True)
+    assert cfg["adapter"] == "unmerged"
+    err = worst(answers(tmp_path / "unmerged", golden))
+    assert err < FP32_TOLERANCE, err
+    tok, model = load(str(tmp_path / "unmerged"), "mps", LoadOptions(backend="mlx"))
+    assert model.loras
+    base, _ = load_mlx_lm(base_dir(read_meta(checkpoint)))
+    ids = mx.array([tok("Order 4411 arrived two weeks late and the box was crushed.")["input_ids"]])
+    on = model.text(ids)
+    with model.adapter(False):
+        off = model.text(ids)
+    again = model.text(ids)
+    assert mx.array_equal(off, base.language_model.model(ids))
+    assert not mx.array_equal(on, off) and mx.array_equal(on, again)
+
+
+@needs_mlx
+def test_a_merged_model_has_no_adapter_switch(checkpoint, tmp_path):
+    from d1a.backends.checkpoint import Checkpoint, LoadOptions, load
+    from d1a.backends.mlx import export_mlx
+    export_mlx(Checkpoint(checkpoint), tmp_path / "merged")
+    _, model = load(str(tmp_path / "merged"), "mps", LoadOptions(backend="mlx"))
+    with pytest.raises(ValueError, match="merged"):
+        with model.adapter(False):
+            pass

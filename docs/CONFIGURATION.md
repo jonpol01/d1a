@@ -81,7 +81,7 @@ Library code passes `LoadOptions(...)` instead. Without a setting, the server pi
 | `D1A_BACKEND` | `auto` in the server | `torch`, `mlx` or `auto`. `auto` uses MLX on Apple Silicon for Gemma 4 and Qwen3.5 bases when mlx-lm is installed and fp32 was not asked for. An MLX export always runs on MLX. | `torch` on a Mac to reproduce the reported (torch) numbers. |
 | `D1A_DTYPE` | bf16 on cuda and mps, fp32 on cpu | `bf16`, `fp16` or `fp32`. fp32 is the exact path every reported number uses. bf16 halves memory and is 2–4.5× faster, with probabilities within ~0.01. Ignored on MLX. | `fp32` to reproduce numbers. |
 | `D1A_ATTN` | sdpa on mps and cuda, eager on cpu | The attention kernel: `sdpa` or `eager`. Ignored on MLX. | Rarely. |
-| `D1A_MERGE` | `1` | `0` keeps the LoRA adapter unmerged (torch only; MLX always merges). | Debugging only. |
+| `D1A_MERGE` | `1` | `0` keeps the LoRA adapter unmerged. On MLX it is then attached as LoRA layers that the server can switch off per request, giving back the base model (#274). | Debugging, or an instruction-tuned base that also chats (an export made with `export_mlx --unmerged` does this by itself). |
 | `D1A_LORA_SCALE` | `1` | Interpolates between the base model (`0`) and the fine-tuned weights (`1`). | Experiments only. |
 | `D1A_TEMPERATURE` | the checkpoint's | Serves every request, use cases included, at this temperature. `1.0` gives raw logits. | Experiments only: the checkpoint's own temperature is fitted and released with it. |
 | `D1A_CUDA_GRAPHS` | on for cuda in the server | `0` declines CUDA-graph replay of the hybrid backbone's passes. | Debugging on CUDA. |
