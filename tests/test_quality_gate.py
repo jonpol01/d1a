@@ -181,6 +181,31 @@ def test_the_head_server_loads_the_new_checkpoint(monkeypatch):
     assert "D1A_LEARNING" in gate.LEARNING_ENV   # a shell's own settings file reaches neither side
 
 
+def test_sequential_never_holds_two_servers_and_pairs_the_same_records(monkeypatch):
+    """--sequential (#285): the Mac mini cannot hold two models at once, so base answers everything, its server stops, then
+    head does. Never two servers alive together; the records pair as interleaved ones do (same order, both sides)."""
+    from contextlib import contextmanager
+    alive, peak, order = set(), [0], []
+
+    @contextmanager
+    def fake_server(path, port, run, log, learning=None):
+        alive.add(port); peak[0] = max(peak[0], len(alive)); order.append(run)
+        try: yield port
+        finally: alive.discard(port)
+
+    monkeypatch.setattr(gate, "server", fake_server)
+    monkeypatch.setattr(gate, "post", lambda port, path, body: ({"q": {"choice": f"{port}-{body['i']}"}}, 7.0))
+    reqs = [("g", f"r{i}", "/v1/systemone", {"i": i}) for i in range(3)]
+    records = gate.run_pair("base", "head", reqs, "old", [1, 2], "x", head_run="new", sequential=True)
+    assert peak[0] == 1 and order == ["old", "new"]
+    assert [(r["name"], r["base"]["q"]["choice"], r["head"]["q"]["choice"]) for r in records] == [("r0", "1-0", "2-0"), ("r1", "1-1", "2-1"), ("r2", "1-2", "2-2")]
+    assert all(r["base_ms"] == r["head_ms"] == 7.0 for r in records)
+    peak[0] = 0
+    monkeypatch.setattr(gate, "interleave", lambda reqs, p0, p1: [])
+    gate.run_pair("base", "head", reqs, "old", [1, 2], "y")
+    assert peak[0] == 2   # without the flag both servers run together, as before
+
+
 def test_each_checkout_runs_its_own_module_paths(tmp_path):
     """A version from before the package layout (#60), such as the Mac mini's pin, serves as d1a.serve; a newer one as d1a.serving.serve."""
     old, new = tmp_path / "old", tmp_path / "new"
