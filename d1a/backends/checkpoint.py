@@ -271,8 +271,8 @@ class LoadOptions:
                  the hybrid Qwen3.5 and the Gemma 4 backbones; the pointer head and encoder are shared; refused for other
                  attention-only bases). "auto": mlx when the device is mps, the base is one of those, mlx-lm is installed
                  and fp32 was not asked for (an explicit dtype=float32 means the exact path), else torch; d1a.serving.serve uses
-                 auto. The MLX path always merges the adapter and ignores `attn` and `dtype` (the backbone runs as stored,
-                 bf16). An MLX export runs on mlx whatever None, "auto" or "mlx" says, and refuses "torch".
+                 auto. The MLX path merges the adapter (merge=False attaches it unmerged, switchable per request: #274)
+                 and ignores `attn` and `dtype` (the backbone runs as stored, bf16). An MLX export runs on mlx whatever None, "auto" or "mlx" says, and refuses "torch".
     cuda_graphs  replay a hybrid backbone's serving passes on CUDA (the state prefix, the question rows on a cached state)
                  as CUDA graphs, batched across requests (d1a.backends.cuda_graphs, DecisionModel.probs_batch). None: off, the eager
                  path; d1a.serving.serve turns it on for CUDA. Exact up to floating-point reassociation (passes are padded to buckets).
@@ -431,18 +431,25 @@ class Checkpoint:
     def _load_mlx(self, tok, opts):
         if not mlx_available():
             raise ValueError("the MLX backend needs mlx-lm on Apple Silicon (the `mlx` extra)")
-        from d1a.backends.mlx import MLXDecisionModel, merge_lora   # after the refusal: without mlx-lm this import would hide it
-        if not opts.merge:
-            raise ValueError("the MLX backend always merges the adapter (D1A_MERGE=0 needs backend=torch)")
+        from d1a.backends.mlx import ADAPTER_DIR, MLXDecisionModel, attach_lora, merge_lora   # after the refusal: without mlx-lm this import would hide it
         flash = opts.ple_flash is not False
         if self.export is not None:
-            if opts.lora_scale != 1:
+            unmerged = self.export.get("adapter") == "unmerged"   # export_mlx(unmerged=True): the adapter beside the base (#274)
+            if not opts.merge and not unmerged:
+                raise ValueError(f"an MLX export holds merged weights; D1A_MERGE=0 needs an unmerged export (export_mlx --unmerged) or its source checkpoint {self.export['source']}")
+            if opts.lora_scale != 1 and not unmerged:
                 raise ValueError(f"an MLX export holds merged weights; lora_scale needs its source checkpoint {self.export['source']}")
-            return MLXDecisionModel(self.path, pad_id(tok), head_dim=self.meta.head_dim, ple_flash=flash)
+            model = MLXDecisionModel(self.path, pad_id(tok), head_dim=self.meta.head_dim, ple_flash=flash)
+            if unmerged:
+                model.loras = attach_lora(model.lm, Path(self.path) / ADAPTER_DIR, opts.lora_scale)
+            return model
         if not self.mlx_base():
             raise ValueError(f"the MLX backend is for the hybrid (Qwen3.5) and Gemma 4 bases; {self.meta.base} is another attention-only base and runs on MPS with backend=torch")
         model = MLXDecisionModel(base_dir(self.meta), pad_id(tok), head_dim=self.meta.head_dim, ple_flash=flash)
-        merge_lora(model.lm, self.path, opts.lora_scale)
+        if opts.merge:
+            merge_lora(model.lm, self.path, opts.lora_scale)
+        else:   # D1A_MERGE=0: the adapter attached unmerged, so adapter(False) gives back the base (#274)
+            model.loras = attach_lora(model.lm, self.path, opts.lora_scale)
         return model
 
     def _load_torch(self, tok, device, opts):

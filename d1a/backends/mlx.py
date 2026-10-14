@@ -22,6 +22,7 @@ tests/test_mlx.py (max |dp| and argmax flips on development records, prefix vs f
 """
 import json
 import re
+from contextlib import contextmanager
 from pathlib import Path
 
 import mlx.core as mx
@@ -74,6 +75,40 @@ def merge_lora(lm, adapter_dir, scale=1.0):
     mx.clear_cache()   # hand the merge transients back to the OS; MLX keeps freed buffers otherwise
     return len(merged)
 
+
+
+ADAPTER_DIR = "adapter"   # an unmerged MLX export's PEFT adapter (export_mlx(unmerged=True)), attached at load
+
+
+def attach_lora(lm, adapter_dir, scale=1.0):
+    """Attach a PEFT adapter to the mlx-lm model UNMERGED: each target projection (Linear or QuantizedLinear) is wrapped
+    in mlx-lm's LoRALinear, y = W x + s (x A^T) B^T with s = alpha / r (rsLoRA: / sqrt r) * scale, A and B kept as
+    trained. The base weights are untouched, so MLXDecisionModel.adapter(False) gives back the base model exactly: one
+    model in memory decides with the adapter on and chats with it off (#274). -> [(parent module, attribute, LoRALinear)]."""
+    from mlx_lm.tuner.lora import LoRALinear
+    adapter_dir = Path(adapter_dir)
+    cfg = json.loads((adapter_dir / "adapter_config.json").read_text(encoding="utf-8"))
+    if cfg.get("trainable_token_indices") or cfg.get("use_dora"):
+        raise ValueError("an unmerged MLX adapter carries plain LoRA only (no trained token embeddings, no DoRA)")
+    r = cfg["r"]
+    s = cfg["lora_alpha"] / (r ** 0.5 if cfg.get("use_rslora") else r) * scale
+    weights = mx.load(str(adapter_dir / "adapter_model.safetensors"))
+    modules = dict(lm.named_modules())
+    attached = []
+    for name, a in weights.items():
+        if not name.endswith(".lora_A.weight"):
+            continue
+        stem = name[: -len(".lora_A.weight")]
+        target = stem.replace("base_model.model.", "language_model.model.", 1)   # peft's text-model prefix -> mlx-lm's
+        parent_name, attr = target.rsplit(".", 1)
+        if target not in modules or parent_name not in modules:
+            raise ValueError(f"adapter tensor {stem} has no module in the mlx-lm model (looked for {target})")
+        lora = LoRALinear.from_base(modules[target], r=r, dropout=0.0, scale=s)
+        lora.lora_a, lora.lora_b = a.T.astype(mx.float32), weights[stem + ".lora_B.weight"].T.astype(mx.float32)
+        setattr(modules[parent_name], attr, lora)
+        attached.append((modules[parent_name], attr, lora))
+    mx.eval(lm.parameters())
+    return attached
 
 UNUSED_SHARED_KV = re.compile(r"language_model\.model\.layers\.(\d+)\.self_attn\.(k_proj|v_proj|k_norm)\.weight")
 
@@ -227,6 +262,7 @@ class MLXDecisionModel:
 
     def _init(self, lm, pad_id, head_dim, quantization):
         self.lm, self.quantization = lm, quantization
+        self.loras = []   # attach_lora's wrappers: an unmerged adapter that adapter(False) switches off
         mx.set_cache_limit(CACHE_LIMIT)
         self.text = self.lm.language_model.model                      # Qwen3_5TextModel / Gemma4TextModel: embeddings -> layers -> final norm = `.model.last_hidden_state`
         # mlx-lm keeps some constants as lazy arrays outside the parameters (Gemma 4's proportional RoPE frequencies). A lazy
@@ -250,6 +286,25 @@ class MLXDecisionModel:
 
     def encode(self, tok, rec, **kw):
         return encode(tok, rec, **kw)
+
+    @contextmanager
+    def adapter(self, on=True):
+        """Run the block with an unmerged adapter (attach_lora) switched on or off. Off swaps every LoRALinear back to the
+        layer it wraps, so the model is the base exactly (the chat path, #274); the adapter is back on when the block
+        exits, whatever happens in it. All model calls run on one thread (d1a.serving.serve's model thread), so a switch
+        never overlaps a decision. A merged model has no switch: adapter(False) refuses it."""
+        if on:
+            yield
+            return
+        if not self.loras:
+            raise ValueError("this model's adapter is merged into its weights; adapter(False) needs an unmerged adapter (attach_lora)")
+        for parent, attr, lora in self.loras:
+            setattr(parent, attr, lora.linear)
+        try:
+            yield
+        finally:
+            for parent, attr, lora in self.loras:
+                setattr(parent, attr, lora)
 
     def _hidden(self, rows, cache=None):
         """[N, L, d] hidden states of right-padded token rows. Pads sit after every real token and both layer kinds are
@@ -428,14 +483,15 @@ def q4_0_mlx(w, dtype):
     return mx.array(pack(q)), mx.array(d).astype(dtype), mx.array(-8.0 * d).astype(dtype)
 
 
-def export_mlx(ck, out, bits=None, group_size=64, embeddings=True, per_layer_bits=None, q4_0_grid=False):
+def export_mlx(ck, out, bits=None, group_size=64, embeddings=True, per_layer_bits=None, q4_0_grid=False, unmerged=False):
     """Write `ck` (a LoRA checkpoint, d1a.backends.checkpoint.Checkpoint) as an MLX export folder that d1a.backends.checkpoint serves
     through this backend without the base or the adapter: the adapter merged into the base in fp32 on the CPU stream
     (merge_lora, the same bits the MLX backend computes at load), then optionally quantized (`bits` per weight, affine,
     `group_size` per scale; `embeddings` also quantizes embed_tokens and the per-layer embeddings, Gemma 4's largest
     tensors; `per_layer_bits` gives the per-layer embeddings their own width: on Gemma 4 E2B they are half the weights and
     take 4 bits well, while the linear layers need 8), saved by mlx-lm (config.json + model*.safetensors), with the pointer head in fp32 (head.safetensors), the
-    checkpoint's tokenizer files and d1a_config.json. `q4_0_grid` writes 4-bit group-32 weights on llama.cpp's Q4_0 grid
+    checkpoint's tokenizer files and d1a_config.json. `unmerged` keeps the adapter out of the weights (in adapter/, attached
+    at load), so an instruction-tuned base still chats with the adapter off (#274). `q4_0_grid` writes 4-bit group-32 weights on llama.cpp's Q4_0 grid
     (q4_0_mlx) instead of mlx-lm's min/max scales: for a base trained for Q4_0, such as Gemma 4 12B-it QAT. -> the d1a_config dict."""
     import shutil
 
@@ -450,7 +506,8 @@ def export_mlx(ck, out, bits=None, group_size=64, embeddings=True, per_layer_bit
     meta, out = ck.meta, Path(out)
     tok = load_tokenizer(meta.base, revision=meta.base_revision)
     lm, config = load_mlx_lm(base_dir(meta))
-    merge_lora(lm, ck.path)
+    if not unmerged:
+        merge_lora(lm, ck.path)
     quantization = None
     if q4_0_grid:
         if per_layer_bits or bits not in (None, 4) or group_size not in (32, 64):
@@ -481,7 +538,14 @@ def export_mlx(ck, out, bits=None, group_size=64, embeddings=True, per_layer_bit
     save_file({k: v.float().contiguous() for k, v in meta.head.items()}, str(out / EXPORT_HEAD))
     for name in TOKENIZER_FILES:
         if ck.file(name).exists(): shutil.copyfile(ck.file(name), out / name)
+        elif name == "chat_template.jinja" and (Path(base_dir(meta)) / name).exists():   # a training run keeps no chat template;
+            shutil.copyfile(Path(base_dir(meta)) / name, out / name)                     # an -it base's is what chat needs (#274)
     leading, delimiters, _ = layout(tok)
+    if unmerged:   # the base as quantized above, the adapter beside it, attached at load (attach_lora): adapter(False) = the base
+        (out / ADAPTER_DIR).mkdir(exist_ok=True)
+        for name in ("adapter_config.json", "adapter_model.safetensors"):
+            shutil.copyfile(ck.file(name), out / ADAPTER_DIR / name)
     cfg = export_config(ck, leading, delimiters, pad_id(tok), hidden, quantization, dtype)
+    if unmerged: cfg["adapter"] = "unmerged"
     (out / EXPORT_CONFIG).write_text(json.dumps(cfg, indent=2) + "\n", encoding="utf-8")
     return cfg
