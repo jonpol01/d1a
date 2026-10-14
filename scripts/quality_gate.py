@@ -15,6 +15,7 @@ accuracy drops or whose calibration (ECE, NLL) gets worse. Exit 0 PASS, 1 FAIL, 
     python scripts/quality_gate.py --base origin/main --head <pr branch> --post-status     # sets the PR's required check
     python scripts/quality_gate.py --base origin/main --head origin/main --run JohnP1/d1a-e4b-mlx-q8@v0.6 \
         --head-run <new checkpoint> --card-suites --playground ../d1a-playground    # a new checkpoint against the served one
+    python scripts/quality_gate.py ... --all-suites --sequential    # one model in memory at a time (the Mac mini, 32 GB)
     python scripts/quality_gate.py --base <old pin> --head <new pin> --playground . --post-status jonpol01/d1a-playground@<pr head>
     python scripts/quality_gate.py --base origin/main --head <pr branch> --playground ../d1a-playground --use-case routing
         # the routing requests also carry "use_case": "routing", as d1a.agents.presets' clients send them
@@ -340,11 +341,26 @@ def interleave(reqs, base_port, head_port):
     return records
 
 
-def run_pair(base_dir, head_dir, reqs, run, ports, logs, head_run=None, head_learning=None):
+def one_side(reqs, port):
+    """Every request to one server, in order: (answers, ms) each."""
+    if reqs:
+        post(port, reqs[0][2], reqs[0][3])   # the first request loads lazily
+    return [post(port, path, body) for _, _, path, body in reqs]
+
+
+def run_pair(base_dir, head_dir, reqs, run, ports, logs, head_run=None, head_learning=None, sequential=False):
     """Both servers answer every request, interleaved; the head server loads `head_run` when given (a new checkpoint) and
-    reads `head_learning` (a settings file) when given."""
-    with server(base_dir, ports[0], run, f"{logs}.base.log"), server(head_dir, ports[1], head_run or run, f"{logs}.head.log", head_learning):
-        return interleave(reqs, ports[0], ports[1])
+    reads `head_learning` (a settings file) when given. `sequential`: one server at a time, base then head, for a machine
+    that cannot hold both models at once (the Mac mini, #285). The floor is measured the same way, so the latency check
+    still compares like with like; the suites already load one model at a time."""
+    if not sequential:
+        with server(base_dir, ports[0], run, f"{logs}.base.log"), server(head_dir, ports[1], head_run or run, f"{logs}.head.log", head_learning):
+            return interleave(reqs, ports[0], ports[1])
+    with server(base_dir, ports[0], run, f"{logs}.base.log"):
+        base = one_side(reqs, ports[0])
+    with server(head_dir, ports[1], head_run or run, f"{logs}.head.log", head_learning):
+        head = one_side(reqs, ports[1])
+    return [{"group": g, "name": n, "base": b[0], "head": h[0], "base_ms": b[1], "head_ms": h[1]} for (g, n, _, _), b, h in zip(reqs, base, head)]
 
 
 def latency(records):
@@ -479,6 +495,8 @@ def main():
                     "flip, and their probabilities must not move")
     ap.add_argument("--tol", type=float, default=1e-6, help="largest probability move allowed (default 1e-6)")
     ap.add_argument("--ports", default="8101,8102")
+    ap.add_argument("--sequential", action="store_true", help="run the base server, then the head server, never both at once: "
+                    "half the peak memory, for a machine that cannot hold both models (the Mac mini); requests are not interleaved")
     ap.add_argument("--out", default=str(ROOT / "runs/quality-gate"))
     ap.add_argument("--post-status", nargs="?", const="", metavar="OWNER/REPO@COMMIT",
                     help="set the required quality-gate status to the verdict: on the head's commit (no value), or on that commit")
@@ -524,8 +542,8 @@ def main():
                                       capture_output=True, text=True, check=True).stdout
                 if pinned(mini) != head_commit:
                     raise SystemExit(f"--post-status: {target[0]}@{target[1][:8]} pins {pinned(mini)}, not the head {head_commit}")
-        floor = latency(run_pair(base_dir, base_dir, reqs, a.run, ports, out / "floor"))
-        records = run_pair(base_dir, head_dir, reqs, a.run, ports, out / "gate", head_run=a.head_run, head_learning=a.head_learning)
+        floor = latency(run_pair(base_dir, base_dir, reqs, a.run, ports, out / "floor", sequential=a.sequential))
+        records = run_pair(base_dir, head_dir, reqs, a.run, ports, out / "gate", head_run=a.head_run, head_learning=a.head_learning, sequential=a.sequential)
         changes = [] if a.head_run else None
         groups, failures = compare(records, a.tol, changes, expected)
         failures += [f"--expect-flips {q}: no request's {q} changed; the head's decode rule did not fire" for q, f in (expected or {}).items() if not f]
