@@ -34,6 +34,7 @@ from mlx_lm.utils import load_model
 
 from d1a.backends.backbone import for_mlx
 from d1a.backends.checkpoint import weight_shards
+from d1a.backends.q4_0 import pack, q4_0
 from d1a.backends.torch import probs_one, temperature_of
 from d1a.core.encoding import encode, rows_of, rows_per_pass
 from d1a.core.head import PointerHead
@@ -419,24 +420,12 @@ class MLXDecisionModel:
 TOKENIZER_FILES = ("tokenizer.json", "tokenizer_config.json", "special_tokens_map.json", "chat_template.jinja")
 
 
-def q4_0(w):
-    """llama.cpp's Q4_0 of a [rows, cols] float array, blocks of 32 along each row (its quantize_row_q4_0_ref): d = the
-    block's largest-magnitude value / -8, q = min(15, int(w / d + 8.5)). -> (q uint8 in 0..15, d float32 [rows, cols/32])."""
-    w = np.asarray(w, np.float32)
-    b = w.reshape(w.shape[0], -1, 32)
-    d = np.take_along_axis(b, np.abs(b).argmax(-1)[..., None], -1)[..., 0] / -8.0
-    inv = np.divide(1.0, d, out=np.zeros_like(d), where=d != 0)
-    q = np.clip(np.floor(b * inv[..., None] + 8.5), 0, 15).astype(np.uint8)
-    return q.reshape(w.shape), d.astype(np.float32)
-
-
 def q4_0_mlx(w, dtype):
     """Q4_0 held exactly in MLX's affine 4-bit, group 32 (w' = scale * q + bias with scale = d, bias = -8 d): -> (weight
     packed as MLX packs 4 bits, 8 values per uint32 from the low nibble up; scales; biases). mx.quantize picks min/max
     affine scales per group, which do not land on the Q4_0 grid a Q4_0-trained (QAT) checkpoint was made for (#270)."""
     q, d = q4_0(w)
-    words = q.reshape(q.shape[0], -1, 8).astype(np.uint32) << (4 * np.arange(8, dtype=np.uint32))
-    return mx.array(words.sum(-1, dtype=np.uint32)), mx.array(d).astype(dtype), mx.array(-8.0 * d).astype(dtype)
+    return mx.array(pack(q)), mx.array(d).astype(dtype), mx.array(-8.0 * d).astype(dtype)
 
 
 def export_mlx(ck, out, bits=None, group_size=64, embeddings=True, per_layer_bits=None, q4_0_grid=False):
