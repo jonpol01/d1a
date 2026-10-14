@@ -167,3 +167,30 @@ def test_a_merged_model_has_no_adapter_switch(checkpoint, tmp_path):
     with pytest.raises(ValueError, match="merged"):
         with model.adapter(False):
             pass
+
+
+@needs_mlx
+def test_a_chat_runs_with_the_adapter_off_and_leaves_decisions_unchanged(checkpoint, golden, tmp_path):
+    """#274: generate_chat (the /v1/chat/completions body) on an unmerged export: an OpenAI-shaped answer within its
+    token limit, tool_calls present whenever tools are sent, and the adapter back on afterwards, so the golden answers
+    are exactly what they were before the chat."""
+    from d1a.backends.checkpoint import Checkpoint, LoadOptions, load
+    from d1a.backends.mlx import export_mlx
+    from d1a.backends.torch import SERVE_MAX_BRANCH, SERVE_MAX_STATE
+    from d1a.core.api import SystemOneRequest, to_record
+    from d1a.serving.openai_compat import ChatRequest, generate_chat
+    run = tmp_path / "unmerged"
+    export_mlx(Checkpoint(checkpoint), run, unmerged=True)
+    (run / "chat_template.jinja").write_text("{% for m in messages %}{{ m['content'] }}{% endfor %}", encoding="utf-8")   # the tiny fixture has none
+    tok, model = load(str(run), "mps", LoadOptions(backend="mlx"))
+    encs = [model.encode(tok, to_record(SystemOneRequest.model_validate(r["request"]))[0], max_state=SERVE_MAX_STATE, max_branch=SERVE_MAX_BRANCH)
+            for r in golden["records"][:8]]
+    before = [p for e in encs for p in model.probs(e)]
+    req = ChatRequest(messages=[{"role": "user", "content": "Order 4411 arrived late."}], max_tokens=4, temperature=0.0,
+                      tools=[{"type": "function", "function": {"name": "noop", "parameters": {"type": "object", "properties": {}}}}])
+    body = generate_chat(model, tok, req, run)
+    choice = body["choices"][0]
+    assert body["object"] == "chat.completion" and choice["message"]["role"] == "assistant" and choice["message"]["tool_calls"] == []
+    assert 0 < body["usage"]["completion_tokens"] <= 4 and model.loras
+    after = [p for e in encs for p in model.probs(e)]   # the same model: the adapter must be back on
+    assert all(torch.equal(p, q) for p, q in zip(before, after))

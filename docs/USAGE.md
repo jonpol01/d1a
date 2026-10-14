@@ -66,6 +66,57 @@ answer = client.decide("Shoes arrived late and I was charged twice.",
 print(answer["answers"]["team"]["probabilities"])
 ```
 
+## Chat with D1A
+
+A D1A model on an **instruction-tuned** trunk is also a chat model: with its D1A adapter switched off it is exactly
+that trunk (bit-identical hidden states). `d1a.serving.serve` uses this to answer OpenAI-format chat and embedding requests
+from the same model in memory that answers System One decisions, so apps written for the OpenAI API (mem0, n8n,
+chat UIs) can use D1A instead of a separate chat server (#274).
+
+- **Which models can chat:** D1A-E2B-it today; D1A-E4B-it and D1A-12B when trained. The base-trunk models (D1A-E2B, D1A-E4B)
+  cannot, and neither can a build whose adapter is merged into its weights (the published `-mlx-q8` / `-mlx-q4` repos).
+- **What changes:** chat runs with the adapter off, on the server's model thread between decision requests. A chat and a
+  decision never overlap, so a long answer makes decisions wait for it.
+
+**1. Build a chat-capable folder** from the published adapter (Apple Silicon; downloads the -it base, ~10 GB for E2B):
+
+```bash
+uv run --extra serve python scripts/export_mlx.py --run JohnP1/d1a-e2b-it@v0.6 --q-bits 8 --q-group-size 64 \
+    --unmerged --out runs/exports/d1a-e2b-it-chat
+```
+
+`--unmerged` keeps the adapter beside the base (`adapter/`) instead of folding it in, and the folder carries the base's
+chat template. On the 28-request bench its decisions match fp32 (0/42 flips).
+
+**2. Serve it**, with embeddings if your app needs them (mem0 does):
+
+```bash
+uv sync --extra serve --extra embed      # llama.cpp, for /v1/embeddings
+D1A_EMBED_GGUF=<path to nomic-embed-text-v1.5.Q4_K_M.gguf> \
+  uv run --extra serve python -m d1a.serving.serve --run runs/exports/d1a-e2b-it-chat --port 8009
+```
+
+The GGUF is `nomic-ai/nomic-embed-text-v1.5-GGUF`, file `nomic-embed-text-v1.5.Q4_K_M.gguf`: the file LM Studio serves.
+Its vectors match ones LM Studio stored (cosine 0.989 to 0.995 on 50 mem0 memories), so existing memories stay searchable.
+
+**3. Point an OpenAI client at it**:
+
+```python
+from openai import OpenAI
+client = OpenAI(base_url="http://localhost:8009/v1", api_key="unused")   # a real key when D1A_API_KEY is set
+r = client.chat.completions.create(model="d1a-chat", messages=[{"role": "user", "content": "What is SQL injection?"}])
+```
+
+- **Endpoints:** `POST /v1/chat/completions` (messages, `max_tokens`, `temperature`, `top_p`, `stop`, `tools` and
+  `tool_choice`, `response_format`, `stream`), `POST /v1/embeddings` (`input`, a string or a list), and `GET /v1/models`,
+  which lists `d1a-chat` and the embedder beside the decision model.
+- **Any model id is answered**, so an app configured for another model (an LM Studio id, say) needs only the URL.
+- **Streaming** sends the answer token by token; with `tools` it comes as one chunk, once the tool calls are parsed.
+- **JSON mode** asks the model for JSON in the prompt; there is no constrained decoding.
+- **mem0:** set the OpenAI LLM and embedder base URL to the server. Measured with D1A-E2B-it: facts extracted, graph relations
+  stored, search finds them; an add takes about 11 s on an M1 Max. Its graph search on questions finds no entities: the 2B
+  model answers the question instead of calling the extraction tool, as it did under LM Studio.
+
 ## Photos, Voice and Video
 
 The model server answers questions about an image, a short voice clip or a video with the same model, the same request shape plus a `media` field. On Apple Silicon, serve an MLX build that carries Gemma 4's vision and audio encoders (`media/`, about 1 GB, fetched on the first such request; `JohnP1/d1a-e4b-mlx-q8@v0.3` has them, and `scripts/export_mlx.py --media` adds them to your own export):

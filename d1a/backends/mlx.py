@@ -540,6 +540,8 @@ def export_mlx(ck, out, bits=None, group_size=64, embeddings=True, per_layer_bit
         if ck.file(name).exists(): shutil.copyfile(ck.file(name), out / name)
         elif name == "chat_template.jinja" and (Path(base_dir(meta)) / name).exists():   # a training run keeps no chat template;
             shutil.copyfile(Path(base_dir(meta)) / name, out / name)                     # an -it base's is what chat needs (#274)
+    if unmerged and (Path(base_dir(meta)) / "generation_config.json").exists():   # chat stops at the base's end-of-turn ids (#274)
+        shutil.copyfile(Path(base_dir(meta)) / "generation_config.json", out / "generation_config.json")
     leading, delimiters, _ = layout(tok)
     if unmerged:   # the base as quantized above, the adapter beside it, attached at load (attach_lora): adapter(False) = the base
         (out / ADAPTER_DIR).mkdir(exist_ok=True)

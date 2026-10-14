@@ -4,6 +4,10 @@
 
 Run: uv run --extra serve python -m d1a.serving.serve --run runs/d1a --port 8008
 
+OpenAI-compatible too (#274, d1a.serving.openai_compat): POST /v1/chat/completions answers with the model's adapter switched
+off (an export made with --unmerged on an instruction-tuned base), POST /v1/embeddings from D1A_EMBED_GGUF, and /v1/models
+also lists them in OpenAI form.
+
 TypeSafe-compatible: POST /v1/systemone, GET /v1/models, the `x-typesafe-request-id` response header, and bearer auth
 when D1A_API_KEY is set (unset = open server, the local default). Demo extras: POST /v1/systemone/permute (one Choice
 under several option orders) and POST /v1/systemone/separate (each question in its own pass, for the packed-vs-separate
@@ -37,13 +41,14 @@ import torch
 from dataclasses import dataclass, field, replace
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from d1a.core.api import SystemOneRequest, to_record, to_answers, output_tokens, with_date_facts
 from d1a.backends.checkpoint import EXPORT_CONFIG, Checkpoint, LoadOptions, fused_available, is_hub_id
 from d1a.backends.device import allocated_bytes, default_device, empty_cache, out_of_memory, sync
 from d1a.learning.feedback import FeedbackLog, OutcomeCalibrator
 from d1a.learning import flags, rules
+from d1a.serving import openai_compat
 from d1a.serving.media import MEDIA_DIR, MediaEncoder, MediaRequest, OnDemand, with_media
 from d1a.core.encoding import SERVE_MAX_BRANCH, SERVE_MAX_STATE, layout
 
@@ -54,6 +59,8 @@ PREFIX_MAX_TOKENS = int(setting("D1A_PREFIX_MAX_TOKENS"))  # state tokens the ca
 DATE_FACTS = setting("D1A_DATE_FACTS") == "1"
 FEEDBACK_LOG = setting("D1A_FEEDBACK_LOG")                         # set = log every decision (d1a.learning.feedback) and accept outcomes at POST /v1/feedback
 OUTCOME_CALIBRATOR = setting("D1A_OUTCOME_CALIBRATOR")             # set = apply this d1a.learning.feedback calibrator to yes/no and choice answers, reloaded when the file changes
+CHAT_NAME = setting("D1A_CHAT_NAME")                                # the model id /v1/chat/completions answers as (#274)
+EMBED_GGUF, EMBED_NAME = setting("D1A_EMBED_GGUF"), setting("D1A_EMBED_NAME")   # /v1/embeddings: a GGUF embedder via llama.cpp; unset = off
 API_KEY = setting("D1A_API_KEY")                                  # unset = open server; set = require Authorization: Bearer <key>, as the TypeSafe clients always send
 MAX_BATCH = 64                                                           # requests the model thread takes at once (d1a.backends.cuda_graphs splits them to fit its buffers)
 KEEP_ALIVE_S = 75                                                        # idle keep-alive; above Node's pooled-socket reuse window, so a proxy (the playground's Next.js rewrite) never reuses a socket uvicorn just closed (ECONNRESET, #42); uvicorn's default is 5
@@ -141,6 +148,7 @@ class Server:
         self.torch_device = "cpu" if getattr(self.model, "backend", None) == "mlx" else self.device
         self.prefix_cache = PrefixCache(PREFIX_CACHE_SIZE, int(PREFIX_MIN_TOKENS) if PREFIX_MIN_TOKENS else self.model.prefix_min_tokens)
         self.queue, self.stopping = queue.Queue(), threading.Event()
+        self.tasks = queue.Queue()   # run_task's jobs (a chat generation, #274): run alone between decision batches
         # the model thread gives up the GIL at every CUDA sync and waits to get it back while the event loop parses and
         # answers requests; at Python's default 5 ms switch interval those waits stretched a batch's model time ~2x.
         # Process-wide, so close() puts it back.
@@ -159,6 +167,8 @@ class Server:
         self.media = None
         while not self.queue.empty():
             self.queue.get_nowait()[1].set_exception(RuntimeError("the server stopped")); self.queue.task_done()
+        while not self.tasks.empty():
+            self.tasks.get_nowait()[1].set_exception(RuntimeError("the server stopped"))
         sys.setswitchinterval(self.switch_interval)
 
     def submit(self, rec, media=None, use_case=None):
@@ -177,12 +187,29 @@ class Server:
         self.queue.put((enc, done))
         return done
 
+    def run_task(self, fn):
+        """Queue fn(model, tok) for the model thread, run alone (never batched with decisions) with `lock` held: model
+        work that is not a decision, such as a chat generation (#274). MLX arrays belong to the thread that made them,
+        so it cannot run on the request's thread. -> a Future of fn's result."""
+        if self.stopping.is_set(): raise HTTPException(503, "the server is stopping")
+        done = Future()
+        self.tasks.put((fn, done))
+        return done
+
     def probs(self, rec, use_case=None):
         return self.submit(rec, use_case=use_case).result()
 
     def _work(self):
         graphs = getattr(self.model, "graphs", None)
         while not self.stopping.is_set():
+            try: fn, done = self.tasks.get_nowait()
+            except queue.Empty: pass
+            else:
+                try:
+                    with self.lock: done.set_result(fn(self.model, self.tok))
+                except Exception as e:
+                    traceback.clear_frames(e.__traceback__); done.set_exception(e)
+                continue
             try: batch = [self.queue.get(timeout=0.05)]
             except queue.Empty:
                 if graphs is not None and graphs.capture_due(idle=True):
@@ -354,6 +381,7 @@ def prepare(req):
 
 
 app = FastAPI(title="d1a")
+app.state.embedder = None   # /v1/embeddings: loaded on first use (D1A_EMBED_GGUF)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"], expose_headers=["x-typesafe-request-id", "server-timing"])
 
 
@@ -402,6 +430,54 @@ async def systemone_media(req: MediaRequest, request: Request):
     """/v1/systemone with a photo, a voice clip or a video (d1a.serving.media.MediaRequest), answered by the same model."""
     async with server_async() as s:
         return await s.answer_media_async(req, logged(request))
+
+
+def chat_server_check(s):
+    """A chat needs an unmerged adapter on an instruction-tuned base (export_mlx --unmerged): adapter(False) is that base."""
+    if not getattr(s.model, "loras", None):
+        raise HTTPException(501, "this model has no chat: serve an export made with `scripts/export_mlx.py --unmerged` on an instruction-tuned base (#274)")
+
+
+@app.post("/v1/chat/completions")
+async def chat_completions(req: openai_compat.ChatRequest):
+    """OpenAI-compatible chat, answered by the served model with its D1A adapter switched off (the instruction-tuned base
+    exactly), on the model thread between decision batches (d1a.serving.openai_compat). stream=true sends the answer
+    token by token; with tools it is sent whole, once the tool calls can be parsed."""
+    if req.stream and not req.tools:
+        return StreamingResponse(chat_stream(req), media_type="text/event-stream")
+    async with server_async() as s:
+        chat_server_check(s)
+        model_dir = s.checkpoint.path
+        body = await asyncio.wrap_future(s.run_task(lambda model, tok: openai_compat.generate_chat(model, tok, req, model_dir, CHAT_NAME)))
+    return StreamingResponse(openai_compat.stream_chunks(body), media_type="text/event-stream") if req.stream else body
+
+
+async def chat_stream(req):
+    """The token-by-token stream: the model thread puts each new piece on a queue, this generator sends it as a chunk.
+    The server is held for the whole stream, so an idle unload never takes the model away mid-answer."""
+    async with server_async() as s:
+        chat_server_check(s)
+        pieces, done = queue.Queue(), object()
+        model_dir = s.checkpoint.path
+        future = s.run_task(lambda model, tok: openai_compat.generate_chat(model, tok, req, model_dir, CHAT_NAME, on_text=pieces.put))
+        future.add_done_callback(lambda _: pieces.put(done))
+        body_id, created, name = f"chatcmpl-{uuid.uuid4().hex}", int(time.time()), req.model or CHAT_NAME
+        yield openai_compat.chunk(body_id, created, name, {"role": "assistant", "content": ""})
+        while (piece := await asyncio.to_thread(pieces.get)) is not done:
+            yield openai_compat.chunk(body_id, created, name, {"content": piece})
+        body = future.result()
+        yield openai_compat.chunk(body_id, created, name, {}, body["choices"][0]["finish_reason"])
+        yield "data: [DONE]\n\n"
+
+
+@app.post("/v1/embeddings")
+async def embeddings(req: openai_compat.EmbeddingRequest):
+    """OpenAI-compatible embeddings from D1A_EMBED_GGUF (llama.cpp), the engine and file LM Studio served them with."""
+    if not EMBED_GGUF:
+        raise HTTPException(501, "embeddings are off: set D1A_EMBED_GGUF to a GGUF embedding model (#274)")
+    if app.state.embedder is None:
+        app.state.embedder = openai_compat.Embedder(EMBED_GGUF, EMBED_NAME)
+    return await asyncio.to_thread(app.state.embedder.response, req)
 
 
 class Feedback(BaseModel):
@@ -471,7 +547,10 @@ def models():
                      "prefix_cache": {"size": s.prefix_cache.size, "min_state_tokens": s.prefix_cache.min_tokens, "max_tokens": s.prefix_cache.max_tokens, "hits": s.prefix_cache.hits,
                                       "misses": s.prefix_cache.misses, "cached_states": len(s.prefix_cache.entries), "oom_retries": s.prefix_cache.oom_retries},
                      "batches": {"count": s.batches, "requests": s.batched_requests, "queued": s.queue.qsize(), "latency": latency_summary(s.batch_ms)}})
-    return {"models": [{"name": name, **card} for name in MODEL_NAMES]}
+    data = [{"id": name, "object": "model", "owned_by": "d1a"} for name in MODEL_NAMES]   # the OpenAI listing, for OpenAI clients (#274)
+    if s is not None and getattr(s.model, "loras", None): data.append({"id": CHAT_NAME, "object": "model", "owned_by": "d1a"})
+    if EMBED_GGUF: data.append({"id": EMBED_NAME, "object": "model", "owned_by": "d1a"})
+    return {"models": [{"name": name, **card} for name in MODEL_NAMES], "object": "list", "data": data}
 
 
 def peak_rss_bytes():

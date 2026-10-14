@@ -67,6 +67,9 @@ and `--extra mcp` for the MCP server.
 | `D1A_DATE_FACTS` | `0` | `1` adds computed date facts to a state that holds two or more dates (`d1a.core.api.with_date_facts`). | When questions compare dates; measure first, as the reported numbers are without it. |
 | `D1A_FEEDBACK_LOG` | unset | See Self-learning. | |
 | `D1A_OUTCOME_CALIBRATOR` | unset | See Self-learning. | |
+| `D1A_CHAT_NAME` | `d1a-chat` | The model id `/v1/chat/completions` answers as and `/v1/models` lists. Any id a client sends is answered. | When an OpenAI client insists on a particular id. |
+| `D1A_EMBED_GGUF` | unset (off) | A GGUF embedding model `/v1/embeddings` serves through llama.cpp (the `embed` extra), e.g. `nomic-embed-text-v1.5.Q4_K_M.gguf`. | To serve embeddings, e.g. for mem0 ([Chat with D1A](USAGE.md#chat-with-d1a)). |
+| `D1A_EMBED_NAME` | `text-embedding-nomic-embed-text-v1.5` | The embedding model id `/v1/models` lists (LM Studio's id for nomic, so clients set up for it need no change). | With a different embedder. |
 
 Fixed in code, not settings: up to 64 requests per batch (`MAX_BATCH`), a 75 s keep-alive, and the model list
 (`/v1/models` lists `d1a-latest`, but any model name in a request is answered).

@@ -503,6 +503,9 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+embed = [
+    { name = "llama-cpp-python" },
+]
 mcp = [
     { name = "mcp" },
 ]
@@ -536,6 +539,7 @@ requires-dist = [
     { name = "av", marker = "extra == 'media'", specifier = ">=14" },
     { name = "datasets", specifier = ">=3.0" },
     { name = "fastapi", marker = "extra == 'serve'", specifier = ">=0.115" },
+    { name = "llama-cpp-python", marker = "extra == 'embed'", specifier = ">=0.3.36" },
     { name = "mcp", marker = "extra == 'mcp'", specifier = ">=2.2,<3" },
     { name = "mlx-lm", marker = "platform_machine == 'arm64' and sys_platform == 'darwin' and extra == 'mlx'", specifier = ">=0.31.3,<0.32" },
     { name = "mlx-lm", marker = "platform_machine == 'arm64' and sys_platform == 'darwin' and extra == 'serve'", specifier = ">=0.31.3,<0.32" },
@@ -552,7 +556,7 @@ requires-dist = [
     { name = "typesafe-sdk", marker = "extra == 'serve'", specifier = ">=0.6.0" },
     { name = "uvicorn", marker = "extra == 'serve'", specifier = ">=0.30" },
 ]
-provides-extras = ["serve", "mlx", "media", "mcp"]
+provides-extras = ["serve", "mlx", "media", "embed", "mcp"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -594,6 +598,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/81/e1/56027a71e31b02ddc53c7d65b01e68edf64dea2932122fe7746a516f75d5/dill-0.4.1.tar.gz", hash = "sha256:423092df4182177d4d8ba8290c8a5b640c66ab35ec7da59ccfa00f6fa3eea5fa", size = 187315, upload-time = "2026-01-19T02:36:56.85Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/1e/77/dc8c558f7593132cf8fefec57c4f60c83b16941c574ac5f619abb3ae7933/dill-0.4.1-py3-none-any.whl", hash = "sha256:1e1ce33e978ae97fcfcff5638477032b801c46c7c65cf717f95fbc2248f79a9d", size = 120019, upload-time = "2026-01-19T02:36:55.663Z" },
+]
+
+[[package]]
+name = "diskcache"
+version = "5.6.3"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/3f/21/1c1ffc1a039ddcc459db43cc108658f32c57d271d7289a2794e401d0fdb6/diskcache-5.6.3.tar.gz", hash = "sha256:2c3a3fa2743d8535d832ec61c2054a1641f41775aa7c556758a109941e33e4fc", size = 67916, upload-time = "2023-08-31T06:12:00.316Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/3f/27/4570e78fc0bf5ea0ca45eb1de3818a23787af9b390c0b0a0033a1b8236f9/diskcache-5.6.3-py3-none-any.whl", hash = "sha256:5e31b2d5fbad117cc363ebaf6b689474db18a1f6438bc82358b024abd4c2ca19", size = 45550, upload-time = "2023-08-31T06:11:58.822Z" },
 ]
 
 [[package]]
@@ -985,6 +998,18 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/16/45/c37a21ad5c0ab581a93c55ad544721aaa1f0ae94edb29c6a678a23d013e6/kiwisolver-1.5.1-graalpy312-graalpy250_312_native-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:072bdb15a3c19a5b5dbc8f8fb1f4e1884bf4f3507eeb4cc6334401274d37a5c0", size = 194292, upload-time = "2026-08-28T10:28:11.06Z" },
     { url = "https://files.pythonhosted.org/packages/a6/c1/69f00d627949580e43d57af0aa465df46868d7c29801c137a55374101294/kiwisolver-1.5.1-graalpy312-graalpy250_312_native-win_amd64.whl", hash = "sha256:a5a00665d1a0e26763a7338d7e911d4598fbc1d50dd0d6b7919b7dc6c5d6569f", size = 73362, upload-time = "2026-08-28T10:28:12.449Z" },
 ]
+
+[[package]]
+name = "llama-cpp-python"
+version = "0.3.36"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "diskcache" },
+    { name = "jinja2" },
+    { name = "numpy" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ec/e9/e7de2b0463ea3ffbf0ede6cb21b58c1258a8f6521aae45ca773a59fe7cf3/llama_cpp_python-0.3.36.tar.gz", hash = "sha256:832db0699007f1be95a7e41ef12e88926b02ba836461e36a36372db2760c1a2e", size = 76589250, upload-time = "2026-10-01T05:48:01.345Z" }
 
 [[package]]
 name = "markdown-it-py"
