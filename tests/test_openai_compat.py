@@ -78,6 +78,16 @@ def test_gemma_tool_calls_become_openai_tool_calls():
     assert openai_compat.tool_calls_of("No tools needed.") == ("No tools needed.", [])
 
 
+@needs_mlx
+def test_a_tool_call_cut_off_by_max_tokens_leaves_no_markup_in_the_text():
+    """#278: an answer that runs out of tokens inside a tool call came back as content holding the raw, half-written Gemma
+    block. The client gets the text before it and no tool call (finish_reason is already "length"), so it can retry."""
+    cut = 'Saving it now.<|tool_call>call:write_file{path:<|"|>/tmp/a.md<|"|>,content:<|"|>WHERE TO POINT'
+    assert openai_compat.tool_calls_of(cut) == ("Saving it now.", [])
+    head, calls = openai_compat.tool_calls_of('<|tool_call>call:get_weather{city:<|"|>Tokyo<|"|>}<tool_call|><|tool_call>call:get_wea')
+    assert head == "" and [c["function"]["name"] for c in calls] == ["get_weather"]   # the complete call survives, the cut one goes
+
+
 class StubLlama:
     def __init__(self): self.normalize = []
 

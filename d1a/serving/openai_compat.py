@@ -70,15 +70,17 @@ def eos_ids(tok, model_dir):
 
 
 def tool_calls_of(text):
-    """Gemma 4's <|tool_call>call:name{args}<tool_call|> blocks -> (the text before the first one, OpenAI tool_calls)."""
+    """Gemma 4's <|tool_call>call:name{args}<tool_call|> blocks -> (the text before the first one, OpenAI tool_calls). A block
+    cut off unfinished (max_tokens ran out inside it) is dropped, never returned as text: the markup means nothing to an
+    OpenAI client, and finish_reason "length" already tells it to retry with more tokens (#278)."""
     from mlx_lm.tool_parsers import gemma4
     if gemma4.tool_call_start not in text:
         return text, []
     head = text.split(gemma4.tool_call_start, 1)[0]
     try:
         calls = gemma4.parse_tool_call(text)
-    except ValueError:
-        return text, []
+    except ValueError:   # no complete call: only an unfinished one
+        return head, []
     calls = calls if isinstance(calls, list) else [calls]
     return head, [{"id": f"call_{uuid.uuid4().hex[:24]}", "type": "function",
                    "function": {"name": c["name"], "arguments": json.dumps(c["arguments"], ensure_ascii=False)}} for c in calls]

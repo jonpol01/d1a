@@ -113,6 +113,8 @@ r = client.chat.completions.create(model="d1a-chat", messages=[{"role": "user", 
 - **Any model id is answered**, so an app configured for another model (an LM Studio id, say) needs only the URL.
 - **Streaming** sends the answer token by token; with `tools` it comes as one chunk, once the tool calls are parsed.
 - **JSON mode** asks the model for JSON in the prompt; there is no constrained decoding.
+- **A tool call cut off by `max_tokens`** is dropped: the answer keeps the text before it, with no tool call and
+  `finish_reason` `"length"`, so retry with a larger `max_tokens`.
 - **mem0:** set the OpenAI LLM and embedder base URL to the server. Measured with D1A-E2B-it: facts extracted, graph relations
   stored, search finds them; an add takes about 11 s on an M1 Max. Its graph search on questions finds no entities: the 2B
   model answers the question instead of calling the extraction tool, as it did under LM Studio.
