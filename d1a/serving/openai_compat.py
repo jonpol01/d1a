@@ -171,7 +171,9 @@ class Embedder:
         with self.lock:
             if self.llm is None:
                 from llama_cpp import Llama
-                self.llm = Llama(model_path=str(self.gguf), embedding=True, n_ctx=2048, verbose=False)
+                # every layer on the GPU, as LM Studio runs it: llama.cpp's CPU path (llama-cpp-python's default) gives vectors
+                # only ~0.99 cosine to the ones LM Studio stored; Metal gives the same vectors (cosine 1.00000)
+                self.llm = Llama(model_path=str(self.gguf), embedding=True, n_ctx=2048, n_gpu_layers=-1, verbose=False)
             return [self.llm.embed(t, normalize=True) for t in texts]   # unit length, as LM Studio served them: stored vectors are compared by distance, not only by angle
 
     def response(self, req):
