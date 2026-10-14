@@ -153,7 +153,7 @@ the head, or loading stops. D1A 0.5 stops writing it; reading it stays.
 (`config.json`, `model*.safetensors`, perhaps quantized), `head.safetensors` (fp32), the tokenizer files, and a
 `d1a_config.json` with `format`, `format_version`, `base`, `base_revision`, `source`, `source_revision`,
 `adapter_sha256`, `lora`, `head_dim`, `hidden_size`, `temperature`, `leading_ids`, `bos_id`, `delimiter_ids`, `pad_id`,
-`dtype`, `quantization` and `head`, and from D1A 0.6 `temperature_fit`, `use_case_temperatures` and `use_case_temperature_fits`
+`dtype`, `quantization` (with `"grid": "q4_0"` when the weights are on llama.cpp's Q4_0 grid, `--q4-0`) and `head`, and from D1A 0.6 `temperature_fit`, `use_case_temperatures` and `use_case_temperature_fits`
 (the calibration records of §6; an export without them has no use-case temperatures). The token layout it records is checked
 against its tokenizer at load.
 

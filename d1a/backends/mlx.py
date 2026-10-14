@@ -419,14 +419,35 @@ class MLXDecisionModel:
 TOKENIZER_FILES = ("tokenizer.json", "tokenizer_config.json", "special_tokens_map.json", "chat_template.jinja")
 
 
-def export_mlx(ck, out, bits=None, group_size=64, embeddings=True, per_layer_bits=None):
+def q4_0(w):
+    """llama.cpp's Q4_0 of a [rows, cols] float array, blocks of 32 along each row (its quantize_row_q4_0_ref): d = the
+    block's largest-magnitude value / -8, q = min(15, int(w / d + 8.5)). -> (q uint8 in 0..15, d float32 [rows, cols/32])."""
+    w = np.asarray(w, np.float32)
+    b = w.reshape(w.shape[0], -1, 32)
+    d = np.take_along_axis(b, np.abs(b).argmax(-1)[..., None], -1)[..., 0] / -8.0
+    inv = np.divide(1.0, d, out=np.zeros_like(d), where=d != 0)
+    q = np.clip(np.floor(b * inv[..., None] + 8.5), 0, 15).astype(np.uint8)
+    return q.reshape(w.shape), d.astype(np.float32)
+
+
+def q4_0_mlx(w, dtype):
+    """Q4_0 held exactly in MLX's affine 4-bit, group 32 (w' = scale * q + bias with scale = d, bias = -8 d): -> (weight
+    packed as MLX packs 4 bits, 8 values per uint32 from the low nibble up; scales; biases). mx.quantize picks min/max
+    affine scales per group, which do not land on the Q4_0 grid a Q4_0-trained (QAT) checkpoint was made for (#270)."""
+    q, d = q4_0(w)
+    words = q.reshape(q.shape[0], -1, 8).astype(np.uint32) << (4 * np.arange(8, dtype=np.uint32))
+    return mx.array(words.sum(-1, dtype=np.uint32)), mx.array(d).astype(dtype), mx.array(-8.0 * d).astype(dtype)
+
+
+def export_mlx(ck, out, bits=None, group_size=64, embeddings=True, per_layer_bits=None, q4_0_grid=False):
     """Write `ck` (a LoRA checkpoint, d1a.backends.checkpoint.Checkpoint) as an MLX export folder that d1a.backends.checkpoint serves
     through this backend without the base or the adapter: the adapter merged into the base in fp32 on the CPU stream
     (merge_lora, the same bits the MLX backend computes at load), then optionally quantized (`bits` per weight, affine,
     `group_size` per scale; `embeddings` also quantizes embed_tokens and the per-layer embeddings, Gemma 4's largest
     tensors; `per_layer_bits` gives the per-layer embeddings their own width: on Gemma 4 E2B they are half the weights and
     take 4 bits well, while the linear layers need 8), saved by mlx-lm (config.json + model*.safetensors), with the pointer head in fp32 (head.safetensors), the
-    checkpoint's tokenizer files and d1a_config.json. -> the d1a_config dict."""
+    checkpoint's tokenizer files and d1a_config.json. `q4_0_grid` writes 4-bit group-32 weights on llama.cpp's Q4_0 grid
+    (q4_0_mlx) instead of mlx-lm's min/max scales: for a base trained for Q4_0, such as Gemma 4 12B-it QAT. -> the d1a_config dict."""
     import shutil
 
     import mlx.nn as nn
@@ -442,13 +463,27 @@ def export_mlx(ck, out, bits=None, group_size=64, embeddings=True, per_layer_bit
     lm, config = load_mlx_lm(base_dir(meta))
     merge_lora(lm, ck.path)
     quantization = None
+    if q4_0_grid:
+        if per_layer_bits or bits not in (None, 4) or group_size not in (32, 64):
+            raise ValueError("q4_0_grid is 4 bits in groups of 32, with one width for every quantized weight")
+        bits, group_size = 4, 32
     if bits:
         def widths(path, module):
             if isinstance(module, nn.Embedding) and not embeddings: return False
             if per_layer_bits and path.endswith("embed_tokens_per_layer"): return {"group_size": group_size, "bits": per_layer_bits, "mode": "affine"}
             return True
+        exact = {}
+        if q4_0_grid:   # computed before mlx-lm replaces the weights, one tensor at a time in fp32
+            for path, m in lm.named_modules():
+                if hasattr(m, "to_quantized") and m.weight.shape[-1] % 32 == 0 and widths(path, m):
+                    exact[path] = q4_0_mlx(np.array(m.weight.astype(mx.float32)), m.weight.dtype); mx.eval(*exact[path])
         lm, config = quantize_model(lm, config, group_size, bits, quant_predicate=widths)
-        quantization = {**config["quantization"], "embeddings": bool(embeddings)}
+        quantized = {path: m for path, m in lm.named_modules() if hasattr(m, "scales")}
+        if q4_0_grid:
+            if set(quantized) != set(exact): raise ValueError(f"Q4_0 packing for {sorted(set(quantized) ^ set(exact))[:3]}...")
+            for path, (w, scales, biases) in exact.items():
+                quantized[path].weight, quantized[path].scales, quantized[path].biases = w, scales, biases
+        quantization = {**config["quantization"], "embeddings": bool(embeddings), **({"grid": "q4_0"} if q4_0_grid else {})}
     norm = lm.language_model.model.norm.weight   # read before save_model donates the weights
     hidden, dtype = norm.shape[0], str(norm.dtype).removeprefix("mlx.core.")
     out.mkdir(parents=True, exist_ok=True)
