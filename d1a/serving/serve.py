@@ -548,7 +548,10 @@ def models():
                                       "misses": s.prefix_cache.misses, "cached_states": len(s.prefix_cache.entries), "oom_retries": s.prefix_cache.oom_retries},
                      "batches": {"count": s.batches, "requests": s.batched_requests, "queued": s.queue.qsize(), "latency": latency_summary(s.batch_ms)}})
     data = [{"id": name, "object": "model", "owned_by": "d1a"} for name in MODEL_NAMES]   # the OpenAI listing, for OpenAI clients (#274)
-    if s is not None and getattr(s.model, "loras", None): data.append({"id": CHAT_NAME, "object": "model", "owned_by": "d1a"})
+    # chat is listed whenever the served checkpoint can chat, loaded or not (#280): with --idle-unload an idle server holds no
+    # model, and a client that picks its model from this list (n8n) must still find it; the first chat loads the model
+    if getattr(app.state, "chat", False) or (s is not None and getattr(s.model, "loras", None)):
+        data.append({"id": CHAT_NAME, "object": "model", "owned_by": "d1a"})
     if EMBED_GGUF: data.append({"id": EMBED_NAME, "object": "model", "owned_by": "d1a"})
     return {"models": [{"name": name, **card} for name in MODEL_NAMES], "object": "list", "data": data}
 
@@ -672,6 +675,7 @@ def main():
     app.state.models = OnDemand(load, a.idle_unload, dev)
     with app.state.models.use() as s:   # loaded now, so a bad checkpoint fails at startup, not on a user's request
         model = s.model; app.state.card = card(s)
+        app.state.chat = bool(getattr(model, "loras", None))   # an unmerged adapter: chat with it off (#274); known once, for /v1/models
     app.state.models.run_reaper()
     if fused_default and not opts.fused and model.hybrid: print("fused Qwen3.5 kernels off: install the flash-linear-attention version d1a/backends/fused_qwen35.py pins (FLA_VERSION) to turn them on")
     if model.head.temperature == 1.0:   # 1.0 = never calibrated: d1a.training.train and the study harness leave head.pt at 1.0 on purpose
