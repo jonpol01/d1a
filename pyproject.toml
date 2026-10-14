@@ -54,6 +54,9 @@ media = [
     "torchvision",   # Gemma 4's image processor
     "av>=14",        # video clips: frames sampled by Gemma 4's video processor (PyAV wheels bundle ffmpeg)
 ]
+embed = [
+    "llama-cpp-python>=0.3.36",   # /v1/embeddings (d1a.serving.openai_compat, #274): a GGUF embedder, the engine LM Studio served it with
+]
 mcp = [
     "mcp>=2.2,<3",   # d1a.agents.mcp_server: the agent-factory presets as MCP tools
 ]
