@@ -4,6 +4,7 @@ listing. No weights: stand-ins replace the model and the GGUF embedder (the MLX 
     uv run python -m pytest tests/test_openai_compat.py -v
 """
 import json
+import sys
 import threading
 from concurrent.futures import Future
 from contextlib import asynccontextmanager
@@ -99,6 +100,17 @@ def test_embeddings_are_off_without_a_gguf_and_unit_length_with_one(monkeypatch)
             serve.app.state.embedder = None
     assert r["object"] == "list" and [d["index"] for d in r["data"]] == [0, 1] and r["data"][0]["embedding"] == [0.6, 0.8]
     assert embedder.llm.normalize == [True, True]   # LM Studio served unit-length vectors; stored ones are compared by distance
+
+
+def test_the_embedder_runs_every_layer_on_the_gpu(monkeypatch):
+    """llama.cpp on the CPU (llama-cpp-python's default, n_gpu_layers=0) gives vectors ~0.99 cosine to the ones LM Studio
+    stored with Metal; all layers offloaded gives the same vectors. Measured on the Mac mini (#274)."""
+    made = {}
+    class Llama(StubLlama):
+        def __init__(self, **kw): super().__init__(); made.update(kw)
+    monkeypatch.setitem(sys.modules, "llama_cpp", SimpleNamespace(Llama=Llama))
+    assert openai_compat.Embedder("/stub.gguf", "e").embed(["x"]) == [[0.6, 0.8]]
+    assert made["n_gpu_layers"] == -1 and made["embedding"] is True
 
 
 def test_the_openai_model_list_rides_beside_the_typesafe_one(monkeypatch):

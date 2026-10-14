@@ -97,7 +97,7 @@ D1A_EMBED_GGUF=<path to nomic-embed-text-v1.5.Q4_K_M.gguf> \
 ```
 
 The GGUF is `nomic-ai/nomic-embed-text-v1.5-GGUF`, file `nomic-embed-text-v1.5.Q4_K_M.gguf`: the file LM Studio serves.
-Its vectors match ones LM Studio stored (cosine 0.989 to 0.995 on 50 mem0 memories), so existing memories stay searchable.
+It runs on the GPU, as LM Studio runs it, so its vectors are the ones LM Studio stored (cosine 1.00000 on the Mac mini), and existing memories stay comparable.
 
 **3. Point an OpenAI client at it**:
 
