@@ -141,6 +141,17 @@ def test_embeddings_asked_for_in_base64_come_as_little_endian_float32(monkeypatc
     assert decoded == [pytest.approx([0.6, 0.8])] * 2 and flt[0]["embedding"] == none[0]["embedding"] == [0.6, 0.8]
 
 
+def test_chat_stays_listed_while_the_model_is_unloaded(monkeypatch):
+    """#280: with --idle-unload an idle server holds no model, and d1a-chat dropped out of /v1/models, so a client that picks
+    its model from the list (n8n) could not find it. A chat-capable checkpoint lists it loaded or not; a merged one never."""
+    monkeypatch.setattr(serve, "EMBED_GGUF", None)
+    monkeypatch.setattr(serve.app.state, "models", SimpleNamespace(model=None, idle_s=600), raising=False)
+    monkeypatch.setattr(serve.app.state, "card", {"description": "d"}, raising=False)
+    for can_chat, listed in ((True, True), (False, False)):
+        monkeypatch.setattr(serve.app.state, "chat", can_chat, raising=False)
+        assert (serve.CHAT_NAME in [d["id"] for d in serve.models()["data"]]) is listed
+
+
 def test_the_openai_model_list_rides_beside_the_typesafe_one(monkeypatch):
     monkeypatch.setattr(serve, "EMBED_GGUF", "/stub.gguf")
     serve.app.state.models, serve.app.state.card = SimpleNamespace(model=None, idle_s=0), {"description": "d"}
