@@ -123,6 +123,24 @@ def test_the_embedder_runs_every_layer_on_the_gpu(monkeypatch):
     assert made["n_gpu_layers"] == -1 and made["embedding"] is True
 
 
+def test_embeddings_asked_for_in_base64_come_as_little_endian_float32(monkeypatch):
+    """#282: the openai Node SDK (n8n's embeddings node) always sends encoding_format "base64" and decodes each embedding as
+    base64 float32; a float list came out as 192 numbers instead of 768. Float, or no format, stays a list."""
+    import base64, struct
+    monkeypatch.setattr(serve, "EMBED_GGUF", "/stub.gguf")
+    embedder = openai_compat.Embedder("/stub.gguf", "e"); embedder.llm = StubLlama()
+    serve.app.state.embedder = embedder
+    try:
+        with TestClient(serve.app) as client:
+            b64 = client.post("/v1/embeddings", json={"input": ["a", "b"], "encoding_format": "base64"}).json()["data"]
+            flt = client.post("/v1/embeddings", json={"input": "a", "encoding_format": "float"}).json()["data"]
+            none = client.post("/v1/embeddings", json={"input": "a"}).json()["data"]
+    finally:
+        serve.app.state.embedder = None
+    decoded = [list(struct.unpack("<2f", base64.b64decode(d["embedding"]))) for d in b64]
+    assert decoded == [pytest.approx([0.6, 0.8])] * 2 and flt[0]["embedding"] == none[0]["embedding"] == [0.6, 0.8]
+
+
 def test_the_openai_model_list_rides_beside_the_typesafe_one(monkeypatch):
     monkeypatch.setattr(serve, "EMBED_GGUF", "/stub.gguf")
     serve.app.state.models, serve.app.state.card = SimpleNamespace(model=None, idle_s=0), {"description": "d"}

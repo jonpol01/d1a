@@ -108,7 +108,8 @@ r = client.chat.completions.create(model="d1a-chat", messages=[{"role": "user", 
 ```
 
 - **Endpoints:** `POST /v1/chat/completions` (messages, `max_tokens`, `temperature`, `top_p`, `stop`, `tools` and
-  `tool_choice`, `response_format`, `stream`), `POST /v1/embeddings` (`input`, a string or a list), and `GET /v1/models`,
+  `tool_choice`, `response_format`, `stream`), `POST /v1/embeddings` (`input`, a string or a list; `encoding_format` `float` or `base64`, which Node
+  OpenAI clients such as n8n send by default), and `GET /v1/models`,
   which lists `d1a-chat` and the embedder beside the decision model.
 - **Any model id is answered**, so an app configured for another model (an LM Studio id, say) needs only the URL.
 - **Streaming** sends the answer token by token; with `tools` it comes as one chunk, once the tool calls are parsed.

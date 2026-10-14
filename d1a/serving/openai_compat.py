@@ -8,10 +8,13 @@ llama.cpp (D1A_EMBED_GGUF), the engine and file LM Studio served them with, so v
     POST /v1/chat/completions   messages, max_tokens / max_completion_tokens, temperature, top_p, stop, tools,
                                 tool_choice, response_format (no constrained decoding: the model is asked in the prompt),
                                 stream (answered as one chunk then [DONE])
-    POST /v1/embeddings         input (a string or a list of strings), model; `dimensions` is accepted and ignored
+    POST /v1/embeddings         input (a string or a list of strings), model, encoding_format ("float" or "base64");
+                                `dimensions` is accepted and ignored
 """
+import base64
 import json
 import logging
+import struct
 import threading
 import time
 import uuid
@@ -162,6 +165,14 @@ def stream_chunks(body):
     yield "data: [DONE]\n\n"
 
 
+def encoded(vector, encoding_format):
+    """An embedding as OpenAI returns it: a list of floats, or with encoding_format "base64" the base64 of its little-endian
+    float32 bytes. The openai Node SDK (n8n) always asks for base64 and decodes it, so a list garbles its vectors (#282)."""
+    if encoding_format == "base64":
+        return base64.b64encode(struct.pack(f"<{len(vector)}f", *vector)).decode("ascii")
+    return vector
+
+
 class Embedder:
     """A GGUF embedding model (nomic-embed-text-v1.5 by default) through llama.cpp, loaded on first use. llama.cpp runs
     its own Metal context, so it needs neither the model thread nor MLX; one lock serializes its calls."""
@@ -183,5 +194,5 @@ class Embedder:
         vectors = self.embed(texts)
         tokens = sum(len(self.llm.tokenize(t.encode("utf-8"))) for t in texts)
         return {"object": "list", "model": req.model or self.name,
-                "data": [{"object": "embedding", "index": i, "embedding": v} for i, v in enumerate(vectors)],
+                "data": [{"object": "embedding", "index": i, "embedding": encoded(v, req.encoding_format)} for i, v in enumerate(vectors)],
                 "usage": {"prompt_tokens": tokens, "total_tokens": tokens}}
