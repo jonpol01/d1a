@@ -6,7 +6,7 @@ Run: uv run --extra serve python -m d1a.serving.serve --run runs/d1a --port 8008
 
 OpenAI-compatible too (#274, d1a.serving.openai_compat): POST /v1/chat/completions answers with the model's adapter switched
 off (an export made with --unmerged on an instruction-tuned base), POST /v1/embeddings from D1A_EMBED_GGUF, and /v1/models
-also lists them in OpenAI form.
+also lists them in OpenAI form (the chat model whenever the checkpoint can chat, loaded or not: #280).
 
 TypeSafe-compatible: POST /v1/systemone, GET /v1/models, the `x-typesafe-request-id` response header, and bearer auth
 when D1A_API_KEY is set (unset = open server, the local default). Demo extras: POST /v1/systemone/permute (one Choice
