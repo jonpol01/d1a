@@ -7,7 +7,8 @@ llama.cpp (D1A_EMBED_GGUF), the engine and file LM Studio served them with, so v
 
     POST /v1/chat/completions   messages, max_tokens / max_completion_tokens, temperature, top_p, stop, tools,
                                 tool_choice, response_format (no constrained decoding: the model is asked in the prompt),
-                                stream (answered as one chunk then [DONE])
+                                stream (token by token; with tools, one chunk once the tool calls are parsed, then [DONE]);
+                                a tool call cut off by max_tokens is dropped (finish_reason "length", #278)
     POST /v1/embeddings         input (a string or a list of strings), model, encoding_format ("float" or "base64");
                                 `dimensions` is accepted and ignored
 """
@@ -154,7 +155,9 @@ def chunk(body_id, created, model, delta, finish=None):
 
 
 def stream_chunks(body):
-    """A finished completion as an OpenAI stream: one chunk with the whole message, one with the finish reason, [DONE]."""
+    """A finished completion as an OpenAI stream: one chunk with the whole message, one with the finish reason, [DONE].
+    Used when `tools` are sent: tool calls can only be parsed from the whole answer (serve streams other chats token by
+    token through generate_chat's on_text)."""
     choice = body["choices"][0]
     delta = {k: v for k, v in choice["message"].items() if v is not None}
     if "tool_calls" in delta:
