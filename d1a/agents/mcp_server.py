@@ -8,7 +8,7 @@ card), d1a_gate (may this tool call run?), d1a_route (which model size answers a
 questions). Each returns D1A's answers with their probabilities and `advice`: the preset's fail-safe action
 (d1a.agents.presets.advise). Requires the `mcp` extra.
 """
-import json, os, time, urllib.request
+import json, time, urllib.request
 
 from d1a.agents.presets import PRESETS, USE_CASES, advise, gate_state, judge_state
 from d1a.core.settings import get as setting

@@ -151,7 +151,6 @@ def test_backbone_families(monkeypatch):
 def test_backbone_mlx_cache_copy():
     """The MLX copy rule follows the family: Qwen3.5's recurrent DeltaNet states are copied by mlx-lm's merge, Gemma 4's
     plain and rotating KV caches by replicate (d1a.backends.mlx)."""
-    from types import SimpleNamespace
     from d1a.backends.backbone import Attention, Gemma4, Qwen35
     assert Qwen35.mlx_cache_copy == "merge" and Attention.mlx_cache_copy == Gemma4.mlx_cache_copy == "replicate"
     pytest.importorskip("mlx_lm")

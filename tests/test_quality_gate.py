@@ -210,7 +210,7 @@ def test_each_checkout_runs_its_own_module_paths(tmp_path):
     """A version from before the package layout (#60), such as the Mac mini's pin, serves as d1a.serve; a newer one as d1a.serving.serve."""
     old, new = tmp_path / "old", tmp_path / "new"
     (old / "d1a").mkdir(parents=True); (old / "d1a/serve.py").write_text("", encoding="utf-8"); (old / "d1a/benchmark.py").write_text("", encoding="utf-8")
-    for f in ("d1a/serving/serve.py", "d1a/eval/benchmark.py", "d1a/serve.py"):   # the new layout keeps one-release shims at the old paths
+    for f in ("d1a/serving/serve.py", "d1a/eval/benchmark.py"):
         (new / f).parent.mkdir(parents=True, exist_ok=True); (new / f).write_text("", encoding="utf-8")
     assert (gate.module(old, "serve"), gate.module(old, "benchmark")) == ("d1a.serve", "d1a.benchmark")
     assert (gate.module(new, "serve"), gate.module(new, "benchmark")) == ("d1a.serving.serve", "d1a.eval.benchmark")

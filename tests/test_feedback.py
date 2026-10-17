@@ -3,7 +3,7 @@ import numpy as np
 import pytest
 
 from d1a.training.data import materialize
-from d1a.learning.feedback import FeedbackLog, OutcomeCalibrator, choice_log_loss, choice_pairs, gate, gate_choice, held_out, log_loss, main, pairs, promote, records, split
+from d1a.learning.feedback import FeedbackLog, OutcomeCalibrator, choice_log_loss, choice_pairs, gate, gate_choice, log_loss, main, pairs, promote, records, split
 
 Q = {"resolved": {"type": "noul", "instr": "Does the patch fix the issue?", "criteria": {"true": "fixes it", "false": "does not"}}}
 
