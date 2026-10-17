@@ -249,8 +249,12 @@ class Server:
             try: batch.append(self.queue.get_nowait())
             except queue.Empty: break
         if not batch: return
-        with self.model.adapter(True):
-            results = self._results(batch)
+        try:
+            with self.model.adapter(True):
+                results = self._results(batch)
+        except Exception as e:   # the switch itself failed: the batch is off the queue, so it gets the error, never silence
+            traceback.clear_frames(e.__traceback__)
+            results = [e] * len(batch)
         self._answer(batch, results)
 
     def _run(self, encs):

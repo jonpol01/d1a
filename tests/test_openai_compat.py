@@ -77,6 +77,28 @@ def test_a_decision_during_a_chat_is_answered_between_its_tokens_with_the_adapte
     assert answered_mid_chat and not adapter_on_after and model.passes_on == [True] and probs[0] == [0.25, 0.75]
 
 
+def test_a_decision_taken_between_tokens_gets_the_error_when_the_adapter_switch_fails():
+    """between_tokens takes the waiting decisions off the queue before switching the adapter on: if the switch raises,
+    they must fail with its error, not wait forever, and the chat goes on."""
+    class Broken(SwitchedModel):
+        @contextmanager
+        def adapter(self, on=True):
+            if on: raise RuntimeError("switch failed")
+            yield
+    server = Server(SimpleNamespace(release_date=lambda: "2026-01-01"), "tok", Broken(), "cpu")
+    try:
+        pending = Future()
+        def chat(model, tok):
+            pending.set_result(server.submit(packed("abc", branch=1)))
+            server.between_tokens()
+            return "chat done"
+        assert server.run_task(chat).result(timeout=10) == "chat done"
+        with pytest.raises(RuntimeError, match="switch failed"):
+            pending.result().result(timeout=10)
+    finally:
+        server.close()
+
+
 def held(model):
     """server_async stand-in: one Server-like object holding `model`, whose run_task runs fn at once."""
     def run_task(fn):
