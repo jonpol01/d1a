@@ -73,13 +73,14 @@ that trunk (bit-identical hidden states). `d1a.serving.serve` uses this to answe
 from the same model in memory that answers System One decisions, so apps written for the OpenAI API (mem0, n8n,
 chat UIs) can use D1A instead of a separate chat server (#274).
 
-- **Which models can chat:** D1A-E2B-it today; D1A-E4B-it and D1A-12B when trained. The base-trunk models (D1A-E2B, D1A-E4B)
+- **Which models can chat:** D1A-E2B-it and D1A-E4B-it today; D1A-12B when trained. The base-trunk models (D1A-E2B, D1A-E4B)
   cannot, and neither can a build whose adapter is merged into its weights (the published `-mlx-q8` / `-mlx-q4` repos).
 - **What changes:** chat runs with the adapter off, on the server's model thread between decision requests. A decision
   that arrives during a chat is answered between two of the chat's tokens, with the adapter on for it and off again
   after, so it waits about one token rather than the whole answer, and the chat's answer is the same as without it.
 
-**1. Build a chat-capable folder** from the published adapter (Apple Silicon; downloads the -it base, ~10 GB for E2B):
+**1. Build a chat-capable folder** from the published adapter (Apple Silicon; downloads the -it base, ~10 GB for E2B,
+~16 GB for E4B; for E4B-it use `--run JohnP1/d1a-e4b-it@v0.6`):
 
 ```bash
 uv run --extra serve python scripts/export_mlx.py --run JohnP1/d1a-e2b-it@v0.6 --q-bits 8 --q-group-size 64 \
