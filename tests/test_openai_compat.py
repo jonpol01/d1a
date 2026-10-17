@@ -7,7 +7,7 @@ import json
 import sys
 import threading
 from concurrent.futures import Future
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 from types import SimpleNamespace
 
 import pytest
@@ -34,11 +34,76 @@ def test_a_task_runs_alone_on_the_model_thread_between_decisions():
     assert seen == ("d1a-model", "tok") and before[0] == after[0]
 
 
+class SwitchedModel(StandInModel):
+    """StandInModel with MLXDecisionModel's adapter switch; each pass records whether the adapter was on."""
+    def __init__(self):
+        super().__init__()
+        self.on, self.passes_on = True, []
+
+    @contextmanager
+    def adapter(self, on=True):
+        was, self.on = self.on, on
+        try: yield
+        finally: self.on = was
+
+    def probs_batch(self, encs, cached, keep):
+        self.passes_on.append(self.on)
+        return super().probs_batch(encs, cached, keep)
+
+
+def test_a_decision_during_a_chat_is_answered_between_its_tokens_with_the_adapter_on():
+    """#289: a decision that arrives while a chat generates is answered at the chat's next token, with the adapter on,
+    not after the whole answer; the chat then goes on with the adapter off."""
+    model = SwitchedModel()
+    server = Server(SimpleNamespace(release_date=lambda: "2026-01-01"), "tok", model, "cpu")
+    started, decision = threading.Event(), {}
+
+    def chat(model, tok):
+        with model.adapter(False):
+            started.set()
+            for _ in range(200):   # a long answer: decision["future"] would wait for all of it without between_tokens
+                if "future" in decision: break
+                threading.Event().wait(0.01)
+            server.between_tokens()
+            return decision["future"].done(), model.on
+    try:
+        task = server.run_task(chat)
+        assert started.wait(10)
+        decision["future"] = server.submit(packed("abc", branch=1))
+        answered_mid_chat, adapter_on_after = task.result(timeout=10)
+        probs, _ = decision["future"].result(timeout=10)
+    finally:
+        server.close()
+    assert answered_mid_chat and not adapter_on_after and model.passes_on == [True] and probs[0] == [0.25, 0.75]
+
+
+def test_a_decision_taken_between_tokens_gets_the_error_when_the_adapter_switch_fails():
+    """between_tokens takes the waiting decisions off the queue before switching the adapter on: if the switch raises,
+    they must fail with its error, not wait forever, and the chat goes on."""
+    class Broken(SwitchedModel):
+        @contextmanager
+        def adapter(self, on=True):
+            if on: raise RuntimeError("switch failed")
+            yield
+    server = Server(SimpleNamespace(release_date=lambda: "2026-01-01"), "tok", Broken(), "cpu")
+    try:
+        pending = Future()
+        def chat(model, tok):
+            pending.set_result(server.submit(packed("abc", branch=1)))
+            server.between_tokens()
+            return "chat done"
+        assert server.run_task(chat).result(timeout=10) == "chat done"
+        with pytest.raises(RuntimeError, match="switch failed"):
+            pending.result().result(timeout=10)
+    finally:
+        server.close()
+
+
 def held(model):
     """server_async stand-in: one Server-like object holding `model`, whose run_task runs fn at once."""
     def run_task(fn):
         f = Future(); f.set_result(fn(model, "tok")); return f
-    s = SimpleNamespace(model=model, checkpoint=SimpleNamespace(path="/nowhere"), run_task=run_task)
+    s = SimpleNamespace(model=model, checkpoint=SimpleNamespace(path="/nowhere"), run_task=run_task, between_tokens=lambda: None)
 
     @asynccontextmanager
     async def server_async():
@@ -54,7 +119,7 @@ def test_chat_on_a_merged_model_is_refused_with_501(monkeypatch):
 
 
 def test_a_stream_sends_each_piece_as_it_comes_then_the_finish_and_done(monkeypatch):
-    def fake_generate(model, tok, req, model_dir=None, model_name="d1a", on_text=None):
+    def fake_generate(model, tok, req, model_dir=None, model_name="d1a", on_text=None, between=None):
         for piece in ("Hel", "lo"): on_text(piece)
         return {"choices": [{"finish_reason": "stop", "message": {"role": "assistant", "content": "Hello"}}]}
     monkeypatch.setattr(serve, "server_async", held(SimpleNamespace(loras=["one"])))

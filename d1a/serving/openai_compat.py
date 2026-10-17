@@ -2,7 +2,8 @@
 use the same model D1A decides with. The model must have an UNMERGED adapter on an instruction-tuned base
 (scripts/export_mlx.py --unmerged on D1A-E2B-it): chat runs with the adapter switched off, which is the base model
 exactly (MLXDecisionModel.adapter), and decisions keep it on. Generation runs on the server's model thread, like every
-forward pass, so a chat and a decision never overlap. Embeddings come from a separate small GGUF embedder run by
+forward pass, so a chat and a decision never overlap; decisions that arrive during a chat run between two of its tokens
+(#289). Embeddings come from a separate small GGUF embedder run by
 llama.cpp (D1A_EMBED_GGUF), the engine and file LM Studio served them with, so vectors stored earlier stay comparable.
 
     POST /v1/chat/completions   messages, max_tokens / max_completion_tokens, temperature, top_p, stop, tools,
@@ -112,9 +113,11 @@ def pieces(lm, tokenizer, prompt, limit, sampler):
     yield detok.last_segment, n + 1, "length"
 
 
-def generate_chat(model, tok, req, model_dir=None, model_name="d1a", on_text=None):
+def generate_chat(model, tok, req, model_dir=None, model_name="d1a", on_text=None, between=None):
     """One chat completion with the adapter off. Run on the model thread (Server.run_task). on_text, if given, receives
-    each new piece of the answer as it is generated (streaming), never text past a stop string. -> the OpenAI response body."""
+    each new piece of the answer as it is generated (streaming), never text past a stop string. between, if given, is
+    called after every token, still inside the adapter switch (Server.between_tokens: the decisions waiting meanwhile,
+    #289). -> the OpenAI response body."""
     from mlx_lm.sample_utils import make_sampler
     from mlx_lm.tokenizer_utils import TokenizerWrapper
     messages = [{**m, "content": text_of(m.get("content"))} for m in req.messages]
@@ -137,6 +140,8 @@ def generate_chat(model, tok, req, model_dir=None, model_name="d1a", on_text=Non
                 on_text(text[sent:]); sent = len(text)
             if cut is not None:
                 break
+            if between is not None:
+                between()
     prompt_tokens = len(tok(prompt, add_special_tokens=False)["input_ids"])
     log.info("chat: %d prompt tokens, %d completion tokens, %.1f s%s", prompt_tokens, completion_tokens, time.time() - t, ", tools" if req.tools else "")
     content, calls = tool_calls_of(text) if req.tools else (text, [])
