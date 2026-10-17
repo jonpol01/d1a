@@ -247,7 +247,6 @@ def _prefix_errors(z, g, z_ref, g_ref):
     gradient, relative error of the whole gradient) and signed, systematic directions (mean logit error, and the error's
     component along the reference itself, for logits and for the gradient: a scaling), each with the size a signed
     statistic of random errors has (`sd_*`, the questions taken as the independent units)."""
-    import torch
     top = max(x.norm() for x in g_ref.values())
     big = [k for k in g_ref if g_ref[k].norm() > 1e-3 * top]
     sums = lambda f: sum(float(f(g[k] - g_ref[k], g_ref[k])) for k in big)   # over the whole gradient, without a flat copy
@@ -445,7 +444,7 @@ def test_server_recovers_when_a_pass_runs_out_of_memory():
 def test_init_from_warm_start_and_compatibility_checks(tmp_path):
     """PR #9: --init_from loads an existing adapter + pointer head before training and refuses incompatible sources.
     Two tiny runs on Qwen2.5-0.5B: the second warm-starts from the first and must start with identical head weights."""
-    import subprocess, sys, json, torch
+    import subprocess, sys
     env = {**os.environ, "OMP_NUM_THREADS": "2"}
     base = [sys.executable, "-m", "d1a.training.train", "--n_per_source", "3", "--epochs", "1", "--accum", "1", "--batch", "1", "--device", "cpu", "--lr", "1e-12", "--base", "Qwen/Qwen2.5-0.5B"]
     subprocess.run(base + ["--out", str(tmp_path / "a")], check=True, capture_output=True, env=env)

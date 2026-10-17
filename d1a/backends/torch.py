@@ -12,7 +12,7 @@ causal rows, one per question, each the state plus that question's branch (rows_
 layers cannot honour the mask, always use them); and, when serving, the state run once into a cache that the questions
 continue from (probs_and_prefix, probs_with_prefix).
 """
-import copy, os
+import copy
 from d1a.core.settings import get as setting
 import torch
 import torch.nn as nn

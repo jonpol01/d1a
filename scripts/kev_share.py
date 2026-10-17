@@ -17,7 +17,6 @@ ROOT = Path(__file__).resolve().parents[1]
 # the modules #60 moved into subpackages, by the name Kev gave them (d1a/_layout.py, read without importing d1a)
 _MOVED = ast.literal_eval((ROOT / "d1a/_layout.py").read_text(encoding="utf-8").split("MOVED = ", 1)[1])
 KEV_NAME = {f"d1a/{new.replace('.', '/')}.py": f"kev/{old}.py" for old, new in _MOVED.items()}
-SHIMS = {f"d1a/{old}.py" for old in _MOVED}
 # modules split out of one D1A file (#60 phase 2: the torch backend's encoding and head moved to d1a.core): compared with
 # that file's Kev counterpart as one text, in their original order, so a move does not count as new code
 SPLIT = {"d1a/backends/torch.py": ("d1a/core/encoding.py", "d1a/core/head.py", "d1a/backends/torch.py")}
@@ -80,7 +79,7 @@ def main():
     stats = defaultdict(lambda: defaultdict(int))
     for p, path in d1a.items():
         if os.path.getsize(path) > 3_000_000: continue
-        if p in SHIMS or p in SPLIT_PART: continue   # one-release import shims (d1a/<old>.py), not code; split parts go with their file
+        if p in SPLIT_PART: continue   # split parts go with their file
         s = stats[area(p)]
         lines = [line for part in SPLIT.get(p, (p,)) for line in Path(ROOT / part if part != p else path).read_text(encoding="utf-8", errors="replace").splitlines()]
         kp = KEV_NAME.get(p) or ("kev/" + p[4:] if p.startswith("d1a/") else p)
