@@ -194,3 +194,37 @@ def test_a_chat_runs_with_the_adapter_off_and_leaves_decisions_unchanged(checkpo
     assert 0 < body["usage"]["completion_tokens"] <= 4 and model.loras
     after = [p for e in encs for p in model.probs(e)]   # the same model: the adapter must be back on
     assert all(torch.equal(p, q) for p, q in zip(before, after))
+
+
+@needs_mlx
+def test_decisions_between_a_chats_tokens_leave_both_unchanged(checkpoint, golden, tmp_path):
+    """#289: Server.between_tokens runs decisions inside a chat's adapter(False) block, between two of its tokens. The
+    decisions must read the adapter (the probabilities of a model at rest) and the chat's tokens must be the ones it
+    generates uninterrupted, greedy and sampled from a seed."""
+    import mlx.core as mx
+    from d1a.backends.checkpoint import Checkpoint, LoadOptions, load
+    from d1a.backends.mlx import export_mlx
+    from d1a.backends.torch import SERVE_MAX_BRANCH, SERVE_MAX_STATE
+    from d1a.core.api import SystemOneRequest, to_record
+    from d1a.serving.openai_compat import ChatRequest, generate_chat
+    run = tmp_path / "unmerged"
+    export_mlx(Checkpoint(checkpoint), run, unmerged=True)
+    (run / "chat_template.jinja").write_text("{% for m in messages %}{{ m['content'] }}{% endfor %}", encoding="utf-8")
+    tok, model = load(str(run), "mps", LoadOptions(backend="mlx"))
+    encs = [model.encode(tok, to_record(SystemOneRequest.model_validate(r["request"]))[0], max_state=SERVE_MAX_STATE, max_branch=SERVE_MAX_BRANCH)
+            for r in golden["records"][:4]]
+    at_rest = [p for e in encs for p in model.probs(e)]
+    for temperature in (0.0, 1.0):
+        req = ChatRequest(messages=[{"role": "user", "content": "Order 4411 arrived late."}], max_tokens=12, temperature=temperature)
+        mx.random.seed(7)
+        alone = generate_chat(model, tok, req, run)
+        mid_chat = []
+
+        def between():
+            with model.adapter(True):
+                mid_chat.extend(p for e in encs for p in model.probs(e))
+        mx.random.seed(7)
+        interrupted = generate_chat(model, tok, req, run, between=between)
+        tokens = interrupted["usage"]["completion_tokens"]
+        assert interrupted["choices"] == alone["choices"] and tokens == alone["usage"]["completion_tokens"] > 1
+        assert len(mid_chat) == len(at_rest) * tokens and all(torch.equal(p, at_rest[i % len(at_rest)]) for i, p in enumerate(mid_chat))

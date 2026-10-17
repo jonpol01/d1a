@@ -290,21 +290,20 @@ class MLXDecisionModel:
     @contextmanager
     def adapter(self, on=True):
         """Run the block with an unmerged adapter (attach_lora) switched on or off. Off swaps every LoRALinear back to the
-        layer it wraps, so the model is the base exactly (the chat path, #274); the adapter is back on when the block
-        exits, whatever happens in it. All model calls run on one thread (d1a.serving.serve's model thread), so a switch
-        never overlaps a decision. A merged model has no switch: adapter(False) refuses it."""
-        if on:
-            yield
-            return
-        if not self.loras:
+        layer it wraps, so the model is the base exactly (the chat path, #274); the switch is back where it was when the
+        block exits, whatever happens in it, so adapter(True) inside adapter(False) runs decisions in the middle of a chat
+        (#289). All model calls run on one thread (d1a.serving.serve's model thread), so a switch never overlaps a
+        decision. A merged model has no switch: adapter(False) refuses it."""
+        if not on and not self.loras:
             raise ValueError("this model's adapter is merged into its weights; adapter(False) needs an unmerged adapter (attach_lora)")
+        was = [getattr(parent, attr) for parent, attr, _ in self.loras]
         for parent, attr, lora in self.loras:
-            setattr(parent, attr, lora.linear)
+            setattr(parent, attr, lora if on else lora.linear)
         try:
             yield
         finally:
-            for parent, attr, lora in self.loras:
-                setattr(parent, attr, lora)
+            for (parent, attr, _), layer in zip(self.loras, was):
+                setattr(parent, attr, layer)
 
     def _hidden(self, rows, cache=None):
         """[N, L, d] hidden states of right-padded token rows. Pads sit after every real token and both layer kinds are

@@ -148,7 +148,7 @@ class Server:
         self.torch_device = "cpu" if getattr(self.model, "backend", None) == "mlx" else self.device
         self.prefix_cache = PrefixCache(PREFIX_CACHE_SIZE, int(PREFIX_MIN_TOKENS) if PREFIX_MIN_TOKENS else self.model.prefix_min_tokens)
         self.queue, self.stopping = queue.Queue(), threading.Event()
-        self.tasks = queue.Queue()   # run_task's jobs (a chat generation, #274): run alone between decision batches
+        self.tasks = queue.Queue()   # run_task's jobs (a chat generation, #274): run between decision batches, and a chat answers decisions between its tokens (#289)
         # the model thread gives up the GIL at every CUDA sync and waits to get it back while the event loop parses and
         # answers requests; at Python's default 5 ms switch interval those waits stretched a batch's model time ~2x.
         # Process-wide, so close() puts it back.
@@ -189,7 +189,8 @@ class Server:
 
     def run_task(self, fn):
         """Queue fn(model, tok) for the model thread, run alone (never batched with decisions) with `lock` held: model
-        work that is not a decision, such as a chat generation (#274). MLX arrays belong to the thread that made them,
+        work that is not a decision, such as a chat generation (#274), which answers waiting decisions between its tokens
+        through between_tokens (#289). MLX arrays belong to the thread that made them,
         so it cannot run on the request's thread. -> a Future of fn's result."""
         if self.stopping.is_set(): raise HTTPException(503, "the server is stopping")
         done = Future()
@@ -218,16 +219,39 @@ class Server:
             while len(batch) < MAX_BATCH:
                 try: batch.append(self.queue.get_nowait())
                 except queue.Empty: break
-            try:
-                with self.lock: results = self._run([enc for enc, _ in batch])
-            except Exception as e:   # every request of the batch gets the error; the thread lives on
-                traceback.clear_frames(e.__traceback__)   # the batch's futures keep the exception, and its frames held the failed pass's tensors (142 MiB, a 3,578-token state on Kev-0.8B); the traceback keeps its lines
-                results = [e] * len(batch)
-            for (_, done), result in zip(batch, results):
-                (done.set_exception if isinstance(result, Exception) else done.set_result)(result)
-                self.queue.task_done()
+            with self.lock: results = self._results(batch)
+            self._answer(batch, results)
             if graphs is not None and graphs.capture_due(idle=False):
                 with self.lock: graphs.capture_pending(limit=1)
+
+    def _results(self, batch):
+        """self._run on a batch of queued (encoding, future) pairs, with `lock` held. -> per request its result, or the
+        error every request of the batch gets (the thread lives on)."""
+        try:
+            return self._run([enc for enc, _ in batch])
+        except Exception as e:
+            traceback.clear_frames(e.__traceback__)   # the batch's futures keep the exception, and its frames held the failed pass's tensors (142 MiB, a 3,578-token state on Kev-0.8B); the traceback keeps its lines
+            return [e] * len(batch)
+
+    def _answer(self, batch, results):
+        for (_, done), result in zip(batch, results):
+            (done.set_exception if isinstance(result, Exception) else done.set_result)(result)
+            self.queue.task_done()
+
+    def between_tokens(self):
+        """Answer the decisions waiting now, from inside a chat generation (generate_chat's `between`, on the model thread
+        with `lock` already held by run_task): a decision waits about one chat token, not the whole answer (#289). One
+        batch per call, so a stream of decisions slows a chat but never stops it. The adapter goes on for the batch and
+        back off after; mlx-lm builds the chat's next token before it yields this one and the token after once this
+        returns, both with the adapter off, so the chat's numbers do not change."""
+        batch = []
+        while len(batch) < MAX_BATCH:
+            try: batch.append(self.queue.get_nowait())
+            except queue.Empty: break
+        if not batch: return
+        with self.model.adapter(True):
+            results = self._results(batch)
+        self._answer(batch, results)
 
     def _run(self, encs):
         """One batch through model.probs_batch, with the prefix cache. -> per request (probs, stats). A pass out of device
@@ -441,14 +465,15 @@ def chat_server_check(s):
 @app.post("/v1/chat/completions")
 async def chat_completions(req: openai_compat.ChatRequest):
     """OpenAI-compatible chat, answered by the served model with its D1A adapter switched off (the instruction-tuned base
-    exactly), on the model thread between decision batches (d1a.serving.openai_compat). stream=true sends the answer
+    exactly), on the model thread between decision batches; decisions that arrive meanwhile are answered between its
+    tokens (Server.between_tokens, d1a.serving.openai_compat). stream=true sends the answer
     token by token; with tools it is sent whole, once the tool calls can be parsed."""
     if req.stream and not req.tools:
         return StreamingResponse(chat_stream(req), media_type="text/event-stream")
     async with server_async() as s:
         chat_server_check(s)
         model_dir = s.checkpoint.path
-        body = await asyncio.wrap_future(s.run_task(lambda model, tok: openai_compat.generate_chat(model, tok, req, model_dir, CHAT_NAME)))
+        body = await asyncio.wrap_future(s.run_task(lambda model, tok: openai_compat.generate_chat(model, tok, req, model_dir, CHAT_NAME, between=s.between_tokens)))
     return StreamingResponse(openai_compat.stream_chunks(body), media_type="text/event-stream") if req.stream else body
 
 
@@ -459,7 +484,7 @@ async def chat_stream(req):
         chat_server_check(s)
         pieces, done = queue.Queue(), object()
         model_dir = s.checkpoint.path
-        future = s.run_task(lambda model, tok: openai_compat.generate_chat(model, tok, req, model_dir, CHAT_NAME, on_text=pieces.put))
+        future = s.run_task(lambda model, tok: openai_compat.generate_chat(model, tok, req, model_dir, CHAT_NAME, on_text=pieces.put, between=s.between_tokens))
         future.add_done_callback(lambda _: pieces.put(done))
         body_id, created, name = f"chatcmpl-{uuid.uuid4().hex}", int(time.time()), req.model or CHAT_NAME
         yield openai_compat.chunk(body_id, created, name, {"role": "assistant", "content": ""})
