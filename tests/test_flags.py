@@ -114,3 +114,72 @@ def test_the_server_serves_a_configured_flag_beside_the_answer_and_logs_it(tmp_p
     import os; os.utime(path, (os.path.getmtime(path) + 5,) * 2)
     other = serve.Server._body(fake, req, meta, ps, {"tokens": 1, "latency_ms": 1.0})
     assert "flags" not in other["answers"]["sev"]
+
+
+def test_a_shadow_flag_is_logged_but_not_served(tmp_path, monkeypatch):
+    """#296: mode "shadow" keeps the response byte-identical to the one without the flag, and the flag in the log's meta."""
+    from types import SimpleNamespace
+    from d1a.serving import serve
+    from d1a.core.api import SystemOneRequest, to_record
+    from d1a.learning import settings
+    q = {"sev": {"type": "choice", "instructions": "Severity?", "criteria": {k: None for k in ("P0", "P1", "P2", "P3", "P4")}}}
+    req = SystemOneRequest(state="a pull request", questions=q); _, meta = to_record(req)
+    fake = SimpleNamespace(checkpoint=SimpleNamespace(requested=RUN), tok=None)
+    monkeypatch.setattr(serve, "output_tokens", lambda tok, answers: 0)
+    monkeypatch.setattr(serve, "LEARNING", serve.Learning(tmp_path / "log.jsonl"))
+    ps = [[0.2, 0.15, 0.45, 0.15, 0.05]]
+    monkeypatch.setattr(serve, "FLAGS", serve.flags.Configured(None))
+    plain = serve.Server._body(fake, req, meta, ps, {"tokens": 1, "latency_ms": 1.0})
+    path = tmp_path / "learning.json"; settings.init(path); settings.set_values(path, {"flags.sev_severe": {**SEV, "mode": "shadow"}})
+    monkeypatch.setattr(serve, "FLAGS", serve.flags.Configured(path))
+    body = serve.Server._body(fake, req, meta, ps, {"tokens": 1, "latency_ms": 1.0})
+    strip = lambda b: json.dumps({k: v for k, v in b.items() if k != "decision_id"}, sort_keys=True)
+    assert strip(body) == strip(plain)
+    logged = [d for d in serve.LEARNING.log.events() if d["kind"] == "decision"][-1]["meta"]["flags"]["sev"]["sev_severe"]
+    assert logged == {"on": True, "p": 0.35, "t": 0.30, "space": "raw", "shadow": True}
+
+
+TRACK = {"window": 100, "every": 20, "clamp": [0.2, 0.4], "alert_rate": 0.23}
+
+
+def logged(ps, run=RUN, replay=False, state=None, prefix="pr"):
+    """Decision events for the sev question with group probability p (split evenly over P0/P1), top answer P2."""
+    out = []
+    for i, p in enumerate(ps):
+        probs = {"P0": p / 2, "P1": p / 2, "P2": 1 - p - 0.01, "P3": 0.01, "P4": 0.0}
+        out.append({"kind": "decision", "id": f"d{i}", "ts": 1.79e9 + i, "run": run, "state": state or f"{prefix} {i}",
+                    "answers": {"sev": {"type": "choice", "choice": "P2", "probabilities": probs}}, **({"replay_of": "x"} if replay else {})})
+    return out
+
+
+def test_track_refits_t_from_logged_scores_only_when_due_and_within_the_clamp():
+    """#296: below `window` decisions the offline t stays; then t is the (1 - budget) quantile of the last `window` of the
+    flag's run, refit only every `every` new decisions, clamped; replays, other runs and repeated states don't count."""
+    f = {**SEV, "track": TRACK}
+    noise = logged([0.9] * 50, replay=True, prefix="replayed") + logged([0.9] * 50, run="other@v1", prefix="other") + logged([0.9] * 50, state="same pr")
+    assert F.track(noise + logged([0.25] * 98), f)["t"] is None                      # 99 decisions count: below the window
+    ps = [0.21 + 0.001 * i for i in range(100)]                                       # 0.15 above the 0.85 quantile ...
+    r = F.track(logged(ps), f)
+    assert abs(r["t"]["t"] - round(float(F.np.quantile(ps, 0.85)), 4)) < 1e-9 and r["t"]["fitted_on"]["kit"] == "decision-log"
+    assert F.track(logged(ps), f, refit_at=90)["t"] is None                           # ... only 10 new since the last refit
+    assert F.track(logged([0.9] * 100), f)["t"]["t"] == 0.4                           # clamped,
+    assert any("clamp" in a for a in F.track(logged([0.9] * 100), f)["alerts"])       # and reported
+    hot = {**f, "t": 0.30}
+    assert any("flag rate" in a for a in F.track(logged([0.1] * 150 + [0.35] * 100), {**hot, "track": {**TRACK, "every": 100, "window": 250}}, refit_at=250)["alerts"])
+
+
+def test_tick_writes_a_tracked_t_and_alerts_once(tmp_path, monkeypatch):
+    """#296: the loop's tick refits a tracked flag into the settings file (audited, and re-read by the server) and notifies
+    an alert at its onset only."""
+    from d1a.learning import loop, settings as S
+    from d1a.learning.feedback import FeedbackLog
+    path = tmp_path / "learning.json"; S.init(path)
+    S.set_values(path, {"flags.sev_severe": {**SEV, "mode": "shadow", "track": TRACK}, "reports.notify": ["flag_alert"]})
+    log = FeedbackLog(tmp_path / "log.jsonl")
+    for e in logged([0.9] * 120): log._append(e)
+    sent = []; monkeypatch.setattr(loop, "notify", lambda settings, text: sent.append(text) or True)
+    line = loop.tick(log.path, tmp_path / "cal.json", run=RUN, settings_path=path)
+    assert line["flags"]["sev_severe"]["t"] == 0.4 and S.load(path)[0]["flags"]["sev_severe"]["t"] == 0.4
+    assert S.load(path)[0]["flags"]["sev_severe"]["mode"] == "shadow" and "tick:track" in path.with_name(path.name + ".audit.jsonl").read_text(encoding="utf-8")
+    loop.tick(log.path, tmp_path / "cal.json", run=RUN, settings_path=path)
+    assert len(sent) == 1 and "clamp" in sent[0]

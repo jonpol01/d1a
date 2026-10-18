@@ -226,7 +226,8 @@ def progress(resolved, settings):
 
 def tick(log_path, calibrator_path, server=None, run=None, trained_dir=None, settings_path=None, api_key=None, now=None):
     """One run of the loop, meant every few minutes (a LaunchAgent, cron): replay on a model change, then the promotion gate
-    when it is due, a report line in <log dir>/learning-status.json, and notifications. -> that report line."""
+    when it is due, tracked flag thresholds (#296, from logged scores, no labels), a report line in
+    <log dir>/learning-status.json, and notifications. -> that report line."""
     import fcntl
     lock = open(Path(log_path).with_name(Path(log_path).name + ".lock"), "a", encoding="utf-8")
     try: fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -297,7 +298,34 @@ def _tick(log_path, calibrator_path, server, run, trained_dir, settings_path, ap
         line["reached_min"] = newly
         if "min_reached" in settings["reports"]["notify"]:
             line["notified_min"] = notify(settings, f"D1A {served}: {', '.join(newly)} reached {p['min_outcomes']} fit outcomes; the gate can now decide on them")
+    tracked = track_flags(log, settings, settings_path, status)
+    if tracked:
+        line["flags"] = tracked
+        onset = [f"{name}: {a}" for name, r in tracked.items() if r.get("alert_onset") for a in r["alerts"]]
+        if onset and "flag_alert" in settings["reports"]["notify"]:
+            line["notified_flags"] = notify(settings, f"D1A {served} flag alert: " + "; ".join(onset))
     status["reports"] = (status.get("reports", []) + [line])[-100:]
     status["settings"] = settings
     save_status(log_path, status)
     return line
+
+
+def track_flags(log, settings, settings_path, status):
+    """Refit each tracked flag's t from the log's scores when due (d1a.learning.flags.track) and write it to the settings
+    file, which the server re-reads. -> {name: {"n", "t" (when written), "rate_recent", "alerts", "alert_onset"}}."""
+    from d1a.learning import flags as F
+    named = {k: f for k, f in (settings.get("flags") or {}).items() if f.get("track")}
+    if not named: return {}
+    events, out, state = log.events(), {}, status.setdefault("flag_track", {})
+    for name, f in named.items():
+        st = state.setdefault(name, {"refit_at": 0, "alerting": False})
+        r = F.track(events, f, st["refit_at"])
+        rep = {"n": r["n"], "alerts": r["alerts"], **({"rate_recent": round(r["rate_recent"], 4)} if "rate_recent" in r else {})}
+        if r["t"] is not None and settings_path:
+            try:
+                S.set_values(settings_path, {f"flags.{name}": r["t"]}, source="tick:track")
+                st["refit_at"] = r["n"]; rep["t"] = r["t"]["t"]
+            except S.SettingsError as e: rep["error"] = str(e)
+        rep["alert_onset"] = bool(r["alerts"]) and not st["alerting"]; st["alerting"] = bool(r["alerts"])
+        out[name] = rep
+    return out
