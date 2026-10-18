@@ -3,7 +3,7 @@ use the same model D1A decides with. The model must have an UNMERGED adapter on 
 (scripts/export_mlx.py --unmerged on D1A-E2B-it): chat runs with the adapter switched off, which is the base model
 exactly (MLXDecisionModel.adapter), and decisions keep it on. Generation runs on the server's model thread, like every
 forward pass, so a chat and a decision never overlap; decisions that arrive during a chat run between two of its tokens
-(#289). Embeddings come from a separate small GGUF embedder run by
+(#289) or between two chunks of its prompt's prefill (#290). Embeddings come from a separate small GGUF embedder run by
 llama.cpp (D1A_EMBED_GGUF), the engine and file LM Studio served them with, so vectors stored earlier stay comparable.
 
     POST /v1/chat/completions   messages, max_tokens / max_completion_tokens, temperature, top_p, stop, tools,
@@ -27,6 +27,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 log = logging.getLogger("d1a.chat")
 DEFAULT_MAX_TOKENS = 1024
+PREFILL_STEP = 2048   # tokens per prefill chunk: mlx-lm's default, so a chat's cache matches generate_step's own
 MAX_TOKENS = 8192
 
 
@@ -91,9 +92,11 @@ def tool_calls_of(text):
                    "function": {"name": c["name"], "arguments": json.dumps(c["arguments"], ensure_ascii=False)}} for c in calls]
 
 
-def pieces(lm, tokenizer, prompt, limit, sampler):
+def pieces(lm, tokenizer, prompt, limit, sampler, between=None):
     """mlx-lm's stream_generate loop (the same prompt encoding, end-of-turn check and streaming detokenizer) without its
-    wired-memory context, which needs the Metal device and fails on the CPU one CI runs MLX on.
+    wired-memory context, which needs the Metal device and fails on the CPU one CI runs MLX on. between, if given, is
+    called between the prompt's prefill chunks (PREFILL_STEP tokens each, mlx-lm's own chunking, so the chat's cache is
+    the one an uninterrupted prefill builds): a decision waits for one chunk of a long prompt, not all of it (#290).
     -> (new text, tokens so far, None | "stop" | "length") per step; the last step names the finish."""
     import mlx.core as mx
     from mlx_lm.generate import generate_step
@@ -102,7 +105,9 @@ def pieces(lm, tokenizer, prompt, limit, sampler):
     detok = tokenizer.detokenizer
     detok.reset()
     n = 0
-    for n, (token, _) in enumerate(generate_step(mx.array(ids), lm, max_tokens=limit, sampler=sampler)):
+    progress = (lambda done, total: between()) if between is not None else (lambda done, total: None)
+    steps = generate_step(mx.array(ids), lm, max_tokens=limit, sampler=sampler, prefill_step_size=PREFILL_STEP, prompt_progress_callback=progress)
+    for n, (token, _) in enumerate(steps):
         if token in tokenizer.eos_token_ids:
             detok.finalize(); yield detok.last_segment, n, "stop"; return
         detok.add_token(token)
@@ -116,8 +121,8 @@ def pieces(lm, tokenizer, prompt, limit, sampler):
 def generate_chat(model, tok, req, model_dir=None, model_name="d1a", on_text=None, between=None):
     """One chat completion with the adapter off. Run on the model thread (Server.run_task). on_text, if given, receives
     each new piece of the answer as it is generated (streaming), never text past a stop string. between, if given, is
-    called after every token, still inside the adapter switch (Server.between_tokens: the decisions waiting meanwhile,
-    #289). -> the OpenAI response body."""
+    called after every token and between the prompt's prefill chunks, still inside the adapter switch
+    (Server.between_tokens: the decisions waiting meanwhile, #289, #290). -> the OpenAI response body."""
     from mlx_lm.sample_utils import make_sampler
     from mlx_lm.tokenizer_utils import TokenizerWrapper
     messages = [{**m, "content": text_of(m.get("content"))} for m in req.messages]
@@ -130,7 +135,7 @@ def generate_chat(model, tok, req, model_dir=None, model_name="d1a", on_text=Non
     stops = [s for s in ([req.stop] if isinstance(req.stop, str) else req.stop or []) if s]
     t, text, sent, finish, completion_tokens = time.time(), "", 0, "length", 0
     with model.adapter(False):
-        for piece, completion_tokens, ended in pieces(model.lm, wrapper, prompt, limit, sampler):
+        for piece, completion_tokens, ended in pieces(model.lm, wrapper, prompt, limit, sampler, between):
             text += piece
             if ended: finish = ended
             cut = min((text.index(s) for s in stops if s in text), default=None)
