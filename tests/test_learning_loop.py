@@ -272,7 +272,10 @@ def test_flags_are_reserved_validated_and_empty_by_default(tmp_path):
     flag = {"question": "sev", "options": ["P0", "P1"], "t": 0.19, "space": "raw", "run": "JohnP1/d1a-e2b-mlx-q8@v0.6", "budget": 0.1,
             "fitted_on": {"kit": "pr-labels:development", "created_max": "2026-10-02T10:58:00Z", "n": 946}}
     assert S.validate({"flags": {"p0p1": flag}})["flags"]["p0p1"] == flag
+    local = {**flag, "run": "/Users/me/d1a-models/d1a-e4b-it-chat-v0.6-q8"}   # an unmerged chat build is served from a folder
+    assert S.validate({"flags": {"p0p1": local}})["flags"]["p0p1"]["run"] == local["run"]
     for bad in ({**flag, "t": 1.5}, {**flag, "space": "calibrated"}, {**flag, "run": "JohnP1/d1a-e2b-mlx-q8"}, {**flag, "budget": 0.6},
+                {**flag, "run": "d1a-models/chat-build"}, {**flag, "run": "/"},
                 {**flag, "fitted_on": {"kit": "x", "created_max": "yesterday", "n": 3}}, {k: v for k, v in flag.items() if k != "t"}, {**flag, "extra": 1}):
         with pytest.raises(S.SettingsError): S.validate({"flags": {"p0p1": bad}})
     path = tmp_path / "learning.json"; S.init(path)
