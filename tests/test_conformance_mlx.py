@@ -227,4 +227,40 @@ def test_decisions_between_a_chats_tokens_leave_both_unchanged(checkpoint, golde
         interrupted = generate_chat(model, tok, req, run, between=between)
         tokens = interrupted["usage"]["completion_tokens"]
         assert interrupted["choices"] == alone["choices"] and tokens == alone["usage"]["completion_tokens"] > 1
-        assert len(mid_chat) == len(at_rest) * tokens and all(torch.equal(p, at_rest[i % len(at_rest)]) for i, p in enumerate(mid_chat))
+        # at least once per token; the prefill's progress calls (#290) add a few more
+        assert len(mid_chat) >= len(at_rest) * tokens and len(mid_chat) % len(at_rest) == 0
+        assert all(torch.equal(p, at_rest[i % len(at_rest)]) for i, p in enumerate(mid_chat))
+
+
+@needs_mlx
+def test_decisions_between_a_chats_prefill_chunks_leave_both_unchanged(checkpoint, golden, tmp_path, monkeypatch):
+    """#290: a long prompt is prefilled in PREFILL_STEP-token chunks (mlx-lm's own), and between() runs between them, so
+    a decision waits for one chunk, not the whole prompt. Prefilled with cut-ins, the chat's tokens are the ones an
+    uninterrupted prefill gives, and the decisions read the adapter."""
+    from d1a.backends.checkpoint import Checkpoint, LoadOptions, load
+    from d1a.backends.mlx import export_mlx
+    from d1a.backends.torch import SERVE_MAX_BRANCH, SERVE_MAX_STATE
+    from d1a.core.api import SystemOneRequest, to_record
+    from d1a.serving import openai_compat
+    from d1a.serving.openai_compat import ChatRequest, generate_chat
+    run = tmp_path / "unmerged"
+    export_mlx(Checkpoint(checkpoint), run, unmerged=True)
+    (run / "chat_template.jinja").write_text("{% for m in messages %}{{ m['content'] }}{% endfor %}", encoding="utf-8")
+    tok, model = load(str(run), "mps", LoadOptions(backend="mlx"))
+    encs = [model.encode(tok, to_record(SystemOneRequest.model_validate(r["request"]))[0], max_state=SERVE_MAX_STATE, max_branch=SERVE_MAX_BRANCH)
+            for r in golden["records"][:2]]
+    at_rest = [p for e in encs for p in model.probs(e)]
+    monkeypatch.setattr(openai_compat, "PREFILL_STEP", 8)   # the tiny prompt below spans several chunks
+    req = ChatRequest(messages=[{"role": "user", "content": "Order 4411 arrived late and the box was crushed; the customer wants a refund today."}],
+                      max_tokens=4, temperature=0.0)
+    alone = generate_chat(model, tok, req, run)
+    calls, mid_chat, first_token = [], [], []
+
+    def between():
+        calls.append(len(first_token))
+        with model.adapter(True):
+            mid_chat.extend(p for e in encs for p in model.probs(e))
+    interrupted = generate_chat(model, tok, req, run, on_text=lambda piece: first_token.append(piece), between=between)
+    assert interrupted["choices"] == alone["choices"]
+    assert calls.count(0) >= 3   # before the first token: the start of the prefill and between its chunks
+    assert all(torch.equal(p, at_rest[i % len(at_rest)]) for i, p in enumerate(mid_chat))
