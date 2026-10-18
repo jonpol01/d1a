@@ -124,7 +124,7 @@ def track(events, flag, refit_at=0):
         out["rate_recent"] = sum(top or p >= t_now for _, p, top in recent) / len(recent)
         if len(recent) == ALERT_WINDOW and out["rate_recent"] > tr["alert_rate"]:
             out["alerts"].append(f"flag rate {out['rate_recent']:.3f} over the last {ALERT_WINDOW} decisions, above {tr['alert_rate']}")
-    if t_now in tr["clamp"]: out["alerts"].append(f"t {t_now} is at a clamp {tr['clamp']}")
+    if any(abs(t_now - c) < 1e-9 for c in tr["clamp"]): out["alerts"].append(f"t {t_now} is at a clamp {tr['clamp']}")
     return out
 
 

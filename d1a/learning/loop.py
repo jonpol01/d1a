@@ -325,7 +325,7 @@ def track_flags(log, settings, settings_path, status):
             try:
                 S.set_values(settings_path, {f"flags.{name}": r["t"]}, source="tick:track")
                 st["refit_at"] = r["n"]; rep["t"] = r["t"]["t"]
-            except S.SettingsError as e: rep["error"] = str(e)
+            except (OSError, json.JSONDecodeError, S.SettingsError) as e: rep["error"] = str(e)   # the errors S.load survives
         rep["alert_onset"] = bool(r["alerts"]) and not st["alerting"]; st["alerting"] = bool(r["alerts"])
         out[name] = rep
     return out

@@ -183,3 +183,16 @@ def test_tick_writes_a_tracked_t_and_alerts_once(tmp_path, monkeypatch):
     assert S.load(path)[0]["flags"]["sev_severe"]["mode"] == "shadow" and "tick:track" in path.with_name(path.name + ".audit.jsonl").read_text(encoding="utf-8")
     loop.tick(log.path, tmp_path / "cal.json", run=RUN, settings_path=path)
     assert len(sent) == 1 and "clamp" in sent[0]
+
+
+def test_a_broken_settings_file_does_not_stop_the_tick(tmp_path):
+    """#297 review: a due refit into a settings file that no longer parses is reported, and the tick still saves its status."""
+    from d1a.learning import loop, settings as S
+    from d1a.learning.feedback import FeedbackLog
+    path = tmp_path / "learning.json"; S.init(path); S.set_values(path, {"flags.sev_severe": {**SEV, "track": TRACK}})
+    path.write_text("{", encoding="utf-8")                                            # a half-written edit; last-valid holds the flag
+    log = FeedbackLog(tmp_path / "log.jsonl")
+    for e in logged([0.9] * 120): log._append(e)
+    line = loop.tick(log.path, tmp_path / "cal.json", run=RUN, settings_path=path)
+    assert "error" in line["flags"]["sev_severe"] and "t" not in line["flags"]["sev_severe"]
+    assert loop.load_status(log.path)["reports"][-1]["flags"] == line["flags"] and path.read_text(encoding="utf-8") == "{"
