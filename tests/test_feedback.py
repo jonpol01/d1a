@@ -3,7 +3,7 @@ import numpy as np
 import pytest
 
 from d1a.training.data import materialize
-from d1a.learning.feedback import FeedbackLog, OutcomeCalibrator, choice_log_loss, choice_pairs, gate, gate_choice, log_loss, main, pairs, promote, records, split
+from d1a.learning.feedback import FeedbackLog, OutcomeCalibrator, choice_log_loss, choice_pairs, gate, gate_choice, log_loss, main, pairs, promote, records, split, split_time
 
 Q = {"resolved": {"type": "noul", "instr": "Does the patch fix the issue?", "criteria": {"true": "fixes it", "false": "does not"}}}
 
@@ -387,3 +387,51 @@ def test_the_promote_command_writes_a_drop_even_when_nothing_is_promoted(tmp_pat
     main(["promote", str(tmp_path / "f.jsonl"), "--calibrator", str(path)])
     assert json.loads(capsys.readouterr().out)["promoted"] == []
     assert OutcomeCalibrator.load(path).params == {"resolved": [1.0, 0.0, 50]}
+
+
+def _mix_shift(n, seed):
+    """Choice decisions from a model trained on a balanced mix, served where option "a" is three times as common: the
+    model's probabilities are right within each option's share but blind to the mix."""
+    rng = np.random.default_rng(seed); keys = ["a", "b", "c"]; out = []
+    for i in range(n):
+        y = rng.choice(3, p=[0.6, 0.2, 0.2]); logits = rng.normal(0, 1, 3); logits[y] += 1.2
+        p = np.exp(logits) / np.exp(logits).sum()
+        out.append({"id": f"d{i}", "ts": float(i), "group": f"g{i}", "temperature": 1.5,
+                    "answers": {"q": {"type": "choice", "choice": keys[int(p.argmax())], "probabilities": dict(zip(keys, p.tolist()))}}, "labels": {"q": keys[y]}})
+    return out
+
+
+def test_the_vector_form_learns_a_label_mix_the_model_was_not_trained_on_and_the_default_stays_one_temperature():
+    """On decisions after training, a per-option bias learned from outcomes corrects
+    the label mix; one temperature cannot. The default form is unchanged."""
+    fit, test = _mix_shift(1500, 0), _mix_shift(1500, 1)
+    temp, vec = OutcomeCalibrator()._fit(fit), OutcomeCalibrator()._fit(fit, form="vector")
+    assert set(temp.params["q"]) == {"s", "n"} and set(vec.params["q"]) == {"s", "b", "n"}
+    b = vec.params["q"]["b"]; assert b["a"] > b["b"] + 0.5 and b["a"] > b["c"] + 0.5
+    probs, labels = choice_pairs(test, "q")
+    raw, t_loss, v_loss = (choice_log_loss([c.probs("q", p) for p in probs] if c else probs, labels).mean() for c in (None, temp, vec))
+    assert v_loss < t_loss - 0.02 and v_loss < raw - 0.02
+
+
+def test_a_served_choice_changes_only_with_serve_choice_and_never_away_from_a_held_option(tmp_path):
+    """The default keeps the model's chosen option (only probabilities move). serve["choice"] serves the recalibrated top
+    option, except that a held option (severity P0/P1, which a label-mix correction pushes down) stays the model's."""
+    params = {"sev": {"s": 1.0, "b": {"P2": 3.0}, "n": 100}}
+    ans = lambda choice: {"sev": {"type": "choice", "choice": choice, "confidence": 0.5,
+                                  "probabilities": {"P0": 0.1, "P1": 0.3, "P2": 0.2, "P3": 0.4}}}
+    keep = OutcomeCalibrator(params).apply(ans("P3"))["sev"]
+    assert keep["choice"] == "P3" and max(keep["probabilities"], key=keep["probabilities"].get) == "P2"
+    serve = OutcomeCalibrator(params, serve={"choice": True, "hold": {"sev": ["P0", "P1"]}})
+    assert serve.apply(ans("P3"))["sev"]["choice"] == "P2"
+    assert serve.apply(ans("P1"))["sev"]["choice"] == "P1"
+    path = tmp_path / "cal.json"; serve.save(path); back = OutcomeCalibrator.load(path)
+    assert back.serve == serve.serve and back.at(1.5).serve == serve.serve
+    OutcomeCalibrator(params).save(path); assert "serve" not in json.loads(path.read_text(encoding="utf-8")) and not OutcomeCalibrator.load(path).serve["choice"]
+
+
+def test_the_time_split_holds_out_the_newest_groups_and_orders_a_replay_by_its_original_decision():
+    rows = [{"id": f"d{i}", "ts": float(i), "group": f"g{i}"} for i in range(10)]
+    rows.append({"id": "r", "ts": 99.0, "decided_ts": 0.5, "group": "g-replayed", "replay_of": "old"})
+    fit, held = split_time(rows, share=0.3)
+    assert {d["group"] for d in held} == {"g7", "g8", "g9"} and "g-replayed" in {d["group"] for d in fit}
+    assert {d["group"] for d in fit}.isdisjoint({d["group"] for d in held})

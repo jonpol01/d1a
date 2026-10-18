@@ -69,12 +69,16 @@ def test_settings_reject_values_outside_the_agreed_ranges_and_unknown_keys():
     bad = [{"promotion": {"min_outcomes": 9}}, {"promotion": {"held_out": 0.05}}, {"promotion": {"held_out": 0.6}},
            {"promotion": {"ci_level": 0.8}}, {"schedule": {"after_new_outcomes": 0}}, {"schedule": {"daily_at": "4:00"}},
            {"schedule": {"daily_at": "24:00"}}, {"promotion": {"min_outcome": 20}}, {"flagz": {}}, {"promotion": {"auto": "yes"}},
-           {"outcomes": {"sources": []}}, {"reports": {"notify": ["sometimes"]}}, {"version": 2}]
+           {"outcomes": {"sources": []}}, {"reports": {"notify": ["sometimes"]}}, {"version": 2},
+           {"promotion": {"form": "matrix"}}, {"promotion": {"split": "hash"}}, {"promotion": {"serve_choice": 1}},
+           {"promotion": {"hold": {"sev": []}}}, {"promotion": {"hold": ["P0"]}}]
     for data in bad:
         with pytest.raises(S.SettingsError): S.validate(data)
     ok = S.validate({"promotion": {"min_outcomes": 10, "held_out": 0.5, "ci_level": 0.99, "questions": ["type"]},
                      "schedule": {"daily_at": "23:59", "after_new_outcomes": None}})
     assert ok["promotion"]["held_out"] == 0.5 and ok["replay"] == S.DEFAULTS["replay"]
+    b = S.validate({"promotion": {"form": "vector", "split": "time", "serve_choice": True, "hold": {"sev": ["P0", "P1"]}}})["promotion"]
+    assert (b["form"], b["split"], b["serve_choice"], b["hold"]) == ("vector", "time", True, {"sev": ["P0", "P1"]})
 
 
 def test_a_broken_file_falls_back_to_the_last_valid_one_and_set_refuses_without_writing(tmp_path):
@@ -268,7 +272,10 @@ def test_flags_are_reserved_validated_and_empty_by_default(tmp_path):
     flag = {"question": "sev", "options": ["P0", "P1"], "t": 0.19, "space": "raw", "run": "JohnP1/d1a-e2b-mlx-q8@v0.6", "budget": 0.1,
             "fitted_on": {"kit": "pr-labels:development", "created_max": "2026-10-02T10:58:00Z", "n": 946}}
     assert S.validate({"flags": {"p0p1": flag}})["flags"]["p0p1"] == flag
+    local = {**flag, "run": "/Users/me/d1a-models/d1a-e4b-it-chat-v0.6-q8"}   # an unmerged chat build is served from a folder
+    assert S.validate({"flags": {"p0p1": local}})["flags"]["p0p1"]["run"] == local["run"]
     for bad in ({**flag, "t": 1.5}, {**flag, "space": "calibrated"}, {**flag, "run": "JohnP1/d1a-e2b-mlx-q8"}, {**flag, "budget": 0.6},
+                {**flag, "run": "d1a-models/chat-build"}, {**flag, "run": "/"},
                 {**flag, "fitted_on": {"kit": "x", "created_max": "yesterday", "n": 3}}, {k: v for k, v in flag.items() if k != "t"}, {**flag, "extra": 1}):
         with pytest.raises(S.SettingsError): S.validate({"flags": {"p0p1": bad}})
     path = tmp_path / "learning.json"; S.init(path)
@@ -282,3 +289,20 @@ def test_config_set_records_who_changed_it(tmp_path, capsys):
     main(["config", "set", "promotion.min_outcomes=15", "--file", str(path), "--source", "page"])
     with pytest.raises(SystemExit, match="refused"): main(["config", "set", "promotion.held_out=0.9", "--file", str(path)])
     assert [(e["key"], e["new"], e["source"]) for e in S.audit(path)][-1] == ("promotion.min_outcomes", 15, "page")
+
+
+def test_the_promote_command_and_the_loop_pass_the_calibrator_form_split_and_serve_settings(tmp_path, monkeypatch):
+    """promotion.form / split / serve_choice / hold reach promote() from both the promote command and tick()."""
+    from d1a.learning import feedback
+    seen = []
+    def fake_promote(resolved, current=None, *args, **kw):
+        seen.append({k: kw.get(k) for k in ("form", "split_by", "serve")}); return feedback.OutcomeCalibrator(), {}
+    monkeypatch.setattr(feedback, "promote", fake_promote); monkeypatch.setattr(loop, "promote", fake_promote, raising=False)
+    log = FeedbackLog(tmp_path / "log.jsonl")
+    for i in range(30): decide(log, f"PR {i}", NEW, f"o/r#{i}", label="bug" if i % 3 else "docs", p=0.95)
+    path = tmp_path / "learning.json"; monkeypatch.setenv(S.ENV, str(path)); S.init(path)
+    S.set_values(path, {"promotion.form": "vector", "promotion.split": "time", "promotion.serve_choice": True, "promotion.hold": {"type": ["docs"]}})
+    main(["promote", str(log.path), "--calibrator", str(tmp_path / "cal.json"), "--run", NEW])
+    loop.tick(log.path, tmp_path / "cal.json", run=NEW)
+    want = {"form": "vector", "split_by": "time", "serve": {"choice": True, "hold": {"type": ["docs"]}}}
+    assert len(seen) == 2 and all(s == want for s in seen)

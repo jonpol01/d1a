@@ -276,7 +276,7 @@ def _tick(log_path, calibrator_path, server, run, trained_dir, settings_path, ap
         line["gate"] = {"reason": reason, "skipped": "outcomes.enabled is false: learning from outcomes is off"}; reason = None
     if reason:
         path = Path(calibrator_path); current = OutcomeCalibrator.load(path) if path.exists() else None
-        cal, report = promote(resolved, current, p["held_out"], p["min_outcomes"], p["questions"], tolerance=p["tolerance"],
+        cal, report = promote(resolved, current, p["held_out"], p["min_outcomes"], p["questions"], form=p["form"], split_by=p["split"], serve={"choice": p["serve_choice"], "hold": p["hold"]}, tolerance=p["tolerance"],
                               n=p["bootstrap"], level=p["ci_level"])
         promoted = sorted(q for q, x in report.items() if x["promote"])
         wrote = False

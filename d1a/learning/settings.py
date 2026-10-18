@@ -25,7 +25,8 @@ DEFAULTS = {
     "version": VERSION,
     "outcomes": {"enabled": True, "sources": None},           # sources: the outcome sources that count (None: all of them)
     "promotion": {"auto": True, "questions": None,             # questions: the ones that learn (None: all of them)
-                  "min_outcomes": 20, "held_out": 0.3, "ci_level": 0.95, "tolerance": 0.01, "bootstrap": 2000},
+                  "min_outcomes": 20, "held_out": 0.3, "ci_level": 0.95, "tolerance": 0.01, "bootstrap": 2000,
+                  "form": "temperature", "split": "random", "serve_choice": False, "hold": {}},   # see d1a.learning.feedback.OutcomeCalibrator
     "schedule": {"daily_at": "04:00", "after_new_outcomes": 10},   # local time HH:MM, or None; >= N new outcomes, or None
     "replay": {"enabled": True, "on_model_change": True, "exclude_no_pr_id": True, "per_tick_cap": 50, "pause_s": 1.0},
     "reports": {"webhook_file": None, "notify": ["promotion", "min_reached"]},
@@ -46,6 +47,10 @@ class SettingsError(ValueError):
 
 def _is_int(v): return isinstance(v, int) and not isinstance(v, bool)
 def _is_num(v): return isinstance(v, (int, float)) and not isinstance(v, bool)
+def _is_run(v):
+    """A served run as the server names it (its checkpoint.requested): a Hub id pinned to a tag, repo@tag, or the absolute
+    path of a local folder (an unmerged chat build is served from one)."""
+    return isinstance(v, str) and (("@" in v and not v.startswith("/")) or (v.startswith("/") and len(v) > 1))
 def _str_list(v): return v is None or (isinstance(v, list) and v and all(isinstance(x, str) and x.strip() for x in v) and len(set(v)) == len(v))
 
 
@@ -61,6 +66,11 @@ RULES = {   # key -> (check, what it must be)
     "promotion.ci_level": (lambda v: _is_num(v) and any(abs(v - c) < 1e-9 for c in CI_LEVELS), "0.9, 0.95 or 0.99"),
     "promotion.tolerance": (lambda v: _is_num(v) and 0 <= v <= 0.1, "a number from 0 to 0.1"),
     "promotion.bootstrap": (lambda v: _is_int(v) and 200 <= v <= 20000, "an integer from 200 to 20000"),
+    "promotion.form": (lambda v: v in ("temperature", "vector"), "\"temperature\" (one inverse temperature per choice question) or \"vector\" (plus a per-option bias)"),
+    "promotion.split": (lambda v: v in ("random", "time"), "\"random\" (held-out groups by hash) or \"time\" (the newest groups held out)"),
+    "promotion.serve_choice": (lambda v: isinstance(v, bool), "true or false (true: a recalibrated choice question serves its recalibrated top option)"),
+    "promotion.hold": (lambda v: isinstance(v, dict) and all(isinstance(k, str) and k.strip() and _str_list(x) and x for k, x in v.items()),
+                       "{question: [options]}: the model's own choice is kept when it is one of these, e.g. {\"sev\": [\"P0\", \"P1\"]}"),
     "schedule.daily_at": (lambda v: v is None or (isinstance(v, str) and bool(HHMM.match(v))), "null or HH:MM in this machine's local time"),
     "schedule.after_new_outcomes": (lambda v: v is None or (_is_int(v) and v >= 1), "null or an integer >= 1"),
     "replay.enabled": (lambda v: isinstance(v, bool), "true or false"),
@@ -95,7 +105,7 @@ def check_flag(name, f):
     if "options" in f and not (_str_list(f["options"]) and f["options"]): p.append(f"flags.{name}.options: a non-empty list of distinct option keys")
     if "t" in f and not (_is_num(f["t"]) and 0 <= f["t"] <= 1): p.append(f"flags.{name}.t: a number from 0 to 1")
     if "space" in f and f["space"] != "raw": p.append(f"flags.{name}.space: must be \"raw\" (probabilities before the calibrator)")
-    if "run" in f and not (isinstance(f["run"], str) and "@" in f["run"]): p.append(f"flags.{name}.run: the model it was fitted for, repo@tag")
+    if "run" in f and not _is_run(f["run"]): p.append(f"flags.{name}.run: the model it was fitted for, repo@tag or an absolute local path")
     if "budget" in f and not (_is_num(f["budget"]) and 0.01 <= f["budget"] <= 0.5): p.append(f"flags.{name}.budget: a number from 0.01 to 0.5")
     if "fitted_on" in f:
         fo = f["fitted_on"]
@@ -121,7 +131,7 @@ def check_rule(name, r):
     if "from" in r and not (_str_list(r["from"]) and r["from"] and r.get("option") not in r["from"]):
         p.append(f"rules.{name}.from: a non-empty list of distinct option keys, without the rule's option")
     if "space" in r and r["space"] != "raw": p.append(f"rules.{name}.space: must be \"raw\" (probabilities before the calibrator)")
-    if "run" in r and not (isinstance(r["run"], str) and "@" in r["run"]): p.append(f"rules.{name}.run: the model it was fitted for, repo@tag")
+    if "run" in r and not _is_run(r["run"]): p.append(f"rules.{name}.run: the model it was fitted for, repo@tag or an absolute local path")
     if "fitted_on" in r:
         fo = r["fitted_on"]
         if not (isinstance(fo, dict) and set(fo) == {"kit", "n", "tested_on"}): p.append(f"rules.{name}.fitted_on: {{kit, n, tested_on}}")
