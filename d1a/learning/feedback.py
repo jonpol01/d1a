@@ -118,10 +118,10 @@ class FeedbackLog:
         per_q = src if isinstance(src, dict) else None
         srcs = None if src is None or per_q is not None else {src} if isinstance(src, str) else set(src)
         events = self.events() if events is None else events
-        decisions, outcomes, runs = {}, {}, {}
+        decisions, outcomes, runs, times = {}, {}, {}, {}
         for e in events:
             if e["kind"] == "decision":
-                runs[e["id"]] = e.get("run")
+                runs[e["id"]] = e.get("run"); times[e["id"]] = e["ts"]
                 if run is None or e.get("run") == run: decisions[e["id"]] = e
         for e in self._outcomes(events):
             s = e.get("meta", {}).get("src")
@@ -143,7 +143,7 @@ class FeedbackLog:
             for o in sorted(own, key=lambda o: (o.get("meta", {}).get("src") in PREFER, o["ts"])):   # trusted and latest last
                 for qid, label in o["labels"].items(): labels[qid], label_src[qid] = label, o.get("meta", {}).get("src")
             group = next((o["meta"]["group"] for o in reversed(own) if o.get("meta", {}).get("group")), None)
-            extra = {"replayed_from": runs.get(d["replay_of"])} if d.get("replay_of") else {}
+            extra = {"replayed_from": runs.get(d["replay_of"]), "decided_ts": times.get(d["replay_of"], d["ts"])} if d.get("replay_of") else {}
             out.append({**d, "labels": labels, "label_src": label_src, "group": group, "outcome_ts": max(o["ts"] for o in own), **extra})
         return out
 
@@ -199,9 +199,9 @@ def served_choices(resolved, qid):
     return out
 
 
-def _rescale(probs, s):
-    """{option: p ** s}, renormalised: temperature 1/s, the same order of options."""
-    lp = {k: s * math.log(max(v, EPS)) for k, v in probs.items()}; top = max(lp.values())
+def _rescale(probs, s, b=None):
+    """{option: p ** s * exp(b[option])}, renormalised: temperature 1/s and, given, a per-option bias; the same order."""
+    lp = {k: s * math.log(max(v, EPS)) + ((b or {}).get(k, 0.0)) for k, v in probs.items()}; top = max(lp.values())
     z = sum(math.exp(v - top) for v in lp.values())
     return {k: math.exp(v - top) / z for k, v in lp.items()}
 
@@ -215,37 +215,51 @@ def _by_temperature(resolved):
 
 class OutcomeCalibrator:
     """Per yes/no question: P' = sigmoid(a * logit(P) + b), fitted to outcomes by maximum likelihood (Platt scaling). Per
-    choice question: P'(option) proportional to P(option) ** s, the inverse temperature s fitted the same way.
+    choice question: P'(option) proportional to P(option) ** s, the inverse temperature s fitted the same way; or, with
+    form "vector", P'(option) proportional to exp(s * log P(option) + b[option]), a per-option bias besides s, which also
+    corrects a label mix the model was not trained on (served traffic whose classes are not as balanced as training was).
+
+    `serve` says how a recalibrated choice answer is served: {"choice": False} (the default) keeps the model's chosen
+    option and recalibrates only the probabilities; {"choice": True, "hold": {question: [options]}} serves the recalibrated
+    top option, except that the model's own choice is kept when it is one of `hold`'s options for that question (a rare,
+    costly class such as severity P0/P1, which a label-mix correction would otherwise push down).
 
     One set of entries per temperature the decisions were read at: `params` for decisions logged without one (before #209,
     when every answer was read at the checkpoint's own temperature), `temperatures` {T: OutcomeCalibrator} for the rest.
     fit() fills each from its own decisions only; at(T) is what answers read at T go through."""
 
-    def __init__(self, params=None, temperatures=None):
-        self.params = dict(params or {})   # {yes/no question id: [a, b, n], choice question id: {"s": s, "n": n}}
+    def __init__(self, params=None, temperatures=None, serve=None):
+        self.params = dict(params or {})   # {yes/no question id: [a, b, n], choice question id: {"s": s, "n": n} (+ "b": {option: bias})}
         self.temperatures = {float(t): c if isinstance(c, OutcomeCalibrator) else OutcomeCalibrator(c) for t, c in (temperatures or {}).items()}
+        self.serve = {"choice": bool((serve or {}).get("choice")), "hold": {q: list(v) for q, v in ((serve or {}).get("hold") or {}).items()}}
 
     def at(self, temperature, own=None):
         """The entries for answers read at `temperature`: those fitted on decisions read at it, never at another. The entries
         of decisions logged without a temperature also apply at the checkpoint's own temperature `own` (where those decisions
         were read) for a question that has none of its own there, and alone when `temperature` is None."""
-        if temperature is None: return OutcomeCalibrator(self.params)
+        if temperature is None: return OutcomeCalibrator(self.params, serve=self.serve)
         fitted = self.temperatures.get(float(temperature))
         params = dict(self.params) if own is not None and float(temperature) == float(own) else {}
-        return OutcomeCalibrator({**params, **(fitted.params if fitted else {})})
+        return OutcomeCalibrator({**params, **(fitted.params if fitted else {})}, serve=self.serve)
 
-    def fit(self, resolved, min_outcomes=20, l2=1e-3):
+    def fit(self, resolved, min_outcomes=20, l2=1e-3, form="temperature"):
         """Fit each temperature's entries on the decisions read at it (_by_temperature), never across two."""
         for t, rows in _by_temperature(resolved).items():
-            (self if t is None else self.temperatures.setdefault(t, OutcomeCalibrator()))._fit(rows, min_outcomes, l2)
+            (self if t is None else self.temperatures.setdefault(t, OutcomeCalibrator()))._fit(rows, min_outcomes, l2, form)
         return self
 
-    def _fit(self, resolved, min_outcomes=20, l2=1e-3):
-        """fit() on decisions all read at one temperature (or none logged), into `params`."""
+    def _fit(self, resolved, min_outcomes=20, l2=1e-3, form="temperature"):
+        """fit() on decisions all read at one temperature (or none logged), into `params`. `form` is the choice questions'
+        ("temperature" or "vector"); yes/no questions are always Platt-scaled."""
         for qid in {q for d in resolved for q in d["labels"]}:
             probs, labels = choice_pairs(resolved, qid)
             if probs:
-                if len(labels) >= min_outcomes and len(set(labels)) > 1: self.params[qid] = {"s": self._fit_s(probs, labels, l2), "n": len(labels)}
+                if len(labels) >= min_outcomes and len(set(labels)) > 1:
+                    if form == "vector":
+                        sv, b = self._fit_vector(probs, labels)
+                        self.params[qid] = {"s": sv, "b": b, "n": len(labels)}
+                    else:
+                        self.params[qid] = {"s": self._fit_s(probs, labels, l2), "n": len(labels)}
                 continue
             p, y = pairs(resolved, qid)
             if len(y) < min_outcomes or y.all() or not y.any(): continue
@@ -284,6 +298,31 @@ class OutcomeCalibrator:
             if abs(t * step) < 1e-9: break
         return float(s)
 
+    @staticmethod
+    def _fit_vector(probs, labels, l2=1e-2):
+        """(s, {option: bias}) by Newton's method on the mean log loss of exp(s * log P + b) renormalised, which is
+        convex in (s, b); l2 pulls towards s = 1 and b = 0, the model as it is. Options are matched by name, so an answer
+        offering fewer options uses the biases of those it offers."""
+        names = sorted({k for pr in probs for k in pr}); idx = {k: i for i, k in enumerate(names)}; m = len(names) + 1
+        rows = [(np.log(np.clip(np.array(list(pr.values())), EPS, 1)), np.array([idx[k] for k in pr]), list(pr).index(y)) for pr, y in zip(probs, labels)]
+        def stats(x):
+            loss, grad, hess = 0.0, np.zeros(m), np.zeros((m, m))
+            for lp, j, y in rows:
+                z = x[0] * lp + x[1:][j]; z = z - z.max(); q = np.exp(z); q /= q.sum()
+                feat = np.zeros((len(lp), m)); feat[:, 0] = lp; feat[np.arange(len(lp)), 1 + j] = 1.0
+                loss += float(np.log(np.exp(z).sum()) - z[y]); mean = q @ feat
+                grad += mean - feat[y]; d = feat - mean; hess += (d * q[:, None]).T @ d
+            n = len(rows); reg = np.r_[x[0] - 1, x[1:]]
+            return loss / n + l2 / 2 * float(reg @ reg), grad / n + l2 * reg, hess / n + l2 * np.eye(m)
+        x = np.r_[1.0, np.zeros(m - 1)]
+        for _ in range(100):
+            loss, grad, hess = stats(x); step, t = np.linalg.solve(hess, grad), 1.0
+            while t > 1e-6 and not 0.05 <= x[0] - t * step[0] <= 20: t /= 2   # keep s in [0.05, 20]
+            while t > 1e-6 and stats(x - t * step)[0] > loss: t /= 2
+            x = x - t * step
+            if np.abs(t * step).max() < 1e-9: break
+        return float(x[0]), {k: float(x[1 + i]) for k, i in idx.items()}
+
     def p(self, qid, p_true):
         if not isinstance(self.params.get(qid), list): return p_true
         a, b, _ = self.params[qid]
@@ -291,10 +330,12 @@ class OutcomeCalibrator:
 
     def probs(self, qid, probs):
         """A choice answer's {option: probability} recalibrated (the same order of options)."""
-        return _rescale(probs, self.params[qid]["s"]) if isinstance(self.params.get(qid), dict) else probs
+        pr = self.params.get(qid)
+        return _rescale(probs, pr["s"], pr.get("b")) if isinstance(pr, dict) else probs
 
     def apply(self, answers):
-        """Answers with their yes/no and choice probabilities recalibrated; the chosen option never changes."""
+        """Answers with their yes/no and choice probabilities recalibrated. The chosen option changes only with
+        serve["choice"] (to the recalibrated top option), and never away from one of serve["hold"]'s options."""
         out = {}
         for qid, ans in answers.items():
             if _p_true(ans) is not None: ans = {**ans, "noul": round(self.p(qid, ans["noul"]), 4)}
@@ -302,17 +343,20 @@ class OutcomeCalibrator:
                 q = self.probs(qid, _choice_probs(ans))   # the served confidence is read off the same probabilities (#195)
                 ans = {**ans, "probabilities": {k: round(v, 4) for k, v in q.items()},
                        **({"confidence": round(choice_confidence(list(q.values())), 4)} if "confidence" in ans else {})}
+                if self.serve["choice"] and ans.get("type") == "choice" and ans.get("choice") not in self.serve["hold"].get(qid, ()):
+                    ans["choice"] = max(q, key=q.get)
             out[qid] = ans
         return out
 
     def save(self, path):
         at = {repr(t): c.params for t, c in sorted(self.temperatures.items()) if c.params}   # repr: the float read back exactly
-        Path(path).write_text(json.dumps({"kind": "d1a-outcome-calibrator", "params": self.params, **({"temperatures": at} if at else {})}, indent=1) + "\n", encoding="utf-8")
+        serve = {"serve": self.serve} if self.serve["choice"] else {}   # absent: the default, so older files read the same
+        Path(path).write_text(json.dumps({"kind": "d1a-outcome-calibrator", "params": self.params, **({"temperatures": at} if at else {}), **serve}, indent=1) + "\n", encoding="utf-8")
 
     @classmethod
     def load(cls, path):
         d = json.loads(Path(path).read_text(encoding="utf-8"))
-        return cls(d["params"], d.get("temperatures"))
+        return cls(d["params"], d.get("temperatures"), d.get("serve"))
 
 
 def log_loss(y, p):
@@ -351,7 +395,19 @@ def split(resolved, share=0.3):
     return [d for d in resolved if not held_out(_group(d), share)], [d for d in resolved if held_out(_group(d), share)]
 
 
-def promote(resolved, current=None, share=0.3, min_outcomes=20, questions=None, **gate_kw):
+def split_time(resolved, share=0.3):
+    """(fit, held out) by time: the groups decided last (their earliest decision, a replay at its original's time) are
+    held out, `share` of them, so the gate asks whether what was learned from older outcomes helps on newer ones, as a
+    promoted calibrator is used. Each group stays on one side."""
+    first = {}
+    for d in resolved:
+        t = d.get("decided_ts", d["ts"]); g = _group(d); first[g] = min(first.get(g, t), t)
+    order = sorted(first, key=lambda g: (first[g], str(g))); cut = len(order) - int(round(share * len(order)))
+    newer = set(order[cut:])
+    return [d for d in resolved if _group(d) not in newer], [d for d in resolved if _group(d) in newer]
+
+
+def promote(resolved, current=None, share=0.3, min_outcomes=20, questions=None, form="temperature", split_by="random", serve=None, **gate_kw):
     """The promotion gate run on a live log, separately for each temperature the decisions were read at (fitted across
     two, a calibrator would correct answers read at one by the errors of answers read at the other). Each decision's group
     (its outcome's meta["group"], else the decision itself) goes to the fit or the held-out side by held_out(); a
@@ -360,25 +416,26 @@ def promote(resolved, current=None, share=0.3, min_outcomes=20, questions=None, 
     -> (the calibrator to serve, {question: report}, a question at a logged temperature T reported as "question@T");
     questions that fail keep the current parameters."""
     current = current or OutcomeCalibrator()
+    serve = current.serve if serve is None else serve
     if questions is not None:   # only these learn: the other questions' labels are left out of the fit and the gate
         keep = set(questions)
         resolved = [{**d, "labels": {q: v for q, v in d["labels"].items() if q in keep}} for d in resolved]
         resolved = [d for d in resolved if d["labels"]]
-    out = OutcomeCalibrator(current.params, {t: OutcomeCalibrator(c.params) for t, c in current.temperatures.items()})
+    out = OutcomeCalibrator(current.params, {t: OutcomeCalibrator(c.params) for t, c in current.temperatures.items()}, serve)
     report = {}
     for t, rows in sorted(_by_temperature(resolved).items(), key=lambda kv: (kv[0] is not None, kv[0] or 0)):
         now = current if t is None else current.temperatures.get(t, OutcomeCalibrator())
-        params, rep = _promote(rows, OutcomeCalibrator(now.params), share, min_outcomes, **gate_kw)
+        params, rep = _promote(rows, OutcomeCalibrator(now.params), share, min_outcomes, form, split_by, **gate_kw)
         if t is None: out.params = params
         else: out.temperatures[t] = OutcomeCalibrator(params)
         report.update({qid if t is None else f"{qid}@{t!r}": r for qid, r in rep.items()})
     return out, report
 
 
-def _promote(resolved, current, share, min_outcomes, **gate_kw):
+def _promote(resolved, current, share, min_outcomes, form="temperature", split_by="random", **gate_kw):
     """promote() on decisions all read at one temperature. -> (the parameters to serve, {question: report})."""
-    fit, test = split(resolved, share)
-    cand = OutcomeCalibrator()._fit(fit, min_outcomes)
+    fit, test = (split_time if split_by == "time" else split)(resolved, share)
+    cand = OutcomeCalibrator()._fit(fit, min_outcomes, form=form)
     # a choice calibration of a score question, fitted before #195, is inert in apply(): drop it, so the calibrator file
     # and /v1/feedback's calibrated_questions list only what is applied
     scores = {qid for d in resolved for qid, a in d["answers"].items() if isinstance(a, dict) and a.get("type") == "score"}
@@ -500,7 +557,7 @@ def main(argv=None):
         path = Path(a.calibrator); current = OutcomeCalibrator.load(path) if path.exists() else None
         cal, report = promote(res, current, p["held_out"] if a.held_out is None else a.held_out,
                               p["min_outcomes"] if a.min_outcomes is None else a.min_outcomes, p["questions"],
-                              tolerance=p["tolerance"], n=p["bootstrap"], level=p["ci_level"])
+                              form=p["form"], split_by=p["split"], serve={"choice": p["serve_choice"], "hold": p["hold"]}, tolerance=p["tolerance"], n=p["bootstrap"], level=p["ci_level"])
         if not p["auto"]: report = {q: {**r, "not_written": "promotion.auto is false"} for q, r in report.items()}
         if p["auto"] and any(r["promote"] or r.get("dropped") for r in report.values()):   # written whole and renamed into place: the server never reads half a file
             tmp = path.with_name(path.name + ".tmp"); cal.save(tmp); os.replace(tmp, path)

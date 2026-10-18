@@ -25,7 +25,8 @@ DEFAULTS = {
     "version": VERSION,
     "outcomes": {"enabled": True, "sources": None},           # sources: the outcome sources that count (None: all of them)
     "promotion": {"auto": True, "questions": None,             # questions: the ones that learn (None: all of them)
-                  "min_outcomes": 20, "held_out": 0.3, "ci_level": 0.95, "tolerance": 0.01, "bootstrap": 2000},
+                  "min_outcomes": 20, "held_out": 0.3, "ci_level": 0.95, "tolerance": 0.01, "bootstrap": 2000,
+                  "form": "temperature", "split": "random", "serve_choice": False, "hold": {}},   # see d1a.learning.feedback.OutcomeCalibrator
     "schedule": {"daily_at": "04:00", "after_new_outcomes": 10},   # local time HH:MM, or None; >= N new outcomes, or None
     "replay": {"enabled": True, "on_model_change": True, "exclude_no_pr_id": True, "per_tick_cap": 50, "pause_s": 1.0},
     "reports": {"webhook_file": None, "notify": ["promotion", "min_reached"]},
@@ -61,6 +62,11 @@ RULES = {   # key -> (check, what it must be)
     "promotion.ci_level": (lambda v: _is_num(v) and any(abs(v - c) < 1e-9 for c in CI_LEVELS), "0.9, 0.95 or 0.99"),
     "promotion.tolerance": (lambda v: _is_num(v) and 0 <= v <= 0.1, "a number from 0 to 0.1"),
     "promotion.bootstrap": (lambda v: _is_int(v) and 200 <= v <= 20000, "an integer from 200 to 20000"),
+    "promotion.form": (lambda v: v in ("temperature", "vector"), "\"temperature\" (one inverse temperature per choice question) or \"vector\" (plus a per-option bias)"),
+    "promotion.split": (lambda v: v in ("random", "time"), "\"random\" (held-out groups by hash) or \"time\" (the newest groups held out)"),
+    "promotion.serve_choice": (lambda v: isinstance(v, bool), "true or false (true: a recalibrated choice question serves its recalibrated top option)"),
+    "promotion.hold": (lambda v: isinstance(v, dict) and all(isinstance(k, str) and k.strip() and _str_list(x) and x for k, x in v.items()),
+                       "{question: [options]}: the model's own choice is kept when it is one of these, e.g. {\"sev\": [\"P0\", \"P1\"]}"),
     "schedule.daily_at": (lambda v: v is None or (isinstance(v, str) and bool(HHMM.match(v))), "null or HH:MM in this machine's local time"),
     "schedule.after_new_outcomes": (lambda v: v is None or (_is_int(v) and v >= 1), "null or an integer >= 1"),
     "replay.enabled": (lambda v: isinstance(v, bool), "true or false"),

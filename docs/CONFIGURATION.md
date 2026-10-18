@@ -133,6 +133,10 @@ The settings file (`D1A_LEARNING`; `config show` prints it). Unset, or a key lef
 | `promotion.held_out` | `0.3` | 0.1 to 0.5 | The share of groups the gate holds out. |
 | `promotion.ci_level` | `0.95` | 0.9, 0.95, 0.99 | The gate's bootstrap interval. |
 | `promotion.tolerance`, `promotion.bootstrap` | `0.01`, `2000` | 0 to 0.1; 200 to 20,000 | Frozen-suite tolerance; bootstrap resamples. |
+| `promotion.form` | `"temperature"` | `"temperature"`, `"vector"` | How a choice question is recalibrated: one inverse temperature, or that plus a per-option bias, which also corrects a label mix the served traffic does not share with training. |
+| `promotion.split` | `"random"` | `"random"`, `"time"` | How the gate holds out groups: by hash, or the newest ones (it then asks whether what older outcomes taught helps on newer ones, as a promoted calibrator is used). |
+| `promotion.serve_choice` | `false` | true, false | `false`: a recalibrated choice keeps the model's chosen option and only its probabilities move. `true`: the recalibrated top option is served. |
+| `promotion.hold` | `{}` | `{question: [options]}` | With `serve_choice`, the model's own choice is kept when it is one of these, e.g. `{"sev": ["P0", "P1"]}`, so a correction toward common classes never demotes a rare, costly one. |
 | `schedule.daily_at` | `"04:00"` | `HH:MM` local time, or `null` | `tick` runs the gate once a day after this time. |
 | `schedule.after_new_outcomes` | `10` | ≥ 1, or `null` | `tick` also runs the gate after this many new outcomes. |
 | `replay.enabled`, `replay.on_model_change` | `true`, `true` | true, false | Replay earlier outcomes when the served model changes. |
