@@ -34,10 +34,12 @@ DEFAULTS = {
     "rules": {},   # served decode rules (#252), by name; none by default, so a no-op. Read only by d1a.learning.rules
 }
 FLAG_KEYS = {"question", "options", "t", "space", "run", "budget", "fitted_on"}
+FLAG_OPTIONAL = {"mode", "track"}   # #296: "shadow" logs the flag without serving it; track refits t from logged scores
+TRACK_KEYS = {"window", "every", "clamp", "alert_rate"}
 RULE_KEYS = {"question", "option", "t", "from", "space", "run", "use_case", "fitted_on"}
 NAMED = ("flags", "rules")   # sections of named entries, each checked whole (check_flag, check_rule) rather than key by key
 CI_LEVELS = (0.9, 0.95, 0.99)
-NOTIFY = ("promotion", "min_reached", "every_gate")
+NOTIFY = ("promotion", "min_reached", "every_gate", "flag_alert")
 HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
 
@@ -94,12 +96,14 @@ def flat(d, prefix=""):
 
 
 def check_flag(name, f):
-    """A learned decision threshold (#237): {question, options, t, space, run, budget, fitted_on: {kit, created_max, n}}.
-    Fitted and gated offline by d1a.learning.flags, never by tick/promote/replay; computed on raw probabilities (space
-    "raw", before the outcome calibrator) and pinned to `run`, so a calibrator promotion never moves it. -> problems."""
+    """A learned decision threshold (#237): {question, options, t, space, run, budget, fitted_on: {kit, created_max, n}},
+    optionally mode ("serve" or "shadow") and track {window, every, clamp, alert_rate} (#296). Fitted and gated offline
+    by d1a.learning.flags and never from outcomes: tick only refits a tracked t from logged scores, without labels. It is
+    computed on raw probabilities (space "raw", before the outcome calibrator) and pinned to `run`, so a calibrator
+    promotion never moves it. -> problems."""
     from datetime import datetime
     if not isinstance(f, dict): return [f"flags.{name}: must be an object"]
-    p = [f"flags.{name}.{k}: unknown setting (known: {sorted(FLAG_KEYS)})" for k in f if k not in FLAG_KEYS]
+    p = [f"flags.{name}.{k}: unknown setting (known: {sorted(FLAG_KEYS | FLAG_OPTIONAL)})" for k in f if k not in FLAG_KEYS | FLAG_OPTIONAL]
     p += [f"flags.{name}.{k}: missing" for k in sorted(FLAG_KEYS) if k not in f]
     if "question" in f and not (isinstance(f["question"], str) and f["question"].strip()): p.append(f"flags.{name}.question: a question id")
     if "options" in f and not (_str_list(f["options"]) and f["options"]): p.append(f"flags.{name}.options: a non-empty list of distinct option keys")
@@ -115,6 +119,18 @@ def check_flag(name, f):
             if not (_is_int(fo["n"]) and fo["n"] >= 1): p.append(f"flags.{name}.fitted_on.n: an integer >= 1")
             try: datetime.fromisoformat(str(fo["created_max"]).replace("Z", "+00:00"))
             except ValueError: p.append(f"flags.{name}.fitted_on.created_max: an ISO time")
+    if "mode" in f and f["mode"] not in ("serve", "shadow"): p.append(f"flags.{name}.mode: \"serve\" or \"shadow\" (logged, not served)")
+    if "track" in f:
+        tr = f["track"]
+        if not (isinstance(tr, dict) and set(tr) == TRACK_KEYS): p.append(f"flags.{name}.track: {{window, every, clamp, alert_rate}}")
+        else:
+            if not (_is_int(tr["window"]) and tr["window"] >= 50): p.append(f"flags.{name}.track.window: an integer >= 50 (decisions)")
+            if not (_is_int(tr["every"]) and _is_int(tr["window"]) and 1 <= tr["every"] <= tr["window"]):
+                p.append(f"flags.{name}.track.every: an integer from 1 to window")
+            c = tr["clamp"]
+            if not (isinstance(c, list) and len(c) == 2 and all(_is_num(x) for x in c) and 0 <= c[0] < c[1] <= 1):
+                p.append(f"flags.{name}.track.clamp: [low, high] with 0 <= low < high <= 1")
+            if not (_is_num(tr["alert_rate"]) and 0 < tr["alert_rate"] <= 1): p.append(f"flags.{name}.track.alert_rate: a number in (0, 1]")
     return p
 
 

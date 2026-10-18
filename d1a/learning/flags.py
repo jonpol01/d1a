@@ -12,16 +12,29 @@ for the one served run it was fitted for. It is fitted and gated only on labelle
 live severity outcomes are human corrections only, too few and biased (#237). The objective is recall at a flag-rate
 budget: the threshold is the (1 - budget) quantile of the group's probability on the fit kit, since the flag rate is
 what reviewers feel and needs no labels, and it holds when the base rate drifts.
+
+Two optional settings (#296):
+- mode "shadow": the flag is computed and kept in the decision log's meta, but not served, so the response is the one it
+  would be without the flag. A blind check then collects labels the flag never influenced.
+- track {"window", "every", "clamp", "alert_rate"}: t follows the flag rate without labels. Every `every` new logged
+  decisions, t is refit as the (1 - budget) quantile of the group's probability over the last `window` decisions of the
+  flag's run (scores only, one per distinct state, no replays), clamped to `clamp`. Below `window` decisions, the
+  offline t stays. d1a.learning.loop's tick runs it, and reports when the last 250 decisions' flag rate exceeds
+  `alert_rate` or t sits at a clamp. A threshold fitted on older scores fires more often when the scores drift, and a
+  fixed t did (#237: rate 0.194 against a 0.15 budget).
 """
 import argparse
+import hashlib
 import json
 import sys
+from datetime import datetime, timezone
 
 import numpy as np
 
 from d1a.eval.suite import read_json
 
 FIELDS = ("question", "options", "t", "space", "run", "budget", "fitted_on")
+ALERT_WINDOW = 250   # decisions the tick's flag-rate alert looks back over
 
 
 def group_p(probabilities, options):
@@ -44,14 +57,16 @@ def compute(raw_answers, flags, run):
             continue
         p = group_p(raw["probabilities"], f["options"])
         out.setdefault(f["question"], {})[name] = {"on": raised(raw["probabilities"], raw["choice"], f), "p": round(p, 4),
-                                                   "t": f["t"], "space": "raw"}
+                                                   "t": f["t"], "space": "raw", **({"shadow": True} if f.get("mode") == "shadow" else {})}
     return out
 
 
 def attach(answers, computed):
-    """The answers with each question's flags added as answers[q]["flags"]; nothing else in an answer changes."""
+    """The answers with each question's served flags added as answers[q]["flags"]; nothing else in an answer changes.
+    A shadow flag is left out: it is only logged."""
     for q, fl in computed.items():
-        if q in answers: answers[q].setdefault("flags", {}).update(fl)
+        shown = {name: v for name, v in fl.items() if not v.get("shadow")}
+        if q in answers and shown: answers[q].setdefault("flags", {}).update(shown)
     return answers
 
 
@@ -77,6 +92,40 @@ class Configured:
         if mtime != self._mtime:
             self._flags, self._mtime = self._settings.load(self.path)[0].get(self.SECTION) or {}, mtime
         return self._flags
+
+
+def logged_scores(events, flag):
+    """[(ts, group probability, raised)] for the flag's question in the log's decisions by the flag's run, oldest first:
+    no replays (they re-score old decisions), one per distinct state (its latest), choice answers only."""
+    latest = {}
+    for e in events:
+        if e.get("kind") != "decision" or e.get("replay_of") or e.get("run") != flag["run"]: continue
+        a = (e.get("answers") or {}).get(flag["question"])
+        if not a or a.get("type") != "choice" or not a.get("probabilities"): continue
+        key = hashlib.sha256(json.dumps(e.get("state"), sort_keys=True).encode()).hexdigest()
+        latest[key] = (e["ts"], group_p(a["probabilities"], flag["options"]), a.get("choice") in flag["options"])
+    return sorted(latest.values())
+
+
+def track(events, flag, refit_at=0):
+    """The tracked threshold of a flag with a `track` setting. -> {"n", "t" (the refit flag, or None: too few decisions or
+    not due), "rate_recent", "alerts"}. Due when there are at least `window` decisions and `every` more than at the last
+    refit (`refit_at`, a count)."""
+    tr = flag["track"]; scores = logged_scores(events, flag); n = len(scores)
+    out = {"n": n, "t": None, "alerts": []}
+    if n >= tr["window"] and n - refit_at >= tr["every"]:
+        window = scores[-tr["window"]:]
+        t = round(float(np.clip(np.quantile([p for _, p, _ in window], 1 - flag["budget"]), *tr["clamp"])), 4)
+        created = datetime.fromtimestamp(window[-1][0], timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        out["t"] = {**flag, "t": t, "fitted_on": {"kit": "decision-log", "created_max": created, "n": tr["window"]}}
+    t_now = out["t"]["t"] if out["t"] else flag["t"]
+    recent = scores[-ALERT_WINDOW:]
+    if recent:
+        out["rate_recent"] = sum(top or p >= t_now for _, p, top in recent) / len(recent)
+        if len(recent) == ALERT_WINDOW and out["rate_recent"] > tr["alert_rate"]:
+            out["alerts"].append(f"flag rate {out['rate_recent']:.3f} over the last {ALERT_WINDOW} decisions, above {tr['alert_rate']}")
+    if any(abs(t_now - c) < 1e-9 for c in tr["clamp"]): out["alerts"].append(f"t {t_now} is at a clamp {tr['clamp']}")
+    return out
 
 
 def _rows(rows, question):
