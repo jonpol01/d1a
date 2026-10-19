@@ -185,7 +185,8 @@ frames; its sound is not used. There are no further settings.
 | `D1A_URL` | `http://127.0.0.1:8009` | The D1A server the tools ask. |
 | `D1A_RUN` | unset | Loads this checkpoint in the MCP process instead of asking a server. |
 | `D1A_GATE_CARD` | unset | The Claude Code gate hook (`d1a.agents.claude_code_gate`): the task the agent is on, as the gate reads it (unset: "work in <the session's directory>"). |
-| `D1A_GATE_ALLOW` | `0` | `1`: the gate hook passes D1A's "allow" on, so Claude Code skips its prompt. `0`: the hook only adds "ask" and "deny", and Claude Code's own rules decide the rest. |
+| `D1A_GATE_ALLOW` | `0` | `1`: the gate hook passes D1A's "allow" on, so Claude Code skips its prompt (your own deny and ask rules still apply). Only for agents you trust D1A's gate with. `0`: the hook only adds "ask" and "deny", and Claude Code's own rules decide the rest. |
+| `D1A_GATE_TIMEOUT` | `10` | Seconds the gate hook waits for D1A before asking a person. Keep the hook's own `timeout` in settings.json above it. |
 
 ## Evaluation
 

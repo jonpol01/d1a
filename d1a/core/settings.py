@@ -51,6 +51,7 @@ SETTINGS = {s.name: s for s in (
     Setting("D1A_RUN", None, "d1a.agents.mcp_server"),
     Setting("D1A_GATE_CARD", None, "d1a.agents.claude_code_gate"),
     Setting("D1A_GATE_ALLOW", "0", "d1a.agents.claude_code_gate"),
+    Setting("D1A_GATE_TIMEOUT", "10", "d1a.agents.claude_code_gate"),
 )}
 
 

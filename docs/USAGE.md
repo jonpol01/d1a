@@ -91,7 +91,9 @@ tool call, D1A's gate decides.
 - **D1A's answers:** "deny" denies the call, and "ask" asks you. Each carries D1A's probabilities as the reason.
 - **"allow" adds nothing by default:** Claude Code's own permission rules decide, as without the hook. Set
   `D1A_GATE_ALLOW=1` to let D1A's "allow" skip the prompt.
-- **Fail-safe:** if D1A is unreachable or fails, the hook asks you.
+- **Fail-safe:** if D1A is unreachable, slower than `D1A_GATE_TIMEOUT` (default 10 s), or anything else fails, the hook asks you.
+- **No forged fields:** the command and the card are each read on one line, with newlines escaped, so a command can't forge the gate's other fields.
+- **Use `D1A_URL`:** with `D1A_RUN`, the hook loads the model on every call.
 - **What it reads:** `D1A_URL`/`D1A_RUN`, as the MCP tools do, and `D1A_GATE_CARD` (the task the agent is on;
   default: the session's directory).
 - **Other tools:** a `matcher` such as `"Bash|Write|Edit"` gates them too, read as the tool's name and input.
