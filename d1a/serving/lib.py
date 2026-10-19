@@ -16,7 +16,7 @@ from dataclasses import replace
 
 import torch
 
-from d1a.core.api import SystemOneRequest, to_answers, to_record
+from d1a.core.api import SystemOneRequest, answer_in_passes, conditional, in_request_order, to_answers, to_record
 from d1a.backends.checkpoint import Checkpoint, LoadOptions
 from d1a.backends.device import default_device
 from d1a.core.encoding import SERVE_MAX_BRANCH, SERVE_MAX_STATE
@@ -41,11 +41,18 @@ class D1A:
         """state: the document; questions: {id: question} as in a /v1/systemone request; use_case: as its `use_case` (the
         checkpoint's temperature for it, if it has one). -> {id: answer}."""
         req = SystemOneRequest(model="d1a-latest", state=state, questions=questions, use_case=use_case)
-        rec, meta = to_record(req)
-        enc = self.model.encode(self.tok, rec, max_state=SERVE_MAX_STATE, max_branch=SERVE_MAX_BRANCH)
-        if req.use_case is not None: enc["use_case"] = req.use_case   # as validated: stripped, as the server reads it
-        (ps,), _ = self.model.probs_batch([enc], [None], [False])
-        return to_answers([p.tolist() for p in ps], meta)
+
+        def run(sub):
+            rec, meta = to_record(sub)
+            enc = self.model.encode(self.tok, rec, max_state=SERVE_MAX_STATE, max_branch=SERVE_MAX_BRANCH)
+            if req.use_case is not None: enc["use_case"] = req.use_case   # as validated: stripped, as the server reads it
+            (ps,), _ = self.model.probs_batch([enc], [None], [False])
+            return meta, [p.tolist() for p in ps], None
+        if not conditional(req):
+            meta, ps, _ = run(req)
+            return to_answers(ps, meta)
+        meta, ps, _ = answer_in_passes(req, run)   # ask_if (#36): one pass per level, the rest reported as skipped
+        return in_request_order(req, to_answers(ps, meta))
 
     @property
     def temperatures(self):

@@ -8,6 +8,35 @@ How to call D1A: the System One API, the in-process library, the MCP tools for a
 
 A request may also name its use case, `"use_case": "routing"` (optional, at most 64 characters, surrounding whitespace ignored; D1A's own field, which other System One servers ignore). When the checkpoint carries a temperature for that use case, the request's probabilities are read at it; without `use_case`, or with a name the checkpoint has no temperature for, the checkpoint's own temperature applies and the answers are exactly what they were. The top answer never changes, only how sure it is. `GET /v1/models` lists the checkpoint's `use_case_temperatures` (`{}` for most checkpoints), and the decision log records each request's use case and the temperature it was read at. The agent presets, the MCP tools, `D1A.decide(..., use_case=...)` and both clients pass it. 
 
+**Conditional questions (`ask_if`, #36).** A question can be asked only when earlier answers allow it, in the same
+request. `"ask_if": {"<question id>": <condition>}`, every condition required:
+
+| The question it names | Condition |
+|---|---|
+| a `choice` | a list of its option keys: its answer is one of them |
+| a `noul` | `true` or `false`: its answer (P(yes) ≥ 0.5) is that |
+| a `score` | `{"min": .., "max": ..}`, either optional: its answer's `score` (the expected level, counted from 0) is in range |
+
+```json
+{"state": "Order 4471 was charged twice.",
+ "questions": {"intent": {"type": "choice", "instructions": "What does the customer want?", "criteria": {"refund": null, "track": null}},
+               "amount": {"type": "score", "instructions": "How much is at stake?", "criteria": ["small", "medium", "large"], "ask_if": {"intent": ["refund"]}},
+               "carrier": {"type": "choice", "instructions": "Which carrier?", "criteria": {"ups": null, "dhl": null}, "ask_if": {"intent": ["track"]}}}}
+```
+
+- **Passes:** the server answers in passes, the questions without `ask_if` first, then each question after the ones it
+  names. The state is cached, so a later pass costs only its question rows.
+- **Skipped questions:** a question whose condition fails, or that names a skipped question, comes back as
+  `{"type": .., "skipped": true, "ask_if": {..}}`, in the request's order.
+- **Which answers the conditions read:** the model's own answers, as the learned flags do (before any outcome
+  calibration).
+- **One request:** usage and `latency_ms` are summed over the passes, and the decision log keeps one entry.
+- **Validation:** a condition naming an unknown question or itself, a cycle, or a condition that does not fit the
+  question's type is a 422.
+- **Never model input:** `ask_if` is D1A's own field, so a request without it is answered exactly as before.
+  `/v1/systemone/permute` and `/v1/systemone/separate` refuse it, since they answer questions alone. `D1A.decide` takes
+  the same questions.
+
 **Routing temperature (v0.5-era numbers).** Routing is the first use case: v0.5 is served at T 1.78, which leaves its routing answers under-confident; on held-out factory routing rows a routing temperature of 0.85 lowers ECE from 0.132 to 0.030 and raises the share of answers at 0.9 confidence or more from 0.28 to 0.66, with the same accuracy (#209). v0.6 ships without a routing temperature yet: its own is to be fitted on the same rows and gated before it is added.
 
 Model names: `GET /v1/models` lists only `d1a-latest`, but the server answers a request whatever model name it sends, so a client written for another name (an unconfigured TypeSafe SDK client, for one) keeps working. Set `D1A_API_KEY` to require `Authorization: Bearer <key>`.

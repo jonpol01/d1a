@@ -20,6 +20,9 @@ A question is one of:
 | `choice` | `instructions`, `criteria`: key → description (1 to 255) | one per criteria key, in the object's order | the criteria keys |
 | `score` | `instructions`, `criteria`: a list of levels (1 to 255) | one per level, in order | `"0"`, `"1"`, ... |
 
+Any question may also carry D1A's optional `ask_if` (#36; docs/USAGE.md). It is never model input: the question is
+answered in a later pass, only when the answers it names meet their conditions, and is otherwise reported as skipped.
+
 Each request becomes one **record**: the state as text, and per question its instructions as text and its options as
 texts. The text rules are part of every trained model's contract; a change to them changes every answer.
 
