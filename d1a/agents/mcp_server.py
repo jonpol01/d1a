@@ -18,15 +18,20 @@ RUN = setting("D1A_RUN")
 _local = None
 
 
+def local():
+    """The D1A_RUN checkpoint, loaded on first use by whichever of ask() and temperatures() comes first."""
+    global _local
+    if _local is None:
+        from d1a.serving.lib import D1A
+        _local = D1A.load(RUN)
+    return _local
+
+
 def ask(state, questions, use_case=None):
     """-> the /v1/systemone response for `state` and `questions` (and the request's `use_case`, when given): from D1A_RUN
     in-process, else the server at D1A_URL."""
-    global _local
     if RUN:
-        if _local is None:
-            from d1a.serving.lib import D1A
-            _local = D1A.load(RUN)
-        t = time.perf_counter(); answers = _local.decide(state, questions, use_case=use_case)
+        t = time.perf_counter(); answers = local().decide(state, questions, use_case=use_case)
         return {"answers": answers, "latency_ms": round((time.perf_counter() - t) * 1000, 1)}
     body = json.dumps({"model": "d1a-latest", "state": state, "questions": questions, **({"use_case": use_case} if use_case else {})}).encode()
     req = urllib.request.Request(f"{URL}/v1/systemone", data=body, headers={"content-type": "application/json"})
@@ -36,7 +41,7 @@ def ask(state, questions, use_case=None):
 def temperatures():
     """The checkpoint's temperature and use-case temperatures (D1A.temperatures, or the server's /v1/models entry), read on
     every call: a server reloaded with a new map is followed at once."""
-    if RUN: return _local.temperatures
+    if RUN: return local().temperatures
     with urllib.request.urlopen(f"{URL}/v1/models", timeout=60) as r: return json.load(r)["models"][0]
 
 

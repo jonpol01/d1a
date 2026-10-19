@@ -127,3 +127,37 @@ def test_the_gate_hook_process_answers_on_budget_when_d1a_hangs():
         srv.close()
     assert p.returncode == 0 and json.loads(p.stdout)["hookSpecificOutput"]["permissionDecision"] == "ask"
     assert took < 15, f"the hook took {took:.1f} s"
+
+
+def test_the_agent_demo_walks_every_step_with_fail_safe_advice():
+    """python -m d1a.agents.demo: every step asks D1A one preset and prints its top answers and the advised action."""
+    from d1a.agents import demo
+    from d1a.agents.presets import PRESETS
+
+    def ask(state, questions, use_case=None):
+        answers = {}
+        for qid, q in questions.items():
+            if q["type"] == "noul": answers[qid] = {"type": "noul", "noul": 0.9}
+            else:
+                keys = list(q["criteria"]); p = {k: (0.9 if i == 0 else 0.1 / (len(keys) - 1)) for i, k in enumerate(keys)}
+                answers[qid] = {"type": "choice", "choice": keys[0], "probabilities": p}
+        return {"answers": answers, "latency_ms": 1.0}
+    buf = io.StringIO(); results = demo.run(ask=ask, temperatures={"temperature": 1.0}, out=buf)
+    assert [r["kind"] for r in results] == [k for k, _, _ in demo.STEPS] and set(k for k, _, _ in demo.STEPS) <= set(PRESETS)
+    text = buf.getvalue()
+    assert text.count("advice:") == len(demo.STEPS) and "rm -rf ~/work/app" in text and '"decision": "allow"' in text
+
+
+def test_the_in_process_model_loads_whichever_is_asked_first(monkeypatch):
+    """#302 review: with D1A_RUN, mcp_server.temperatures() before any ask() loads the model instead of failing (the demo
+    reads the temperatures first)."""
+    from types import SimpleNamespace
+    from d1a.agents import mcp_server
+    from d1a.serving import lib
+    loads = []
+    fake = SimpleNamespace(temperatures={"temperature": 1.5, "use_case_temperatures": {}}, decide=lambda *a, **k: {})
+    monkeypatch.setattr(lib.D1A, "load", classmethod(lambda cls, run, *a, **k: loads.append(run) or fake))
+    monkeypatch.setattr(mcp_server, "RUN", "some/checkpoint"); monkeypatch.setattr(mcp_server, "_local", None)
+    assert mcp_server.temperatures() == fake.temperatures
+    mcp_server.ask("x", {"q": {"type": "noul"}})
+    assert loads == ["some/checkpoint"]   # loaded once, shared by both
