@@ -84,3 +84,25 @@ def test_server_and_library_answer_conditional_requests_alike(train_hybrid, tmp_
     assert body["usage"]["input_tokens"] > single["usage"]["input_tokens"]   # two passes
     decisions = [e for e in learning.log.events() if e["kind"] == "decision"]
     assert len(decisions) == 1 and set(decisions[0]["answers"]) == {"team", "angry"}
+
+
+def test_the_torch_media_server_honours_ask_if():
+    """#300 review: d1a.serving.media's MediaModel answers a conditional request in passes as the main server does; a
+    question whose condition fails is skipped and never sent to the model, and input tokens are summed."""
+    from types import MethodType, SimpleNamespace
+    from d1a.serving import media
+    asked = []
+
+    def probs(self, rec, m, use_case):
+        asked.append([q["instr"] for q in rec["questions"]])
+        return [[0.2, 0.8] if q["instr"] == "intent" else [0.5, 0.5] for q in rec["questions"]], 10
+    fake = SimpleNamespace(tok=lambda text, add_special_tokens=False: SimpleNamespace(input_ids=[0] * len(text)))
+    fake.probs = MethodType(probs, fake)
+    r = media.MediaRequest(state="photo of a parcel", media={"type": "image", "data": "x"}, questions={
+        "intent": {"type": "choice", "instructions": "intent", "criteria": {"refund": None, "track": None}},
+        "amount": {"type": "noul", "instructions": "amount", "ask_if": {"intent": ["refund"]}},
+        "carrier": {"type": "noul", "instructions": "carrier", "ask_if": {"intent": ["track"]}}})
+    body = media.MediaModel.answer(fake, r)
+    assert asked == [["intent"], ["carrier"]]
+    assert body["answers"]["amount"] == {"type": "noul", "skipped": True, "ask_if": {"intent": ["refund"]}}
+    assert list(body["answers"]) == ["intent", "amount", "carrier"] and body["usage"]["input_tokens"] == 20
