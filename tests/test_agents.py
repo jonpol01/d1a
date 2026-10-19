@@ -111,3 +111,19 @@ def test_the_gate_hook_asks_when_d1a_is_slow_or_malformed(monkeypatch):
     assert out["hookSpecificOutput"]["permissionDecision"] == "ask"
     buf = io.StringIO(); hook.main(stdin=io.StringIO("[1, 2]"), stdout=buf)   # not an object: still a decision
     assert json.loads(buf.getvalue())["hookSpecificOutput"]["permissionDecision"] == "ask"
+
+
+def test_the_gate_hook_process_answers_on_budget_when_d1a_hangs():
+    """#301 review: against a D1A that accepts the connection and never answers, the hook process prints "ask" and exits
+    within D1A_GATE_TIMEOUT (+ start-up), not when the stuck HTTP call gives up."""
+    import socket, time
+    srv = socket.socket(); srv.bind(("127.0.0.1", 0)); srv.listen(8); port = srv.getsockname()[1]
+    env = {**os.environ, "PYTHONPATH": str(ROOT), "D1A_URL": f"http://127.0.0.1:{port}", "D1A_RUN": "", "D1A_GATE_TIMEOUT": "1"}
+    try:
+        t = time.monotonic()
+        p = subprocess.run([sys.executable, "-m", "d1a.agents.claude_code_gate"], input=json.dumps(BASH), capture_output=True, text=True, env=env, timeout=120)
+        took = time.monotonic() - t
+    finally:
+        srv.close()
+    assert p.returncode == 0 and json.loads(p.stdout)["hookSpecificOutput"]["permissionDecision"] == "ask"
+    assert took < 15, f"the hook took {took:.1f} s"

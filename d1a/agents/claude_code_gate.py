@@ -13,7 +13,7 @@ call", and prints Claude Code's decision JSON. It fails safe:
   it), a malformed answer, unreadable input, or any other failure.
 The card and the command are each read on one line (newlines escaped), so a command cannot forge the gate's other fields.
 """
-import json, sys
+import json, os, sys
 from concurrent.futures import ThreadPoolExecutor
 
 from d1a.agents.presets import GATE, USE_CASES, advise, gate_state
@@ -72,8 +72,10 @@ def main(stdin=sys.stdin, stdout=sys.stdout):
     try: out = output(*decide(call))
     except Exception as e: out = output("ask", f"D1A gate failed ({type(e).__name__}): asking a person")
     if out is not None: stdout.write(json.dumps(out) + "\n")
+    stdout.flush()
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    code = main()
+    os._exit(code)   # leave now: a D1A call past its budget keeps running in a worker thread the interpreter would join
