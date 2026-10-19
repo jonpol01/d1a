@@ -146,3 +146,18 @@ def test_the_agent_demo_walks_every_step_with_fail_safe_advice():
     assert [r["kind"] for r in results] == [k for k, _, _ in demo.STEPS] and set(k for k, _, _ in demo.STEPS) <= set(PRESETS)
     text = buf.getvalue()
     assert text.count("advice:") == len(demo.STEPS) and "rm -rf ~/work/app" in text and '"decision": "allow"' in text
+
+
+def test_the_in_process_model_loads_whichever_is_asked_first(monkeypatch):
+    """#302 review: with D1A_RUN, mcp_server.temperatures() before any ask() loads the model instead of failing (the demo
+    reads the temperatures first)."""
+    from types import SimpleNamespace
+    from d1a.agents import mcp_server
+    from d1a.serving import lib
+    loads = []
+    fake = SimpleNamespace(temperatures={"temperature": 1.5, "use_case_temperatures": {}}, decide=lambda *a, **k: {})
+    monkeypatch.setattr(lib.D1A, "load", classmethod(lambda cls, run, *a, **k: loads.append(run) or fake))
+    monkeypatch.setattr(mcp_server, "RUN", "some/checkpoint"); monkeypatch.setattr(mcp_server, "_local", None)
+    assert mcp_server.temperatures() == fake.temperatures
+    mcp_server.ask("x", {"q": {"type": "noul"}})
+    assert loads == ["some/checkpoint"]   # loaded once, shared by both
