@@ -81,6 +81,28 @@ D1A_URL=http://127.0.0.1:8009 python -m d1a.agents.mcp_server        # stdio; as
 
 Register it as a stdio MCP server (command `python`, args `-m d1a.agents.mcp_server`, env `D1A_URL`) in the agent's MCP settings, and allow the tool names above. `D1A_RUN=<checkpoint>` loads a model in the MCP process instead of calling a server. The question sets are in `d1a/agents/presets.py`, worded exactly as the routing training data asks them, and every tool but `d1a_decide` sends them with `"use_case": "routing"` (`presets.USE_CASES`). `advise` takes the checkpoint's temperatures (`D1A.temperatures`, or the server's `/v1/models` entry, which the MCP tools read on each call) and the use case sent, so that `fail_up`'s small threshold (0.7 at the checkpoint's temperature) follows the temperature the answers were read at: carried through the ratio, `sigmoid(logit(0.7) × T_checkpoint / T_use_case)`, it is 0.855 for v0.5's routing T 0.85. The gate's, the judge's and the 0.5 thresholds stay as they are.
 
+**Claude Code gate hook.** `d1a.agents.claude_code_gate` is a ready-made `PreToolUse` hook: before Claude Code runs a
+tool call, D1A's gate decides.
+
+```json
+{"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "python -m d1a.agents.claude_code_gate", "timeout": 30}]}]}}
+```
+
+- **D1A's answers:** "deny" denies the call, and "ask" asks you. Each carries D1A's probabilities as the reason.
+- **"allow" adds nothing by default:** Claude Code's own permission rules decide, as without the hook. Set
+  `D1A_GATE_ALLOW=1` to let D1A's "allow" skip the prompt.
+- **Fail-safe:** if D1A is unreachable, slower than `D1A_GATE_TIMEOUT` (default 10 s), or anything else fails, the hook asks you.
+- **No forged fields:** the command and the card are each read on one line, with newlines escaped, so a command can't forge the gate's other fields.
+- **Use `D1A_URL`:** with `D1A_RUN`, the hook loads the model on every call.
+- **What it reads:** `D1A_URL`/`D1A_RUN`, as the MCP tools do, and `D1A_GATE_CARD` (the task the agent is on;
+  default: the session's directory).
+- **Other tools:** a `matcher` such as `"Bash|Write|Edit"` gates them too, read as the tool's name and input.
+- **What it is, and isn't:** a second opinion on tool calls, not a prompt-injection defense. It never replaces Claude
+  Code's own permissions. Measured on D1A-E4B-it v0.6:
+  - on public prompt-injection detection (devtools-v1), it catches **60%** of injections (45 of 75), with no false alarms;
+  - on held-out agent-factory tool calls (in-distribution: the same generator as its training data), the gate's top
+    answer is 98% right, and with the fail-safe advice it allowed 0 of 33 calls that should have been asked or denied.
+
 ## Clients
 
 Dependency-free clients for any System One server live in [`clients/python`](../clients/python) (PyPI `d1a-client`, import `d1a_client`) and [`clients/js`](../clients/js) (npm `d1a-client`):
