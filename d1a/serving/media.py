@@ -23,7 +23,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import Literal
-from d1a.core.api import SystemOneRequest, output_tokens, to_answers, to_record
+from d1a.core.api import SystemOneRequest, answer_in_passes, conditional, in_request_order, output_tokens, to_answers, to_record
 from d1a.backends.checkpoint import Checkpoint
 from d1a.backends.device import default_device, empty_cache
 from d1a.core.encoding import encode, layout, rows_of
@@ -148,9 +148,15 @@ class MediaModel:
 
     def answer(self, req: MediaRequest):
         t0 = time.perf_counter()
-        rec, meta = to_record(req)
-        ps, n_in = self.probs(rec, req.media, req.use_case)
-        answers = to_answers(ps, meta)
+
+        def run(sub):
+            rec, meta = to_record(sub); ps, n = self.probs(rec, req.media, req.use_case); return meta, ps, n
+        if conditional(req):   # ask_if (#36): one pass per level, as d1a.serving.serve does, the rest reported as skipped
+            meta, ps, ns = answer_in_passes(req, run)
+            answers, n_in = in_request_order(req, to_answers(ps, meta)), sum(ns)
+        else:
+            meta, ps, n_in = run(req)
+            answers = to_answers(ps, meta)
         return {"model": req.model, "answers": answers, "usage": {"input_tokens": n_in, "output_tokens": output_tokens(self.tok, answers)},
                 "latency_ms": round((time.perf_counter() - t0) * 1000, 1)}
 

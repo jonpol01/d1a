@@ -43,7 +43,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, Field
-from d1a.core.api import SystemOneRequest, to_record, to_answers, output_tokens, with_date_facts
+from d1a.core.api import SystemOneRequest, answer_in_passes, conditional, in_request_order, to_record, to_answers, output_tokens, with_date_facts
 from d1a.backends.checkpoint import EXPORT_CONFIG, Checkpoint, LoadOptions, fused_available, is_hub_id
 from d1a.backends.device import allocated_bytes, default_device, empty_cache, out_of_memory, sync
 from d1a.learning.feedback import FeedbackLog, OutcomeCalibrator
@@ -287,14 +287,28 @@ class Server:
 
     def answer(self, req, log=True):
         """The /v1/systemone response body for one request. log=False: the decision is not written to the decision log."""
+        if conditional(req): return self._in_passes(req, log, lambda rec: self.probs(rec, req.use_case))
         rec, meta = to_record(prepare(req))
         return self._body(req, meta, *self.probs(rec, req.use_case), log=log)
 
     async def answer_async(self, req, log=True):
         """answer() for the event loop: a request waiting on the model thread holds no worker thread, so a container takes
         as many concurrent requests as its batches can absorb (FastAPI runs sync endpoints on a 40-thread pool)."""
+        if conditional(req): return await asyncio.to_thread(self.answer, req, log)   # one pass per ask_if level (#36)
         rec, meta = to_record(prepare(req))
         return self._body(req, meta, *await asyncio.wrap_future(self.submit(rec, use_case=req.use_case)), log=log)
+
+    def _in_passes(self, req, log, run):
+        """A request with ask_if conditions (#36): one model pass per level of d1a.core.api.ask_order (the state prefix is
+        cached, so a later pass pays for its question rows), one decision-log entry, usage and latency summed over the
+        passes, and the answers in the request's order with the questions not asked reported as skipped."""
+        def one(sub):
+            rec, meta = to_record(prepare(sub)); ps, m = run(rec); return meta, ps, m
+        meta, ps, stats = answer_in_passes(req, one)
+        m = {"tokens": sum(x["tokens"] for x in stats), "latency_ms": sum(x["latency_ms"] for x in stats)}
+        body = self._body(req, meta, ps, m, log=log)
+        body["answers"] = in_request_order(req, body["answers"])
+        return body
 
     def media_encoder(self):
         """Gemma 4's vision and audio encoders for this model, loaded on the first photo or voice request: the export's
@@ -319,6 +333,7 @@ class Server:
         rec, meta = to_record(prepare(req))
         try: media = await asyncio.to_thread(lambda: self.media_encoder().encode(req.media))
         except ValueError as e: raise HTTPException(422, str(e))
+        if conditional(req): return await asyncio.to_thread(self._in_passes, req, log, lambda r: self.submit(r, media, req.use_case).result())
         return self._body(req, meta, *await asyncio.wrap_future(self.submit(rec, media, req.use_case)), log=log)
 
     def _body(self, req, meta, ps, m, log=True):
@@ -537,6 +552,7 @@ def systemone_permute(r: PermuteSystemOne, request: Request):
     """Re-run one Choice question under n_perm option orders. Returns per-order probabilities keyed by option name."""
     q = r.request.questions.get(r.question)
     if q is None or q.type != "choice": raise HTTPException(422, "question must be an existing choice question")
+    if q.ask_if: raise HTTPException(422, "permute re-runs one question alone: drop its ask_if")
     rng = random.Random(r.seed); keys = list(q.criteria); runs = []
     with server() as s:
         for i in range(r.n_perm):
@@ -552,6 +568,7 @@ def systemone_permute(r: PermuteSystemOne, request: Request):
 @app.post("/v1/systemone/separate")
 def systemone_separate(req: SystemOneRequest, request: Request):
     """Answer each question in its own request against the same state (N passes). For packed-vs-separate comparison."""
+    if conditional(req): raise HTTPException(422, "separate answers each question alone: ask_if needs the questions it names")
     with server() as s:
         parts = [s.answer(req.model_copy(update={"questions": {qid: q}}), logged(request) is not False) for qid, q in req.questions.items()]
         answers = {qid: a for p in parts for qid, a in p["answers"].items()}

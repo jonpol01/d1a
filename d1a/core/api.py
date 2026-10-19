@@ -24,10 +24,25 @@ JSONContent = Union[str, dict, list, int, float, bool, None]
 MAX_OPTIONS = 255   # TypeSafe's limit for a choice's criteria and a score's levels
 
 
+class ScoreRange(BaseModel):
+    """An ask_if condition on a score question: its answer's score (the expected level, counted from 0) within [min, max]."""
+    model_config = {"extra": "forbid"}
+    min: float | None = None
+    max: float | None = None
+
+
+# D1A's own optional field (#36), never model input: ask a question only when earlier answers allow it, {question id:
+# condition}, every condition required. A condition is a list of option keys (a choice: its answer is one of them), true or
+# false (a noul: its answer, P(yes) >= 0.5, is that), or a ScoreRange (a score). The question is answered after the ones it
+# names, and reported as skipped when a condition fails or one of them was itself skipped.
+AskIf = dict[str, Union[bool, list[str], ScoreRange]] | None
+
+
 class Noul(BaseModel):
     type: Literal["noul"]
     instructions: JSONContent = None
     criteria: dict[str, JSONContent] | None = None   # optional descriptions of "true" and "false"
+    ask_if: AskIf = None
 
     @field_validator("criteria")
     @classmethod
@@ -41,6 +56,7 @@ class Choice(BaseModel):
     type: Literal["choice"]
     instructions: JSONContent = None
     criteria: dict[str, JSONContent]                  # option key -> description (None: the key alone)
+    ask_if: AskIf = None
 
     @model_validator(mode="after")
     def _check(self):   # the name is in a 422's error location ("function-after[_check(), Choice]"): keep it
@@ -53,6 +69,7 @@ class Score(BaseModel):
     type: Literal["score"]
     instructions: JSONContent = None
     criteria: list[JSONContent] = Field(min_length=1, max_length=MAX_OPTIONS)   # the levels, lowest first
+    ask_if: AskIf = None
 
 
 Question = Union[Noul, Choice, Score]
@@ -73,6 +90,71 @@ class SystemOneRequest(BaseModel):
     @classmethod
     def _strip_use_case(cls, v):
         return v.strip() if isinstance(v, str) else v
+
+    @model_validator(mode="after")
+    def _check_ask_if(self):
+        ask_order(self)   # raises on an unknown or wrong-typed condition, or a cycle
+        return self
+
+
+def conditional(req) -> bool:
+    """Whether any question carries an ask_if (#36): without one, a request is answered in a single pass, as before."""
+    return any(q.ask_if for q in req.questions.values())
+
+
+def ask_order(req) -> list[list[str]]:
+    """The questions in passes: those with no ask_if first, then each question one pass after the last one it names.
+    Raises ValueError on a condition that names an unknown question or itself, does not fit that question's type, or forms
+    a cycle."""
+    qs, level = req.questions, {}
+    for qid, q in qs.items():
+        for parent, cond in (q.ask_if or {}).items():
+            p = qs.get(parent)
+            if p is None or parent == qid:
+                raise ValueError(f"question {qid!r}: ask_if names {parent!r}, " + ("itself" if parent == qid else "which is not in this request"))
+            fits = (p.type == "choice" and isinstance(cond, list) and cond and set(cond) <= set(p.criteria)) or \
+                   (p.type == "noul" and isinstance(cond, bool)) or (p.type == "score" and isinstance(cond, ScoreRange))
+            if not fits:
+                want = (f"a non-empty list of its option keys {sorted(p.criteria)}" if p.type == "choice" else
+                        "true or false" if p.type == "noul" else 'a range {"min": .., "max": ..}')
+                raise ValueError(f"question {qid!r}: ask_if on {parent!r} (a {p.type}) takes {want}")
+    def depth(qid, seen=()):
+        if qid in seen: raise ValueError(f"ask_if forms a cycle: {' -> '.join((*seen, qid))}")
+        if qid not in level: level[qid] = 1 + max((depth(p, (*seen, qid)) for p in qs[qid].ask_if or {}), default=-1)
+        return level[qid]
+    for qid in qs: depth(qid)
+    return [[q for q in qs if level[q] == d] for d in range(max(level.values()) + 1)]
+
+
+def ask_holds(cond, ans: dict) -> bool:
+    """Whether one ask_if condition holds for an answer (to_answers' shape)."""
+    if ans["type"] == "choice": return ans["choice"] in cond
+    if ans["type"] == "noul": return (ans["noul"] >= 0.5) == cond
+    return (cond.min is None or ans["score"] >= cond.min) and (cond.max is None or ans["score"] <= cond.max)
+
+
+def skipped(question) -> dict:
+    """A question not asked because its ask_if did not hold: its type, "skipped": true, and the condition as sent."""
+    return {"type": question.type, "skipped": True, "ask_if": {k: v.model_dump(exclude_none=True) if isinstance(v, ScoreRange) else v
+                                                                 for k, v in question.ask_if.items()}}
+
+
+def answer_in_passes(req, run):
+    """Answer a request with ask_if conditions (#36): each pass of ask_order asks the questions whose conditions hold on
+    the answers so far (the model's own answers, as the learned flags read them), through run(sub_request) -> (meta,
+    probs, stats). -> (meta, probs, [stats]) of the questions asked, in pass order; the rest are skipped."""
+    metas, probs, stats, got = [], [], [], {}
+    for level in ask_order(req):
+        ask = [q for q in level if all(p in got and ask_holds(c, got[p]) for p, c in (req.questions[q].ask_if or {}).items())]
+        if not ask: continue
+        meta, ps, m = run(req.model_copy(update={"questions": {q: req.questions[q] for q in ask}}))
+        got.update(to_answers([list(p) for p in ps], meta)); metas += meta; probs += list(ps); stats.append(m)
+    return metas, probs, stats
+
+
+def in_request_order(req, answers: dict) -> dict:
+    """The answers keyed in the request's question order, a skipped one reported as skipped()."""
+    return {qid: answers[qid] if qid in answers else skipped(q) for qid, q in req.questions.items()}
 
 
 # --- text the model reads -----------------------------------------------------------------------------------------------
