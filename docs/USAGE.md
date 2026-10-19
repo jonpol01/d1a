@@ -81,6 +81,21 @@ D1A_URL=http://127.0.0.1:8009 python -m d1a.agents.mcp_server        # stdio; as
 
 Register it as a stdio MCP server (command `python`, args `-m d1a.agents.mcp_server`, env `D1A_URL`) in the agent's MCP settings, and allow the tool names above. `D1A_RUN=<checkpoint>` loads a model in the MCP process instead of calling a server. The question sets are in `d1a/agents/presets.py`, worded exactly as the routing training data asks them, and every tool but `d1a_decide` sends them with `"use_case": "routing"` (`presets.USE_CASES`). `advise` takes the checkpoint's temperatures (`D1A.temperatures`, or the server's `/v1/models` entry, which the MCP tools read on each call) and the use case sent, so that `fail_up`'s small threshold (0.7 at the checkpoint's temperature) follows the temperature the answers were read at: carried through the ratio, `sigmoid(logit(0.7) × T_checkpoint / T_use_case)`, it is 0.855 for v0.5's routing T 0.85. The gate's, the judge's and the 0.5 thresholds stay as they are.
 
+**Claude Code gate hook.** `d1a.agents.claude_code_gate` is a ready-made `PreToolUse` hook: before Claude Code runs a
+tool call, D1A's gate decides.
+
+```json
+{"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "python -m d1a.agents.claude_code_gate", "timeout": 30}]}]}}
+```
+
+- **D1A's answers:** "deny" denies the call, and "ask" asks you. Each carries D1A's probabilities as the reason.
+- **"allow" adds nothing by default:** Claude Code's own permission rules decide, as without the hook. Set
+  `D1A_GATE_ALLOW=1` to let D1A's "allow" skip the prompt.
+- **Fail-safe:** if D1A is unreachable or fails, the hook asks you.
+- **What it reads:** `D1A_URL`/`D1A_RUN`, as the MCP tools do, and `D1A_GATE_CARD` (the task the agent is on;
+  default: the session's directory).
+- **Other tools:** a `matcher` such as `"Bash|Write|Edit"` gates them too, read as the tool's name and input.
+
 ## Clients
 
 Dependency-free clients for any System One server live in [`clients/python`](../clients/python) (PyPI `d1a-client`, import `d1a_client`) and [`clients/js`](../clients/js) (npm `d1a-client`):

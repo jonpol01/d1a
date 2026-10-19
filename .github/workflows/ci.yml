@@ -28,7 +28,7 @@ jobs:
         with:
           enable-cache: true
           python-version: ${{ matrix.python }}
-      - run: uv sync --extra serve --extra media
+      - run: uv sync --extra serve --extra media --extra mcp
       # the Hugging Face files the unit tests read (pinned tokenizers), kept on GitHub's cache between runs: faster, and a
       # slow or unreachable Hub does not fail CI
       - uses: actions/cache@v4

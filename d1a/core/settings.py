@@ -49,6 +49,8 @@ SETTINGS = {s.name: s for s in (
     Setting("D1A_REMOTE_API_KEY", "local", "d1a.eval.benchmark", secret=True),
     Setting("D1A_URL", "http://127.0.0.1:8009", "d1a.agents.mcp_server"),
     Setting("D1A_RUN", None, "d1a.agents.mcp_server"),
+    Setting("D1A_GATE_CARD", None, "d1a.agents.claude_code_gate"),
+    Setting("D1A_GATE_ALLOW", "0", "d1a.agents.claude_code_gate"),
 )}
 
 
