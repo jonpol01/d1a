@@ -127,3 +127,22 @@ def test_the_gate_hook_process_answers_on_budget_when_d1a_hangs():
         srv.close()
     assert p.returncode == 0 and json.loads(p.stdout)["hookSpecificOutput"]["permissionDecision"] == "ask"
     assert took < 15, f"the hook took {took:.1f} s"
+
+
+def test_the_agent_demo_walks_every_step_with_fail_safe_advice():
+    """python -m d1a.agents.demo: every step asks D1A one preset and prints its top answers and the advised action."""
+    from d1a.agents import demo
+    from d1a.agents.presets import PRESETS
+
+    def ask(state, questions, use_case=None):
+        answers = {}
+        for qid, q in questions.items():
+            if q["type"] == "noul": answers[qid] = {"type": "noul", "noul": 0.9}
+            else:
+                keys = list(q["criteria"]); p = {k: (0.9 if i == 0 else 0.1 / (len(keys) - 1)) for i, k in enumerate(keys)}
+                answers[qid] = {"type": "choice", "choice": keys[0], "probabilities": p}
+        return {"answers": answers, "latency_ms": 1.0}
+    buf = io.StringIO(); results = demo.run(ask=ask, temperatures={"temperature": 1.0}, out=buf)
+    assert [r["kind"] for r in results] == [k for k, _, _ in demo.STEPS] and set(k for k, _, _ in demo.STEPS) <= set(PRESETS)
+    text = buf.getvalue()
+    assert text.count("advice:") == len(demo.STEPS) and "rm -rf ~/work/app" in text and '"decision": "allow"' in text

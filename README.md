@@ -87,8 +87,20 @@ print(answers["team"]["probabilities"], answers["urgent"]["noul"])
 ```
 
 - Clients for Python and JS: [docs/USAGE.md](docs/USAGE.md#clients)
-- MCP tools for agents: [docs/USAGE.md](docs/USAGE.md#from-agents-mcp)
+- Agents (MCP tools, the Claude Code gate hook, a demo): [docs/AGENTS_GUIDE.md](docs/AGENTS_GUIDE.md)
 - Photos, voice and video: [docs/USAGE.md](docs/USAGE.md#photos-voice-and-video)
+
+## For Agents
+
+D1A makes an agent's small decisions fast and fail-safe: who takes a request, how large a model it needs, whether a
+tool call may run (allow, ask, deny), and whether a task is done.
+- **Three ways in:** MCP tools for any agent, a Claude Code gate hook, or Python presets.
+- **Try it:** `python -m d1a.agents.demo` walks one task through an agent's day.
+- **Measured:** on held-out agent items, with the fail-safe advice, it allowed 0 of 33 calls that should be asked or
+  denied, and closed 0 of 33 unfinished tasks.
+- **Limit:** it catches 60% of public prompt injections, so it is a second opinion, not a security boundary.
+
+Guide, demo output and numbers: [docs/AGENTS_GUIDE.md](docs/AGENTS_GUIDE.md).
 
 ## How It Works
 
