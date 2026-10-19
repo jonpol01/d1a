@@ -97,6 +97,11 @@ tool call, D1A's gate decides.
 - **What it reads:** `D1A_URL`/`D1A_RUN`, as the MCP tools do, and `D1A_GATE_CARD` (the task the agent is on;
   default: the session's directory).
 - **Other tools:** a `matcher` such as `"Bash|Write|Edit"` gates them too, read as the tool's name and input.
+- **What it is, and isn't:** a second opinion on tool calls, not a prompt-injection defense. It never replaces Claude
+  Code's own permissions. Measured on D1A-E4B-it v0.6:
+  - on public prompt-injection detection (devtools-v1), it catches **60%** of injections (45 of 75), with no false alarms;
+  - on held-out agent-factory tool calls (in-distribution: the same generator as its training data), the gate's top
+    answer is 98% right, and with the fail-safe advice it allowed 0 of 33 calls that should have been asked or denied.
 
 ## Clients
 

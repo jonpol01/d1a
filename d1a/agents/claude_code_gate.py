@@ -12,6 +12,8 @@ call", and prints Claude Code's decision JSON. It fails safe:
 - Anything else asks a person: D1A unreachable, slower than D1A_GATE_TIMEOUT seconds (keep the hook's own timeout above
   it), a malformed answer, unreadable input, or any other failure.
 The card and the command are each read on one line (newlines escaped), so a command cannot forge the gate's other fields.
+A second opinion, not a prompt-injection defense: on devtools-v1's prompt-injection items D1A-E4B-it v0.6 catches 60%
+(docs/USAGE.md). Keep Claude Code's own permission rules.
 """
 import json, os, sys
 from concurrent.futures import ThreadPoolExecutor
