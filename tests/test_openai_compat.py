@@ -103,7 +103,8 @@ def held(model):
     """server_async stand-in: one Server-like object holding `model`, whose run_task runs fn at once."""
     def run_task(fn):
         f = Future(); f.set_result(fn(model, "tok")); return f
-    s = SimpleNamespace(model=model, checkpoint=SimpleNamespace(path="/nowhere"), run_task=run_task, between_tokens=lambda: None)
+    s = SimpleNamespace(model=model, checkpoint=SimpleNamespace(path="/nowhere"), run_task=run_task, between_tokens=lambda: None,
+                        chat_prompts="the server's prompt cache")
 
     @asynccontextmanager
     async def server_async():
@@ -119,7 +120,8 @@ def test_chat_on_a_merged_model_is_refused_with_501(monkeypatch):
 
 
 def test_a_stream_sends_each_piece_as_it_comes_then_the_finish_and_done(monkeypatch):
-    def fake_generate(model, tok, req, model_dir=None, model_name="d1a", on_text=None, between=None):
+    def fake_generate(model, tok, req, model_dir=None, model_name="d1a", on_text=None, between=None, cache=None):
+        assert cache == "the server's prompt cache"   # every chat of the server shares one, so a next step finds the last one's
         for piece in ("Hel", "lo"): on_text(piece)
         return {"choices": [{"finish_reason": "stop", "message": {"role": "assistant", "content": "Hello"}}]}
     monkeypatch.setattr(serve, "server_async", held(SimpleNamespace(loras=["one"])))

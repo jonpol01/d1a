@@ -139,6 +139,7 @@ class Server:
     batched_requests: int = 0
     release_date: str = field(default="")   # for the TypeSafe model card; resolved once (may ask the Hub)
     batch_ms: deque = field(default_factory=lambda: deque(maxlen=512))   # model time of the most recent batches (latency_summary)
+    chat_prompts: object = None   # the chat's openai_compat.PromptCache, made by the first chat; it goes with the server at an idle unload
 
     def __post_init__(self):
         self.release_date = self.release_date or self.checkpoint.release_date()
@@ -481,6 +482,13 @@ def chat_server_check(s):
         raise HTTPException(501, "this model has no chat: serve an export made with `scripts/export_mlx.py --unmerged` on an instruction-tuned base (#274)")
 
 
+def chat_cache(s):
+    """The server's chat prompt cache, made on the model thread by the first chat."""
+    if s.chat_prompts is None:
+        s.chat_prompts = openai_compat.PromptCache()
+    return s.chat_prompts
+
+
 @app.post("/v1/chat/completions")
 async def chat_completions(req: openai_compat.ChatRequest):
     """OpenAI-compatible chat, answered by the served model with its D1A adapter switched off (the instruction-tuned base
@@ -492,7 +500,7 @@ async def chat_completions(req: openai_compat.ChatRequest):
     async with server_async() as s:
         chat_server_check(s)
         model_dir = s.checkpoint.path
-        body = await asyncio.wrap_future(s.run_task(lambda model, tok: openai_compat.generate_chat(model, tok, req, model_dir, CHAT_NAME, between=s.between_tokens)))
+        body = await asyncio.wrap_future(s.run_task(lambda model, tok: openai_compat.generate_chat(model, tok, req, model_dir, CHAT_NAME, between=s.between_tokens, cache=chat_cache(s))))
     return StreamingResponse(openai_compat.stream_chunks(body), media_type="text/event-stream") if req.stream else body
 
 
@@ -503,7 +511,7 @@ async def chat_stream(req):
         chat_server_check(s)
         pieces, done = queue.Queue(), object()
         model_dir = s.checkpoint.path
-        future = s.run_task(lambda model, tok: openai_compat.generate_chat(model, tok, req, model_dir, CHAT_NAME, on_text=pieces.put, between=s.between_tokens))
+        future = s.run_task(lambda model, tok: openai_compat.generate_chat(model, tok, req, model_dir, CHAT_NAME, on_text=pieces.put, between=s.between_tokens, cache=chat_cache(s)))
         future.add_done_callback(lambda _: pieces.put(done))
         body_id, created, name = f"chatcmpl-{uuid.uuid4().hex}", int(time.time()), req.model or CHAT_NAME
         yield openai_compat.chunk(body_id, created, name, {"role": "assistant", "content": ""})
