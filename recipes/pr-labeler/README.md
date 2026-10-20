@@ -100,7 +100,7 @@ On the same 17 PRs and the same input, D1A-E4B got 63% of the labels right again
 
 <img src="../../docs/reports/2026-10-pr-labeler.png" alt="Infographic: D1A labels pull requests; 63% correct vs 51% for Gemma 4 E4B chat; 87% correct above p 0.7" width="100%">
 
-v0.5 and v0.6 followed ([docs/MODELS.md](../../docs/MODELS.md)); the Mac mini serves v0.6 since 2026-10-10.
+v0.5 and v0.6 followed ([docs/MODELS.md](../../docs/MODELS.md)).
 
 
 ## One checkpoint, every device
