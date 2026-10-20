@@ -29,7 +29,7 @@ SETTINGS = {s.name: s for s in (
     Setting("D1A_DATE_FACTS", "0", "d1a.serving.serve"),
     Setting("D1A_FEEDBACK_LOG", None, "d1a.serving.serve"),
     Setting("D1A_OUTCOME_CALIBRATOR", None, "d1a.serving.serve"),
-    Setting("D1A_API_KEY", None, "d1a.serving.serve, d1a.learning.feedback", secret=True),
+    Setting("D1A_API_KEY", None, "d1a.serving.serve, d1a.learning.feedback, d1a.agents.mcp_server", secret=True),
     Setting("D1A_CHAT_NAME", "d1a-chat", "d1a.serving.serve"),
     Setting("D1A_CHAT_CACHE_MB", "1024", "d1a.serving.serve"),
     Setting("D1A_CHAT_LOG", "1", "d1a.serving.serve"),

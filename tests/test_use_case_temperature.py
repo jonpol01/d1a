@@ -336,9 +336,9 @@ def test_presets_lib_mcp_and_the_python_client_send_the_use_case(models, golden,
         assert m.decide(request["state"], request["questions"], use_case=use_case) == to_answers([p.tolist() for p in at(models["raw"][2], enc, T)], meta)
     sent = []
 
-    class Response:   # the server: POST /v1/systemone, and GET /v1/models (a str) listing the routing temperature
+    class Response:   # the server: POST /v1/systemone, and GET /v1/models (a URL or a Request) listing the routing temperature
         def __init__(self, req):
-            self.models = isinstance(req, str) and req.endswith("/v1/models")
+            self.models = (req if isinstance(req, str) else req.full_url).endswith("/v1/models")
             if not self.models: sent.append(json.loads(req.data))
         def __enter__(self): return self
         def __exit__(self, *a): return False

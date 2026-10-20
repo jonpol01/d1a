@@ -27,14 +27,26 @@ def local():
     return _local
 
 
-def ask(state, questions, use_case=None):
+def headers(log=True):
+    """The headers of a request to the server: its bearer key when D1A_API_KEY is set (a server reachable beyond localhost
+    requires one), and with log=False the header that keeps the decision out of its learning log."""
+    h = {"content-type": "application/json"}
+    if key := setting("D1A_API_KEY"):
+        h["authorization"] = f"Bearer {key}"
+    if not log:
+        h["x-d1a-decision-log"] = "off"
+    return h
+
+
+def ask(state, questions, use_case=None, log=True):
     """-> the /v1/systemone response for `state` and `questions` (and the request's `use_case`, when given): from D1A_RUN
-    in-process, else the server at D1A_URL."""
+    in-process, else the server at D1A_URL. log=False keeps the decision out of the server's learning log (a demo's or a
+    test's decisions are not real ones)."""
     if RUN:
         t = time.perf_counter(); answers = local().decide(state, questions, use_case=use_case)
         return {"answers": answers, "latency_ms": round((time.perf_counter() - t) * 1000, 1)}
     body = json.dumps({"model": "d1a-latest", "state": state, "questions": questions, **({"use_case": use_case} if use_case else {})}).encode()
-    req = urllib.request.Request(f"{URL}/v1/systemone", data=body, headers={"content-type": "application/json"})
+    req = urllib.request.Request(f"{URL}/v1/systemone", data=body, headers=headers(log))
     return json.load(urllib.request.urlopen(req, timeout=60))
 
 
@@ -42,7 +54,7 @@ def temperatures():
     """The checkpoint's temperature and use-case temperatures (D1A.temperatures, or the server's /v1/models entry), read on
     every call: a server reloaded with a new map is followed at once."""
     if RUN: return local().temperatures
-    with urllib.request.urlopen(f"{URL}/v1/models", timeout=60) as r: return json.load(r)["models"][0]
+    with urllib.request.urlopen(urllib.request.Request(f"{URL}/v1/models", headers=headers()), timeout=60) as r: return json.load(r)["models"][0]
 
 
 def preset(kind, state):

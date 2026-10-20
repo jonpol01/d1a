@@ -161,3 +161,44 @@ def test_the_in_process_model_loads_whichever_is_asked_first(monkeypatch):
     assert mcp_server.temperatures() == fake.temperatures
     mcp_server.ask("x", {"q": {"type": "noul"}})
     assert loads == ["some/checkpoint"]   # loaded once, shared by both
+
+
+def test_the_agent_tools_send_the_servers_key_and_the_demo_stays_out_of_its_log(monkeypatch):
+    """A server reachable beyond localhost requires D1A_API_KEY: the tools, the gate hook and the demo send it, or every
+    call is refused (the hook then asks about every command, its fail-safe). The demo's decisions are not real ones:
+    they carry x-d1a-decision-log: off, so they stay out of the server's learning log; the tools' do not."""
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+    from d1a.agents import demo, mcp_server
+    from d1a.agents.presets import PRESETS
+    seen = []
+
+    class Server(BaseHTTPRequestHandler):
+        def log_message(self, *args): pass
+
+        def reply(self, body):
+            data = json.dumps(body).encode()
+            self.send_response(200); self.send_header("content-type", "application/json"); self.send_header("content-length", str(len(data)))
+            self.end_headers(); self.wfile.write(data)
+
+        def do_GET(self):
+            seen.append((self.path, dict(self.headers))); self.reply({"models": [{"temperature": 1.0}]})
+
+        def do_POST(self):
+            req = json.loads(self.rfile.read(int(self.headers["content-length"]))); seen.append((self.path, dict(self.headers)))
+            self.reply({"answers": {q: ({"type": "noul", "noul": 0.9} if v["type"] == "noul" else
+                                        {"type": "choice", "choice": list(v["criteria"])[0], "probabilities": {k: 1 / len(v["criteria"]) for k in v["criteria"]}})
+                                    for q, v in req["questions"].items()}})
+    srv = HTTPServer(("127.0.0.1", 0), Server); threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        monkeypatch.setattr(mcp_server, "URL", f"http://127.0.0.1:{srv.server_port}"); monkeypatch.setattr(mcp_server, "RUN", None)
+        monkeypatch.setenv("D1A_API_KEY", "k3y")
+        mcp_server.ask("a state", PRESETS["route"]); mcp_server.temperatures()
+        demo.run(out=io.StringIO())
+    finally:
+        srv.shutdown()
+    lower = [(path, {k.lower(): v for k, v in h.items()}) for path, h in seen]
+    assert all(h.get("authorization") == "Bearer k3y" for _, h in lower)
+    assert "x-d1a-decision-log" not in lower[0][1]   # an agent's own decision is logged
+    demo_calls = [h for path, h in lower[2:] if path == "/v1/systemone"]
+    assert len(demo_calls) == len(demo.STEPS) and all(h.get("x-d1a-decision-log") == "off" for h in demo_calls)
