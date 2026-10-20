@@ -59,6 +59,7 @@ PREFIX_MAX_TOKENS = int(setting("D1A_PREFIX_MAX_TOKENS"))  # state tokens the ca
 DATE_FACTS = setting("D1A_DATE_FACTS") == "1"
 FEEDBACK_LOG = setting("D1A_FEEDBACK_LOG")                         # set = log every decision (d1a.learning.feedback) and accept outcomes at POST /v1/feedback
 OUTCOME_CALIBRATOR = setting("D1A_OUTCOME_CALIBRATOR")             # set = apply this d1a.learning.feedback calibrator to yes/no and choice answers, reloaded when the file changes
+CHAT_LOG = setting("D1A_CHAT_LOG") == "1"                           # print a line per chat (log_chats); counts and time, never text
 CHAT_CACHE_MB = int(setting("D1A_CHAT_CACHE_MB"))                   # the chat prompt cache's budget (openai_compat.PromptCache); 0 disables
 CHAT_NAME = setting("D1A_CHAT_NAME")                                # the model id /v1/chat/completions answers as (#274)
 EMBED_GGUF, EMBED_NAME = setting("D1A_EMBED_GGUF"), setting("D1A_EMBED_NAME")   # /v1/embeddings: a GGUF embedder via llama.cpp; unset = off
@@ -485,7 +486,9 @@ def chat_server_check(s):
 
 def log_chats(stream=None):
     """Print each chat's log line (openai_compat's "chat: N prompt tokens (M cached), ...") with its time, beside uvicorn's
-    request lines: nothing configures logging otherwise, and Python drops INFO lines by default."""
+    request lines: nothing configures logging otherwise, and Python drops INFO lines by default. D1A_CHAT_LOG=0: none."""
+    if not CHAT_LOG:
+        return
     handler = logging.StreamHandler(stream or sys.stdout)
     handler.setFormatter(logging.Formatter("%(asctime)s %(message)s", "%Y-%m-%d %H:%M:%S"))
     chat = logging.getLogger(openai_compat.log.name)
