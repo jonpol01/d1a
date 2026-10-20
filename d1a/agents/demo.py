@@ -4,7 +4,8 @@
     D1A_RUN=JohnP1/d1a-e2b-mlx-q8 python -m d1a.agents.demo     # or loads a checkpoint in this process
 
 Each step prints D1A's top answer with its probability and the action the preset's fail-safe advice takes
-(d1a.agents.presets.advise): unsure answers route up, ask a person, or keep a task open. The steps are the MCP tools'
+(d1a.agents.presets.advise): unsure answers route up, ask a person, or keep a task open. The demo's decisions are kept out
+of the server's learning log, and D1A_API_KEY is sent when set. The steps are the MCP tools'
 (d1a.agents.mcp_server) and the Claude Code gate hook's (d1a.agents.claude_code_gate) decisions.
 """
 import json, sys
@@ -43,7 +44,7 @@ def run(ask=None, temperatures=None, out=sys.stdout):
     from d1a.agents.presets import PRESETS, USE_CASES, advise
     if ask is None:
         from d1a.agents import mcp_server
-        ask, temperatures = mcp_server.ask, mcp_server.temperatures
+        ask, temperatures = (lambda s, q, u=None: mcp_server.ask(s, q, u, log=False)), mcp_server.temperatures
     temps = temperatures() if callable(temperatures) else temperatures
     results = []
     for kind, title, arg in STEPS:

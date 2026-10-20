@@ -24,6 +24,8 @@ fail-safe rules are `advise()` in the same file.
 python -m d1a.agents.demo              # against the D1A server at D1A_URL (default http://127.0.0.1:8009)
 ```
 
+Its decisions are kept out of the server's learning log, so it is safe to run against a live server.
+
 One task goes through an agent's day. Here is real output from D1A-E4B-it v0.6, served on an Apple M4 (the latencies
 include an SSH tunnel):
 
@@ -88,6 +90,8 @@ browser UI.
 - **The tools:** `d1a_intake`, `d1a_judge`, `d1a_tier`, `d1a_gate`, `d1a_route`, and `d1a_decide` (your own questions).
   Each returns D1A's answers and the `advice`.
 - **The MCP extra:** it needs `pip install "d1a[mcp]"`.
+- **A server that requires a key:** add `"D1A_API_KEY": "<the server's key>"` to `env`. The gate hook and the demo
+  read it too.
 - **Tested end to end:** a real MCP client starts the server, lists the tools and calls them in CI
   (`tests/test_agents.py`).
 
