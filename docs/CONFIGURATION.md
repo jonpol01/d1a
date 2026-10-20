@@ -39,6 +39,7 @@ settings come from. The list lives in `d1a/core/settings.py`; every module reads
 | answer about photos, voice and video | install the `media` extra and serve an MLX export that carries `media/` |
 | learn from outcomes | `D1A_FEEDBACK_LOG`, `POST /v1/feedback`, `python -m d1a.learning.feedback promote`, `D1A_OUTCOME_CALIBRATOR` (see Self-learning) |
 | keep test or demo traffic out of the learning log | request header `x-d1a-decision-log: off` |
+| prove which weights, temperature and cache produced an answer | request header `x-d1a-audit: on` ([Audit an answer](#audit-an-answer)) |
 | reproduce reported numbers exactly | `D1A_DTYPE=fp32` (and `D1A_BACKEND=torch` on Apple Silicon) |
 | give agents D1A as tools | `python -m d1a.agents.mcp_server` with `D1A_URL` or `D1A_RUN` |
 | score a remote D1A endpoint | `python -m d1a.eval.benchmark --remote <url>` with `D1A_REMOTE_API_KEY` |
@@ -94,6 +95,25 @@ request: a busy day of 10,000 requests adds under 1 MB. Rotation is left to what
 
 The decision log (`D1A_FEEDBACK_LOG`, [Self-learning](#self-learning)) is separate and off by default. When it is on,
 it does hold each request's text and answers, because outcomes are matched to them.
+
+## Audit an answer
+
+Send the request header `x-d1a-audit: on` to `/v1/systemone` or `/v1/systemone/media`, and the response gains an `audit`
+block that says what produced the answer, for a port, a bug report or a support ticket. Without the header the
+response is unchanged. It holds hashes and settings, never the request's or the answer's text:
+
+| Field | What it is |
+|---|---|
+| `d1a`, `run`, `backend`, `dtype` | the package version, the checkpoint as served (`--run`), and how it runs |
+| `weights_sha256` | the adapter's sha256, or for an MLX export one sha256 over its shards (the first audited request computes it, seconds for an MLX export) |
+| `state_sha256` | the sha256 of the state text the model read (after `D1A_DATE_FACTS`, when on); `media_sha256`: the sha256 of the photo, clip or video |
+| `temperature`, `checkpoint_temperature`, `temperature_source` | the temperature the answer was read at, the checkpoint's own, and `checkpoint` or `use_case:<name>` |
+| `outcome_calibrator` | the questions the outcome calibrator recalibrated (empty when none) |
+| `rules`, `flags` | per question, the decode rules that fired and the flags served |
+| `passes` | per model pass (one, or one per `ask_if` level): `tokens`, `prefix_cache_hit`, `cached_tokens` (the state tokens read from the prefix cache) |
+| `logged` | whether the decision went into the decision log |
+
+The Python and JS clients send no custom headers; use any HTTP client (curl, `requests`, `fetch`).
 
 ## Model loading (`D1A_*` load options)
 

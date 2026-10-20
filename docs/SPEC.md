@@ -109,7 +109,8 @@ From a question's probabilities p (option order):
 
 Both confidences read p normalised to sum 1 (all zeros as uniform). Every reported number is rounded to 4 decimals.
 The response holds `model` (the request's), `answers` (question id → answer), `usage` (`input_tokens`: the packed sequence's length; `output_tokens`: the tokens of the
-serialised answers) and `latency_ms`. Other endpoints of `d1a.serving.serve` (`/v1/systemone/media`, `/permute`, `/separate`,
+serialised answers) and `latency_ms`; with a decision log on, a `decision_id`; with the request header `x-d1a-audit: on`, an `audit`
+block ([CONFIGURATION.md](CONFIGURATION.md#audit-an-answer)). Other endpoints of `d1a.serving.serve` (`/v1/systemone/media`, `/permute`, `/separate`,
 `/v1/feedback`, `/v1/models`) are described in its docstring.
 
 ## 6. Calibration

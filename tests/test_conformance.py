@@ -84,3 +84,42 @@ def test_the_golden_vectors_compare_tool_passes_on_the_fixture(tmp_path, monkeyp
     assert report["token_id_mismatches"] == [] and report["all"]["questions"] == 154
     assert report["all"]["max_dp"] < TOLERANCE and report["all"]["argmax_flips"] == 0
     capsys.readouterr()
+
+
+def test_an_audited_answer_says_what_produced_it(golden, loaded, monkeypatch):
+    """#32: with x-d1a-audit: on, an answer carries what produced it, so a port or a support ticket can prove it: the code,
+    the weights, the text the model read, its temperature and where that came from, the self-learning steps applied, and
+    the prefix cache per model pass. The answers themselves are the ones an unaudited request gets."""
+    import hashlib
+    import d1a
+    from d1a.core.api import SystemOneRequest, to_record
+    from d1a.backends.checkpoint import Checkpoint
+    from d1a.serving import serve
+    tok, model = loaded
+    monkeypatch.setattr(serve, "PREFIX_MIN_TOKENS", "0")   # the fixture's states are short: cache them anyway
+    monkeypatch.setattr(serve, "LEARNING", serve.Learning())
+    with pytest.MonkeyPatch.context() as mp:
+        mp.chdir(ROOT)
+        server = serve.Server(Checkpoint(str(FIXTURE / "checkpoint")), tok, model, "cpu")
+        weights = Checkpoint(str(FIXTURE / "checkpoint")).weights_sha256()
+    try:
+        req = SystemOneRequest.model_validate(golden["records"][0]["request"])
+        plain, first, again = server.answer(req), server.answer(req, audit=True), server.answer(req, audit=True)
+        assert "audit" not in plain and first["answers"] == plain["answers"] == again["answers"] and first["usage"] == plain["usage"]
+        a = first["audit"]
+        assert a["d1a"] == d1a.__version__ and a["run"] == str(FIXTURE / "checkpoint") and a["weights_sha256"] == weights
+        assert a["state_sha256"] == hashlib.sha256(to_record(req)[0]["state"].encode("utf-8")).hexdigest()
+        assert a["temperature"] == a["checkpoint_temperature"] == model.head.temperature and a["temperature_source"] == "checkpoint"
+        assert a["outcome_calibrator"] == [] and a["rules"] == {} and a["flags"] == {} and a["logged"] is False
+        assert len(a["passes"]) == 1 and a["passes"][0]["tokens"] > 0
+        hit = again["audit"]["passes"][0]   # the same state again: read from the prefix cache
+        assert hit["prefix_cache_hit"] is True and 0 < hit["cached_tokens"] < hit["tokens"]
+        monkeypatch.setattr(model.head, "use_case_temperatures", {"routing": 2.0})
+        routed = server.answer(req.model_copy(update={"use_case": "routing"}), audit=True)["audit"]
+        assert routed["temperature"] == 2.0 and routed["temperature_source"] == "use_case:routing"
+        first_q, second_q = list(req.questions)[:2]
+        cond = req.model_copy(update={"questions": {first_q: req.questions[first_q],
+                                                    second_q: req.questions[second_q].model_copy(update={"ask_if": {first_q: list(req.questions[first_q].criteria)}})}})
+        assert len(server.answer(cond, audit=True)["audit"]["passes"]) == 2   # one entry per ask_if pass
+    finally:
+        server.close()
