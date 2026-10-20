@@ -59,6 +59,7 @@ PREFIX_MAX_TOKENS = int(setting("D1A_PREFIX_MAX_TOKENS"))  # state tokens the ca
 DATE_FACTS = setting("D1A_DATE_FACTS") == "1"
 FEEDBACK_LOG = setting("D1A_FEEDBACK_LOG")                         # set = log every decision (d1a.learning.feedback) and accept outcomes at POST /v1/feedback
 OUTCOME_CALIBRATOR = setting("D1A_OUTCOME_CALIBRATOR")             # set = apply this d1a.learning.feedback calibrator to yes/no and choice answers, reloaded when the file changes
+CHAT_CACHE_MB = int(setting("D1A_CHAT_CACHE_MB"))                   # the chat prompt cache's budget (openai_compat.PromptCache); 0 disables
 CHAT_NAME = setting("D1A_CHAT_NAME")                                # the model id /v1/chat/completions answers as (#274)
 EMBED_GGUF, EMBED_NAME = setting("D1A_EMBED_GGUF"), setting("D1A_EMBED_NAME")   # /v1/embeddings: a GGUF embedder via llama.cpp; unset = off
 API_KEY = setting("D1A_API_KEY")                                  # unset = open server; set = require Authorization: Bearer <key>, as the TypeSafe clients always send
@@ -483,9 +484,9 @@ def chat_server_check(s):
 
 
 def chat_cache(s):
-    """The server's chat prompt cache, made on the model thread by the first chat."""
-    if s.chat_prompts is None:
-        s.chat_prompts = openai_compat.PromptCache()
+    """The server's chat prompt cache, made on the model thread by the first chat; None when D1A_CHAT_CACHE_MB is 0."""
+    if s.chat_prompts is None and CHAT_CACHE_MB > 0:
+        s.chat_prompts = openai_compat.PromptCache(CHAT_CACHE_MB << 20)
     return s.chat_prompts
 
 

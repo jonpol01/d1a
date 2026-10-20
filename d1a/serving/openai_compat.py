@@ -33,8 +33,10 @@ log = logging.getLogger("d1a.chat")
 DEFAULT_MAX_TOKENS = 1024
 PREFILL_STEP = 2048   # tokens per prefill chunk: mlx-lm's default, so a chat's cache matches generate_step's own
 MAX_TOKENS = 8192
-CACHE_PROMPTS = 4          # prompts whose KV cache is kept: a few agents or conversations taking turns
-CACHE_BYTES = 1 << 30      # E4B-it's cache is ~16 KB a token past its 512-token window: 1 GiB holds ~60k prompt tokens
+CACHE_PROMPTS = 16         # prompts whose KV cache is kept. A chat keeps two (its system prompt, evicted last, and its
+                           # whole prompt), so a few agents taking turns each keep both; the byte budget is the real
+                           # limit (D1A_CHAT_CACHE_MB). E4B-it: ~8 KB a token (its 4 full-attention layers) + ~0.1 GB a
+                           # prompt (20 sliding-window layers), so 1 GiB holds three or four 20k-token prompts
 
 
 class ChatRequest(BaseModel):
@@ -106,7 +108,7 @@ class PromptCache:
     at the end of its system prompt, which a new session with the same system prompt continues. The system prompts are
     evicted last."""
 
-    def __init__(self, prompts=CACHE_PROMPTS, nbytes=CACHE_BYTES):
+    def __init__(self, nbytes, prompts=CACHE_PROMPTS):
         from mlx_lm.models.cache import LRUPromptCache
         self.lru = LRUPromptCache(max_size=prompts, max_bytes=nbytes)
 

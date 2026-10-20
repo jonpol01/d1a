@@ -289,7 +289,7 @@ def test_a_chat_continuing_a_kept_prompt_prefills_only_its_new_tokens(checkpoint
                     {"role": "user", "content": "Now email the customer and close the ticket.\n"}]
     other = [{"role": "user", "content": "Order 4411 arrived late and the box was crushed; the customer wants a replacement.\n"}]
     ask = lambda messages, cache=None: generate_chat(model, tok, ChatRequest(messages=messages, max_tokens=6, temperature=0.0), run, cache=cache)
-    cache = PromptCache()
+    cache = PromptCache(1 << 30)
     n_first, n_step = (len(tok("".join(m["content"] for m in ms))["input_ids"]) for ms in (first, step))   # with <bos>, as the chat encodes
     assert ask(first, cache)["usage"]["prompt_tokens_details"]["cached_tokens"] == 0
     warm = ask(step, cache)
@@ -304,7 +304,7 @@ def test_a_chat_continuing_a_kept_prompt_prefills_only_its_new_tokens(checkpoint
     # the kept cache of the step's prompt, built warm, gives the next-token logits a cold prefill gives
     from mlx_lm.tokenizer_utils import TokenizerWrapper
     prompt = "".join(m["content"] for m in step)
-    ids, cold = tok(prompt)["input_ids"], PromptCache()
+    ids, cold = tok(prompt)["input_ids"], PromptCache(1 << 30)
     with model.adapter(False):
         list(openai_compat.pieces(model.lm, TokenizerWrapper(tok), prompt, 1, lambda x: mx.argmax(x, axis=-1), cache=cold))
         (a, rest), (b, _) = cache.fetch(ids), cold.fetch(ids)
