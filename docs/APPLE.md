@@ -1,6 +1,6 @@
 # Apple Silicon
 
-D1A on Apple hardware: MLX on the GPU (what the Mac mini serves) and a Core ML preview on the Neural Engine.
+D1A on Apple hardware: MLX on the GPU and a Core ML preview on the Neural Engine.
 
 ## Apple Silicon (MLX)
 

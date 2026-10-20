@@ -16,6 +16,251 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-20
+
+D1A also chats. An instruction-tuned D1A build served with its adapter unmerged answers OpenAI chat and embedding
+requests from the same model that makes decisions, and keeps the prompts it has seen, so an agent's next step costs
+seconds instead of a full read of its prompt. Decisions can depend on earlier answers, agents get a guide and a tool gate,
+and every decision stays as it was in 0.5.0.
+
+### What's new
+
+- **One model for decisions and chat.** `d1a.serving.serve` answers `POST /v1/chat/completions` (tools, JSON mode,
+  streaming) and `POST /v1/embeddings` on an unmerged `-it` MLX export, so OpenAI clients (mem0, n8n, chat UIs) and
+  D1A's decisions share one model. A decision that arrives during a chat waits for one token or one prompt chunk, not
+  the whole chat. See docs/USAGE.md, "Chat with D1A".
+- **A prompt cache for agents.** A chat that continues an earlier prompt prefills only its new tokens: on D1A-E4B-it,
+  an agent step on a 20k-token prompt takes 1–1.7 s instead of 33 s (M1 Max), and 2–3 s instead of 39 s (M4).
+- **Conditional questions.** `ask_if` asks a question only when earlier answers meet a condition, in one request.
+- **D1A for agents.** docs/AGENTS_GUIDE.md and `python -m d1a.agents.demo` show intake, tool gating, judging and
+  routing; `d1a.agents.claude_code_gate` is a Claude Code hook that asks D1A before a tool call runs and falls back to
+  asking you on any failure.
+- **Instruction-tuned models.** D1A-E4B-it and D1A-E2B-it v0.6 load and serve correctly (they now get the `<bos>` they
+  were trained with), and v0.6.1 adds a routing temperature to the default checkpoints.
+- **More control over self-learning, all off by default.**
+  - Decode rules: a learned rule moves a choice only where its condition holds, and the quality gate checks it fired
+    everywhere it should.
+  - Flags can run in shadow mode, with thresholds that track the live scores.
+  - Recalibration can now work per option, hold out the newest outcomes, and keep the model's own answer for held
+    options such as severity P0/P1.
+- **Logs you can read.** The server prints a line per chat with its cached tokens, and docs/CONFIGURATION.md has a Logs
+  section: what is written, and that none of it holds request or answer text.
+
+### Added
+
+- The model server prints a line per chat: prompt tokens, how many came from the prompt cache, completion tokens and
+  time (#306). It holds counts only, never text. `D1A_CHAT_LOG=0` turns it off. docs/CONFIGURATION.md gains a Logs
+  section: what the server writes, what it never holds, and where the Mac mini keeps it.
+- The OpenAI chat endpoint keeps a prompt cache (#304). A chat that continues an earlier one prefills only its new
+  tokens: an agent's next step, a conversation's next turn, or a new session with the same system prompt. This covers
+  up to 16 prompts in 1 GiB (`D1A_CHAT_CACHE_MB`; `0` turns it off). With D1A-E4B-it on an M1 Max, an agent step
+  on a 20k-token prompt takes 1–1.7 s instead of 33 s. `usage.prompt_tokens_details.cached_tokens` reports the tokens taken from the cache.
+- `python -m d1a.agents.demo`: one task through an agent's day (intake, gate, judge, route). Each step is a D1A call
+  with its top answers and the fail-safe advice.
+- `docs/AGENTS_GUIDE.md`: what D1A decides for agents, the three ways to plug it in (MCP, the Claude Code gate hook,
+  Python), real demo output, and the measured numbers with their limits. The README gains a "For Agents" section.
+- `d1a.agents.claude_code_gate`, a Claude Code `PreToolUse` hook: D1A's gate preset decides allow, ask or deny before an
+  agent's tool call runs. It fails safe: "allow" is passed on only with `D1A_GATE_ALLOW=1`, and an unreachable D1A asks
+  a person. New settings: `D1A_GATE_CARD`, `D1A_GATE_ALLOW`.
+- Tests prove agents can use D1A: a real MCP client lists and calls the MCP server's tools over stdio on a tiny trained
+  checkpoint, and CI installs the `mcp` extra so the MCP server is tested at all.
+- Conditional questions (#36): a question may carry `ask_if` ({question id: condition}) and is answered only when the
+  answers it names meet their conditions (a choice's option keys, a noul's true/false, a score's range), in later passes
+  of the same request. Otherwise it is reported as skipped. It is never model input: a request without `ask_if` is
+  answered exactly as before. The server, `D1A.decide` and the MCP/clients' pass-through take it; permute and separate
+  refuse it.
+- Learned flags can run in shadow mode (`flags.<name>.mode = "shadow"`): the flag is logged but not served, so the response
+  is unchanged (#297). A tracked threshold (`flags.<name>.track`) is refit by the loop's tick from logged scores without
+  labels, clamped, with a `flag_alert` notification when the recent flag rate runs above `alert_rate` or `t` sits at a clamp.
+- Self-learning settings, all off by default (#294): `promotion.form = "vector"` (per-option recalibration of choice
+  questions), `promotion.split = "time"` (the gate holds out the newest outcomes), and `promotion.serve_choice` with
+  `promotion.hold` (serve the recalibrated top option, but keep the model's own answer for held options such as severity
+  P0/P1). Flags and rules may name a local-path run.
+- `scripts/quality_gate.py --sequential` (#286): the base server answers every request, stops, then the head server does, so
+  only one model is in memory at a time. The Mac mini (32 GB, with its other services) cannot hold two, which stopped the
+  #285 baseline gate there. The latency floor is measured the same way, so the latency check still compares like with like.
+- OpenAI-compatible chat and embeddings on `d1a.serving.serve` (#274), so apps written for the OpenAI API (mem0, n8n,
+  chat UIs) can use D1A's model instead of a separate chat server.
+  - `POST /v1/chat/completions` answers with the served model's adapter switched off: an export made with `--unmerged` on an
+    instruction-tuned base (D1A-E2B-it), whose base is then a chat model. It runs on the model thread between decision
+    requests and supports streaming (token by token), tools (Gemma 4 tool calls as OpenAI `tool_calls`), `stop` and JSON mode.
+  - `POST /v1/embeddings` serves a GGUF embedder through llama.cpp (`D1A_EMBED_GGUF`, the new `embed` extra).
+  - `/v1/models` also lists the models in OpenAI form beside the TypeSafe listing.
+  - New settings: `D1A_CHAT_NAME`, `D1A_EMBED_GGUF`, `D1A_EMBED_NAME`. Guide: "Chat with D1A" in docs/USAGE.md.
+  - An `--unmerged` export also carries the base's `generation_config.json`, so chat stops at its end-of-turn tokens.
+- One model that decides and chats on Apple Silicon (#274): `scripts/export_mlx.py --unmerged` keeps the LoRA out of the
+  weights (`adapter/`, attached at load by `d1a.backends.mlx.attach_lora`), and `MLXDecisionModel.adapter(False)` switches
+  it off per request, giving back the base model exactly. On an instruction-tuned base (D1A-E2B-it) that base is a chat
+  model. `D1A_MERGE=0` now attaches a training run's adapter the same way on MLX. The export also carries the base's
+  `chat_template.jinja` when the run has none. D1A-E2B-it, unmerged 8-bit: 0/42 flips against fp32 on the 28-request
+  bench (max |dp| 0.062, 288 ms per request; the merged build: 0/42, 0.015, 160 ms).
+- `scripts/export_mlx.py --q4-0` writes 4-bit weights in groups of 32 on llama.cpp's Q4_0 grid (scale = d, bias = −8·d;
+  `d1a.backends.q4_0`, numpy only, and `d1a.backends.mlx.q4_0_mlx`) instead of mlx-lm's min/max scales, for a base trained for Q4_0 such as
+  Gemma 4 12B-it QAT (#270). On that checkpoint Q4_0's weight error is about 20% below mlx-lm's 4-bit group 32 and 30%
+  below group 64. The export's `d1a_config.json` records `"grid": "q4_0"`.
+- Gemma 4's unified model (the 12B, `google/gemma-4-12B-it-qat-q4_0-unquantized`) as a base on both backends (#270).
+  PyTorch runs it through transformers as it already ran the E-series. MLX loads it through mlx-lm's Gemma 4 classes
+  (`d1a.backends.mlx.unified_classes`): the unified checkpoint's vision embedder is dropped on load, and the unified
+  model's zero per-layer-embedding and KV-sharing sizes are stated rather than taken from mlx-lm's E-series defaults.
+  No D1A-12B is trained yet.
+- Pull-request checks adapted from NousResearch/hermes-agent (MIT): `blob size` (no new file, and no changed binary, over 500 KiB;
+  `scripts/check_blob_size.py`, exemptions in `.github/blob-size-allowlist.txt`), `shared history` (the branch shares
+  history with main) and `uv.lock in sync` (`uv lock --check`, uv pinned), plus a weekly OSV-Scanner run on `uv.lock`
+  (Security tab, detection only) (#269).
+- Served decode rules (`rules.<name>` in the `D1A_LEARNING` settings, `d1a.learning.rules`): for a request that sends the
+  rule's `use_case` to the run it was fitted for, the served choice of one question becomes the rule's option when the
+  model's choice is one of `from` and its probability of that option reaches `t`, and the answer names the rule
+  (`rule`: name, from, p, t). Only the choice moves: the
+  probabilities, the confidence and the decision log's answers stay the model's, and the log records what was served
+  (`meta.served`, `meta.rules`). Written for the live PR labeler: severity's P3/P4 answers are served as P2 when
+  p(P2) >= 0.20, which brought D1A-E4B v0.6 closer to hermes-agent's written label definitions on held-out pull requests
+  (#252). A client that does not send the use case gets exactly the answers it got before.
+- `scripts/quality_gate.py --head-learning <file> --labeler-use-case <name> --expect-flips <question>`: gates a decode
+  rule; the head server reads the settings file, the labeler replay sends the use case, flips on that question are listed
+  with the probability that crossed the threshold, and every other change still fails.
+- Pull-request hygiene in CI, inside the existing required checks: `verified commits` refuses AI attribution in commit
+  messages or the pull request body; `package builds and installs` refuses a pull request without its
+  `changes/<PR>-<slug>.md` fragment (Dependabot and releases exempt) and any added line with a local machine path.
+  `d1a/core/hygiene.py` holds the patterns; `d1a.training.study publish` and `scripts/golden_vectors.py --upload` refuse
+  to send files with a local path to the Hugging Face Hub. The Apple Silicon job also runs `tests/test_mlx.py`'s
+  weight-free LoRA-merge test, which no CI job ran before.
+- `recipes/pr-labeler/README.md`, "The label standard": D1A uses hermes-agent's label set by its written definitions
+  (hermes-agent's own label descriptions), not by the habits of whoever labelled the training PRs (#252). The section
+  lists the definitions, what #252 measured (severity labels match the definitions on about 60% of checked rows), and
+  what the next training round changes (a P2/P3 tie-break, blast wording, relabelled severity rows). Until then, the
+  PR labeler is served one decode rule for severity (P3/P4 → P2 at p(P2) ≥ 0.20, #259); the section gives its numbers.
+- docs/CONFIGURATION.md, `rules.<name>`: `t` is compared with the serving machine's own probability, which differs slightly between
+  Apple chips, so a rule's flips are checked on the machine that serves it (#259).
+- `python -m d1a.learning.feedback void <log> --ids ... --src ... --reason ...` (and `FeedbackLog.void`): withdraws one
+  source's outcomes on some decisions, with a reason, by appending a `void` event; the log is never rewritten. Every
+  reader (resolved, pending, status, records, promote, the tick) drops the outcomes it covers, and an outcome that source
+  sends later counts again. Written for the live PR labeler, where 40 "human" outcomes were the PR author's own labels set
+  while opening the PR, not a person correcting D1A. Earlier d1a versions take every non-decision event for an outcome, so
+  update the server and the tick before voiding.
+- `outcomes.sources` (the `D1A_LEARNING` settings) can name the sources per question, e.g. `{"sev": ["human"], "*": ["reviewer",
+  "human"]}`: a source then teaches only the questions it is trusted on, and its other labels stay in the log for monitoring.
+  Every reader of the loop (replay, the gate, `records`, `promote`) applies it. Written for the live PR labeler, whose review
+  bot labels change type like hermes-agent's maintainers but uses another severity scale (jonpol01/d1a#252).
+- MLX conformance (#64): `tests/test_conformance_mlx.py` runs the committed golden vectors (tests/golden/tiny-gemma4)
+  through the MLX backend, as a LoRA checkpoint and as an export folder (ids exact, probabilities within 1e-5) and as an
+  8-bit export (ids exact, no flip on a question the reference decides). CI runs it on Apple Silicon.
+
+### Changed
+
+- README, docs/APPLE.md and the PR-labeler recipe no longer say which model one particular deployment serves: that
+  goes stale with every switch. The README's status is dated 2026-10-20.
+- README: the build table lists D1A-E4B-it and D1A-E2B-it (PyTorch adapter, merged MLX 8-bit and 4-bit, Core ML), says that
+  an unmerged `-it` build also chats.
+  docs/MODELS.md lists the E4B-it Core ML 4-bit preview (3 of 42 test answers move; no int8 build).
+- A decision that arrives while a chat is still reading a long prompt is answered between two prefill chunks (2,048
+  tokens, mlx-lm's default), not after the whole prefill (#295): on D1A-E4B-it with a ~6,000-token prompt, 3.6-4.2 s instead
+  of 8.8-9.4 s. The chat's text and the decision's probabilities are unchanged.
+- `docs/MODELS.md` lists D1A-E4B-it v0.6 (`JohnP1/d1a-e4b-it`, `-mlx-q8`, `-mlx-q4`): decisions and chat in one model
+  (#292). The "Where it runs" row is gone.
+- A decision that arrives while an OpenAI chat generates is answered between two of the chat's tokens, not after the
+  whole answer (#289): measured on D1A-E4B-it, 0.24 s instead of 4–5 s during a 200-token chat. The chat's text and the
+  decision's probabilities are unchanged. `MLXDecisionModel.adapter()` now nests (it restores the switch it found).
+- Docstrings of `d1a.serving.openai_compat` and `d1a.serving.serve` brought up to date (#288): streaming is token by token
+  (one chunk only with `tools`), a tool call cut off by `max_tokens` is dropped (#278), and `/v1/models` lists the chat
+  model whenever the checkpoint can chat (#280). No behaviour change.
+- `docs/MODELS.md` opens with a capabilities table of every D1A model line (#273): what D1A-E4B v0.6.1, D1A-E2B v0.6.1,
+  D1A-E2B-it v0.6 and the planned D1A-12B can do (decisions, PR labeling, media, routing temperature, self-learning,
+  chat, embeddings) and their builds.
+- D1A-E4B and D1A-E2B v0.6.1 are the default checkpoints (`d1a.core.versions`) (#264). They have v0.6's weights plus a
+  routing temperature: requests sent with `"use_case": "routing"` are served at T 1.18 (E4B) and 0.95 (E2B) instead
+  of 1.95 and 1.45. Factory routing calibration error falls 0.093 → 0.026 (E4B) and 0.091 → 0.035 (E2B), and no
+  answer changes. CONTRIBUTING.md's release steps now include fitting the per-use-case temperatures.
+- README: D1A has an avatar (`docs/d1a-avatar.png`), the title, tagline and badges are centred, and the badges now
+  link the base model, the PyTorch, MLX and Core ML collections on Hugging Face and the mlx-community mirror (#263).
+- `scripts/quality_gate.py --expect-flips` with `--head-learning` also fails a request a decode rule applies to that did not flip
+  (its use case, the run, the base's choice in `from`, p(option) >= t), so the gate shows the rule fired everywhere it should,
+  not only that every flip was eligible (#259).
+- docs/SELF_LEARNING.md and the PR-labeler recipe: severity's decode rule (#259) is available, not active. On John's repositories a blind
+  check found it right on 3 of the 6 states it fires on, against 2 for v0.6's own answer, so it stays unset there (#252).
+- README.md is now a short front page: what D1A is, what it is proven at, a quick start, which build to pick, the API
+  shape, how it works, a plain account of what is learned from outcomes, and a dated status. The rest moved, unchanged
+  except for a few stale or over-claiming lines, to `docs/USAGE.md`, `docs/MODELS.md`, `docs/APPLE.md`,
+  `docs/TRAINING.md`, `docs/ARCHITECTURE.md`, `docs/SELF_LEARNING.md` and `docs/DEMOS.md`; the PR labeler's history is in
+  `recipes/pr-labeler/README.md`, and the v0.2-era status table is `docs/reports/2026-10-decision-v7-status.md`.
+- The model server reads the `D1A_LEARNING` settings file for its `flags` and `rules`; the quality gate strips that
+  variable from both servers, like the other learning settings. `feedback status` reports the served choice beside the top
+  one when a rule moved it.
+- Prefix-cache hits use less memory (#256). A hit builds only the mask rows of the tokens it runs, not the
+  full L × L mask (about 9× smaller at 8k tokens). A cached prefix no longer keeps the state's hidden states, which no
+  readout reads: 6 KiB less per cached state token on E2B, 384 MiB at the 64k-token cache cap (E4B: 640 MiB). The
+  answers are identical (`scripts/equivalence/hit_real.py`, new: the hit path on real weights against main's, on one
+  shared prefix, with main's own hit twice as the run-to-run floor). Latency is unchanged on real weights; a first
+  request (a miss) still builds the full mask.
+- `tests/test_decide.py` bootstraps each distinct scorecard input once per test session (#255), through a memo keyed on
+  every input `decide.paired` reads: the file runs in 205 s instead of 525 s. Test-only; `scripts/decide.py` is unchanged.
+- `d1a.core.encoding` and `d1a.training.data` import `transformers` and `datasets` only where they are used (#254), so
+  modules that import them without loading a tokenizer or a public dataset start in a fraction of a second: `import
+  d1a.eval.suite` 4.25 s → 0.07 s. The server still imports `transformers` at startup, as before.
+- Temperature fits are about 38x faster on thousands of rows (#253): `d1a.eval.metrics.nll_on_grid` computes the grid
+  losses per block of rows instead of once per row and temperature, and `fit_temperature` (so `d1a.training.calibrate`)
+  and `temperature_gate.interval` use it. The fitted temperatures and intervals are identical, bit for bit.
+- `recipes/swe-verifier/reproduce.sh` says how to get access when it cannot download the adapter or the scored rows
+  (both private at the time of writing), instead of stopping on the bare Hugging Face error; exit 2. The recipe's
+  README describes reproducing the paper's tables.
+
+### Removed
+
+- What D1A no longer needed (#65, #250): three unused `os` imports, the remnants of the 0.3 import shims removed in 0.5
+  (`kev_share.py`'s `SHIMS`, the `_layout.py` docstring, a test fixture), six unused test imports, and
+  `experiments/sft-v1-lengths.json` (Kev's SFT token counts, read by nothing). The survey found no Kev-only research code
+  left; `docs/UPSTREAM.md` now explains how `kev_share` counts and why from-scratch rewrites that match Kev by design stay
+  counted. Kev share: model code 26%, total 32% (both unchanged at the percent).
+
+### Fixed
+
+- `POST /v1/embeddings` honours `encoding_format: "base64"` (#282): each embedding comes as base64 of little-endian
+  float32, as the OpenAI API defines it. The openai Node SDK (n8n's embeddings node) always asks for it, and decoded the
+  float lists it got before into garbage (192 numbers instead of 768).
+- `GET /v1/models` lists `d1a-chat` while an idle server has unloaded the model (#280): it is listed whenever the served
+  checkpoint can chat, so a client that picks its model from the list (n8n) still finds it; the first chat loads the model.
+- OpenAI chat with `tools`: an answer that ran out of `max_tokens` inside a tool call returned the half-written Gemma 4
+  markup as `content` (#278). It now returns the text before it and no tool call, with `finish_reason` `"length"`.
+- `/v1/embeddings` runs its GGUF embedder on the GPU (#277). On the CPU, llama-cpp-python's default, its vectors were only
+  ~0.99 cosine to the ones LM Studio stored from the same file; now they are the same (1.00000 on the Mac mini).
+- `uv.lock` matches `pyproject.toml` again: it still named d1a 0.3.0, and newer uv narrows the CUDA wheels to Linux (#269).
+- A `noul` question whose criteria use keys other than `true` and `false` (for example `yes` and `no`) is refused with
+  a 422 that names the accepted keys (#265). Before, the request validated and the question was answered without its
+  criteria: on one describe-flow probe that moved p(vague) from 0.98 to 0.43.
+- `d1a.training.calibrate --transfer` reports rows saved at a served temperature from their raw logits (#264). It used to
+  apply the fitted temperature on top of the served one, so factory routing read ECE 0.091 → 0.120 for a temperature
+  that brings it to 0.023.
+- Gemma 4 instruction-tuned trunks (`google/gemma-4-E2B-it`) are encoded with the `<bos>` their model was trained with. The
+  -it tokenizer adds no special tokens (its base twin adds `<bos>`), so `d1a.core.encoding.layout()` derived no leading ids
+  and every -it record would have started without `<bos>`. The layout now falls back to the tokenizer's `bos_token_id`
+  when it adds nothing up front; Qwen (no bos token) and Gemma base are unchanged (#227).
+- The MLX backend and `export_mlx` load a checkpoint whose base is a local directory: they took it for a Hub id
+  (`<dir>@<revision>`) and failed. Hub bases load as before.
+
+### Models tested with this release
+
+| Checkpoint | Hugging Face tag |
+|---|---|
+| D1A-E4B v0.6.1, MLX 8-bit | `JohnP1/d1a-e4b-mlx-q8@v0.6.1` |
+| D1A-E4B-it v0.6 (decisions and chat), MLX 8-bit with its adapter unmerged | built from `JohnP1/d1a-e4b-it@v0.6` with `scripts/export_mlx.py --unmerged` |
+
+The quality gate on real weights finds no changed answer between 0.5.0 and 0.6.0 on D1A-E4B v0.6.1 (237 requests: every demo example and the PR-labeler replay; 0 flips, max |dp| 0), and
+each pull request's own gate found none on D1A-E4B-it v0.6. Package 0.6.0 serves every model tag from v0.1 to v0.6.1.
+
+### Upgrade notes (from 0.5.0)
+
+- A `noul` question whose `criteria` use keys other than `true` and `false` is now refused with a 422 that names the
+  accepted keys (#265). Before, it was answered without its criteria; rename the keys.
+- The default checkpoints (`d1a.core.versions`) are v0.6.1: v0.6's weights, plus a routing temperature for requests
+  sent with `"use_case": "routing"`. Pin `@v0.6` to keep the old routing probabilities.
+- Serve Gemma 4 `-it` checkpoints with 0.6.0 or later: 0.5.0 encodes them without `<bos>`.
+- New settings, all optional: `D1A_CHAT_NAME`, `D1A_CHAT_CACHE_MB`, `D1A_CHAT_LOG`, `D1A_EMBED_GGUF`,
+  `D1A_EMBED_NAME` (the server), and `D1A_GATE_CARD`, `D1A_GATE_ALLOW`, `D1A_GATE_TIMEOUT` (the agent gate hook).
+  With them unset, a decision-only server behaves as in 0.5.0.
+- New request field `ask_if` and new endpoints `/v1/chat/completions` and `/v1/embeddings`; existing requests and
+  answers are unchanged.
+- The README is a short front page now; the material it held moved, unchanged, to `docs/USAGE.md`, `docs/MODELS.md`,
+  `docs/APPLE.md`, `docs/TRAINING.md`, `docs/ARCHITECTURE.md`, `docs/SELF_LEARNING.md` and `docs/DEMOS.md`.
+
 ## [0.5.0] - 2026-10-11
 
 D1A learns from its outcomes on its own: a settings file for the self-learning loop, replay of every earlier outcome
@@ -796,7 +1041,8 @@ Checkpoints on Hugging Face, newest first. Each version continues training the p
 Retired, kept for reproducibility: JohnP1/d1a-e4b-routing and its MLX build (now part of v0.2), and
 JohnP1/d1a-e4b-pr-labeler-mlx-q8 (now v0.3).
 
-[Unreleased]: https://github.com/jonpol01/d1a/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/jonpol01/d1a/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/jonpol01/d1a/releases/tag/v0.6.0
 [0.5.0]: https://github.com/jonpol01/d1a/releases/tag/v0.5.0
 [0.4.0]: https://github.com/jonpol01/d1a/releases/tag/v0.4.0
 [0.3.0]: https://github.com/jonpol01/d1a/releases/tag/v0.3.0

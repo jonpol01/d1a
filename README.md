@@ -66,7 +66,7 @@ curl -s localhost:8009/v1/systemone -H 'content-type: application/json' -d '{
 |---|---|---|---|---|
 | D1A-E4B | [d1a-e4b](https://huggingface.co/JohnP1/d1a-e4b) | [d1a-e4b-mlx-q8](https://huggingface.co/JohnP1/d1a-e4b-mlx-q8), ~6 GB | [d1a-e4b-coreml](https://huggingface.co/JohnP1/d1a-e4b-coreml), 6.1 GB | PR labels, the most accurate build |
 | D1A-E2B | [d1a-e2b](https://huggingface.co/JohnP1/d1a-e2b) | [d1a-e2b-mlx-q8](https://huggingface.co/JohnP1/d1a-e2b-mlx-q8), 3.5 GB | [d1a-e2b-coreml](https://huggingface.co/JohnP1/d1a-e2b-coreml), 3.5 GB | on-device |
-| D1A-E4B-it | [d1a-e4b-it](https://huggingface.co/JohnP1/d1a-e4b-it) (adapter) | [d1a-e4b-it-mlx-q8](https://huggingface.co/JohnP1/d1a-e4b-it-mlx-q8), 7.0 GB with media; [-mlx-q4](https://huggingface.co/JohnP1/d1a-e4b-it-mlx-q4), 4.9 GB | [d1a-e4b-it-coreml-4bit](https://huggingface.co/JohnP1/d1a-e4b-it-coreml-4bit), 4.6 GB | decisions and chat in one model (what the Mac mini serves) |
+| D1A-E4B-it | [d1a-e4b-it](https://huggingface.co/JohnP1/d1a-e4b-it) (adapter) | [d1a-e4b-it-mlx-q8](https://huggingface.co/JohnP1/d1a-e4b-it-mlx-q8), 7.0 GB with media; [-mlx-q4](https://huggingface.co/JohnP1/d1a-e4b-it-mlx-q4), 4.9 GB | [d1a-e4b-it-coreml-4bit](https://huggingface.co/JohnP1/d1a-e4b-it-coreml-4bit), 4.6 GB | decisions and chat in one model |
 | D1A-E2B-it | [d1a-e2b-it](https://huggingface.co/JohnP1/d1a-e2b-it) (adapter) | [d1a-e2b-it-mlx-q8](https://huggingface.co/JohnP1/d1a-e2b-it-mlx-q8), 4.8 GB with media; [-mlx-q4](https://huggingface.co/JohnP1/d1a-e2b-it-mlx-q4), 3.6 GB | [d1a-e2b-it-coreml](https://huggingface.co/JohnP1/d1a-e2b-it-coreml), 3.8 GB; [-4bit](https://huggingface.co/JohnP1/d1a-e2b-it-coreml-4bit), 2.9 GB | decisions and chat on a phone |
 
 E4B for PR labels (E2B never predicted P0/P1 on newer PRs); E2B for on-device. The `-it` models are trained the same way on the instruction-tuned Gemma 4 trunks, so one model also chats: with its D1A adapter off it is Gemma 4 E4B-it / E2B-it. Chat needs an unmerged build (`scripts/export_mlx.py --unmerged`, [Chat with D1A](docs/USAGE.md#chat-with-d1a)); the published `-mlx-q8` / `-mlx-q4` repos have the adapter merged and answer decisions only. D1A-E4B-it is about 2.9× slower per decision than D1A-E2B-it and more accurate on 21 of 22 suites. All builds are at `v0.6`. Core ML is a preview for iPhone/iPad: text only, inputs up to 512 tokens, and MLX is faster on Macs ([docs/APPLE.md](docs/APPLE.md)); the 4-bit E4B-it build moves 3 of 42 test answers, so use MLX 8-bit where answers must not move. Sizes, exceptions and older versions: [docs/MODELS.md](docs/MODELS.md).
@@ -137,9 +137,9 @@ One L4 is enough. Fine-tuning, calibration and scoring: [docs/TRAINING.md](docs/
 
 ## Status
 
-As of 2026-10-18:
+As of 2026-10-20:
 
-- The PR labeler is in daily use on a Mac mini. Since 2026-10-17 the Mini serves D1A-E4B-it v0.6 as one model: decisions (the labeler) and OpenAI-format chat and embeddings for local apps. The labeler numbers under *Proven at* were measured with D1A-E4B v0.6.
+- The PR labeler is in daily use. D1A-E4B-it v0.6 serves decisions (the labeler) and OpenAI-format chat and embeddings for local apps as one model, with a prompt cache for agents. The labeler numbers under *Proven at* were measured with D1A-E4B v0.6.
 - The SWE verifier is no better than cheap trajectory heuristics within an issue (a null result); recalibration on outcomes works ([docs/SELF_LEARNING.md](docs/SELF_LEARNING.md)).
 - The photo, voice and video demos are zero-shot: the checkpoints are trained on text only ([docs/DEMOS.md](docs/DEMOS.md)).
 - Core ML is a preview: text only, inputs up to 512 tokens, slower than MLX on Macs ([docs/APPLE.md](docs/APPLE.md)).
