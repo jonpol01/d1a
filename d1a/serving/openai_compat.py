@@ -3,17 +3,21 @@ use the same model D1A decides with. The model must have an UNMERGED adapter on 
 (scripts/export_mlx.py --unmerged on D1A-E2B-it): chat runs with the adapter switched off, which is the base model
 exactly (MLXDecisionModel.adapter), and decisions keep it on. Generation runs on the server's model thread, like every
 forward pass, so a chat and a decision never overlap; decisions that arrive during a chat run between two of its tokens
-(#289) or between two chunks of its prompt's prefill (#290). Embeddings come from a separate small GGUF embedder run by
+(#289) or between two chunks of its prompt's prefill (#290). A chat whose prompt starts with an earlier one's (an agent's
+next step, a conversation's next turn) prefills only what is new: its prompt cache (PromptCache) keeps the KV cache of the
+latest prompts. Embeddings come from a separate small GGUF embedder run by
 llama.cpp (D1A_EMBED_GGUF), the engine and file LM Studio served them with, so vectors stored earlier stay comparable.
 
     POST /v1/chat/completions   messages, max_tokens / max_completion_tokens, temperature, top_p, stop, tools,
                                 tool_choice, response_format (no constrained decoding: the model is asked in the prompt),
                                 stream (token by token; with tools, one chunk once the tool calls are parsed, then [DONE]);
-                                a tool call cut off by max_tokens is dropped (finish_reason "length", #278)
+                                a tool call cut off by max_tokens is dropped (finish_reason "length", #278);
+                                usage.prompt_tokens_details.cached_tokens: the prompt tokens taken from the prompt cache
     POST /v1/embeddings         input (a string or a list of strings), model, encoding_format ("float" or "base64");
                                 `dimensions` is accepted and ignored
 """
 import base64
+import copy
 import json
 import logging
 import struct
@@ -29,6 +33,10 @@ log = logging.getLogger("d1a.chat")
 DEFAULT_MAX_TOKENS = 1024
 PREFILL_STEP = 2048   # tokens per prefill chunk: mlx-lm's default, so a chat's cache matches generate_step's own
 MAX_TOKENS = 8192
+CACHE_PROMPTS = 16         # prompts whose KV cache is kept. A chat keeps two (its system prompt, evicted last, and its
+                           # whole prompt), so a few agents taking turns each keep both; the byte budget is the real
+                           # limit (D1A_CHAT_CACHE_MB). E4B-it: ~8 KB a token (its 4 full-attention layers) + ~0.1 GB a
+                           # prompt (20 sliding-window layers), so 1 GiB holds three or four 20k-token prompts
 
 
 class ChatRequest(BaseModel):
@@ -92,21 +100,69 @@ def tool_calls_of(text):
                    "function": {"name": c["name"], "arguments": json.dumps(c["arguments"], ensure_ascii=False)}} for c in calls]
 
 
-def pieces(lm, tokenizer, prompt, limit, sampler, between=None):
+class PromptCache:
+    """The KV caches of the latest chat prompts, adapter off (mlx-lm's LRUPromptCache, the one mlx_lm.server keeps). A
+    prompt that starts with a kept one reuses its cache and prefills only the rest. Gemma 4's sliding-window layers
+    cannot be cut back once a prompt passes their window, so a kept prompt is only reused whole, never trimmed: each
+    cache is kept at its prompt's end, before any answer token, which is where the next turn's prompt continues it, and
+    at the end of its system prompt, which a new session with the same system prompt continues. The system prompts are
+    evicted last."""
+
+    def __init__(self, nbytes, prompts=CACHE_PROMPTS):
+        from mlx_lm.models.cache import LRUPromptCache
+        self.lru = LRUPromptCache(max_size=prompts, max_bytes=nbytes)
+
+    def fetch(self, ids):
+        """-> (a copy of the cache of the longest usable kept prefix of ids, or None; the ids left to run, never empty)."""
+        cache, rest = self.lru.fetch_nearest_cache("chat", ids)
+        return (cache, rest) if rest else (None, ids)   # ids are a kept prompt exactly: its last token is not in it
+
+    def keep(self, ids, cache, kind="assistant"):
+        self.lru.insert_cache("chat", list(ids), copy.deepcopy(cache), cache_type=kind)
+
+
+def pieces(lm, tokenizer, prompt, limit, sampler, between=None, cache=None, stats=None, system=None):
     """mlx-lm's stream_generate loop (the same prompt encoding, end-of-turn check and streaming detokenizer) without its
     wired-memory context, which needs the Metal device and fails on the CPU one CI runs MLX on. between, if given, is
     called between the prompt's prefill chunks (PREFILL_STEP tokens each, mlx-lm's own chunking, so the chat's cache is
     the one an uninterrupted prefill builds): a decision waits for one chunk of a long prompt, not all of it (#290).
-    -> (new text, tokens so far, None | "stop" | "length") per step; the last step names the finish."""
+    cache, a PromptCache, supplies the prompt's longest kept prefix and keeps this prompt, and its system prompt (system:
+    the prompt's start that renders it); stats["cached"] is set to the prompt tokens it supplied. -> (new text, tokens so far, None | "stop" | "length") per step; the last step names the
+    finish."""
     import mlx.core as mx
-    from mlx_lm.generate import generate_step
+    from mlx_lm.generate import generate_step, generation_stream
+    from mlx_lm.models.cache import make_prompt_cache
     add_special = tokenizer.bos_token is None or not prompt.startswith(tokenizer.bos_token)
     ids = tokenizer.encode(prompt, add_special_tokens=add_special)
+    kv, rest = cache.fetch(ids) if cache is not None else (None, ids)
+    kv = kv if kv is not None else make_prompt_cache(lm)
+    if stats is not None:
+        stats["cached"] = len(ids) - len(rest)
+    between = between or (lambda: None)
+    # the prompt but its last token, as generate_step prefills it (its chunks, and one more cut at the system prompt's
+    # end): the cache is kept there and here, before the last token's step starts the answer
+    start, end = len(ids) - len(rest), len(ids) - 1
+    cuts = set(range(start, end, PREFILL_STEP))
+    mark = None
+    if cache is not None and system:
+        head = tokenizer.encode(system, add_special_tokens=add_special)
+        mark = len(head) if start < len(head) < end and ids[:len(head)] == head else None
+        cuts |= {mark} - {None}
+    between()
+    with mx.stream(generation_stream):
+        for a, b in zip(sorted(cuts), sorted(cuts)[1:] + [end]):
+            lm(mx.array(ids[a:b])[None], cache=kv)
+            mx.eval([c.state for c in kv])
+            mx.clear_cache()
+            if b == mark:
+                cache.keep(ids[:b], kv, "system")
+            between()
+    if cache is not None and end > start:
+        cache.keep(ids[:-1], kv)
     detok = tokenizer.detokenizer
     detok.reset()
     n = 0
-    progress = (lambda done, total: between()) if between is not None else (lambda done, total: None)
-    steps = generate_step(mx.array(ids), lm, max_tokens=limit, sampler=sampler, prefill_step_size=PREFILL_STEP, prompt_progress_callback=progress)
+    steps = generate_step(mx.array(rest[-1:]), lm, max_tokens=limit, sampler=sampler, prompt_cache=kv)
     for n, (token, _) in enumerate(steps):
         if token in tokenizer.eos_token_ids:
             detok.finalize(); yield detok.last_segment, n, "stop"; return
@@ -118,24 +174,28 @@ def pieces(lm, tokenizer, prompt, limit, sampler, between=None):
     yield detok.last_segment, n + 1, "length"
 
 
-def generate_chat(model, tok, req, model_dir=None, model_name="d1a", on_text=None, between=None):
+def generate_chat(model, tok, req, model_dir=None, model_name="d1a", on_text=None, between=None, cache=None):
     """One chat completion with the adapter off. Run on the model thread (Server.run_task). on_text, if given, receives
     each new piece of the answer as it is generated (streaming), never text past a stop string. between, if given, is
     called after every token and between the prompt's prefill chunks, still inside the adapter switch
-    (Server.between_tokens: the decisions waiting meanwhile, #289, #290). -> the OpenAI response body."""
+    (Server.between_tokens: the decisions waiting meanwhile, #289, #290). cache, a PromptCache, holds adapter-off caches
+    only: never pass it one a decision wrote. -> the OpenAI response body."""
     from mlx_lm.sample_utils import make_sampler
     from mlx_lm.tokenizer_utils import TokenizerWrapper
     messages = [{**m, "content": text_of(m.get("content"))} for m in req.messages]
     if req.response_format and req.response_format.get("type") == "json_object":   # no constrained decoding: ask for it
         messages = [{"role": "system", "content": "Respond with a single valid JSON object only."}] + messages
     prompt = tok.apply_chat_template(messages, tools=req.tools or None, tokenize=False, add_generation_prompt=True)
+    n_system = next((i for i, m in enumerate(messages) if m.get("role") != "system"), len(messages))
+    system = tok.apply_chat_template(messages[:n_system], tools=req.tools or None, tokenize=False) if 0 < n_system < len(messages) else None
+    system = system if system and prompt.startswith(system) else None   # a template that renders it differently alone: no mark
     limit = req.max_completion_tokens or req.max_tokens or DEFAULT_MAX_TOKENS
     sampler = make_sampler(temp=req.temperature, top_p=req.top_p if req.top_p < 1.0 else 0.0)
     wrapper = TokenizerWrapper(tok, eos_token_ids=eos_ids(tok, model_dir))
     stops = [s for s in ([req.stop] if isinstance(req.stop, str) else req.stop or []) if s]
-    t, text, sent, finish, completion_tokens = time.time(), "", 0, "length", 0
+    t, text, sent, finish, completion_tokens, stats = time.time(), "", 0, "length", 0, {"cached": 0}
     with model.adapter(False):
-        for piece, completion_tokens, ended in pieces(model.lm, wrapper, prompt, limit, sampler, between):
+        for piece, completion_tokens, ended in pieces(model.lm, wrapper, prompt, limit, sampler, between, cache, stats, system):
             text += piece
             if ended: finish = ended
             cut = min((text.index(s) for s in stops if s in text), default=None)
@@ -148,14 +208,16 @@ def generate_chat(model, tok, req, model_dir=None, model_name="d1a", on_text=Non
             if between is not None:
                 between()
     prompt_tokens = len(tok(prompt, add_special_tokens=False)["input_ids"])
-    log.info("chat: %d prompt tokens, %d completion tokens, %.1f s%s", prompt_tokens, completion_tokens, time.time() - t, ", tools" if req.tools else "")
+    log.info("chat: %d prompt tokens (%d cached), %d completion tokens, %.1f s%s", prompt_tokens, stats["cached"], completion_tokens,
+             time.time() - t, ", tools" if req.tools else "")
     content, calls = tool_calls_of(text) if req.tools else (text, [])
     message = {"role": "assistant", "content": content.strip() or (None if calls else "")}
     if req.tools is not None:
         message["tool_calls"] = calls   # always a list when tools were sent: mem0's graph memory indexes it unconditionally
     return {"id": f"chatcmpl-{uuid.uuid4().hex}", "object": "chat.completion", "created": int(t), "model": req.model or model_name,
             "choices": [{"index": 0, "message": message, "finish_reason": "tool_calls" if calls else finish}],
-            "usage": {"prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens, "total_tokens": prompt_tokens + completion_tokens}}
+            "usage": {"prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens, "total_tokens": prompt_tokens + completion_tokens,
+                      "prompt_tokens_details": {"cached_tokens": stats["cached"]}}}
 
 
 def chunk(body_id, created, model, delta, finish=None):

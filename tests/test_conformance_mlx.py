@@ -264,3 +264,50 @@ def test_decisions_between_a_chats_prefill_chunks_leave_both_unchanged(checkpoin
     assert interrupted["choices"] == alone["choices"]
     assert calls.count(0) >= 3   # before the first token: the start of the prefill and between its chunks
     assert all(torch.equal(p, at_rest[i % len(at_rest)]) for i, p in enumerate(mid_chat))
+
+
+@needs_mlx
+def test_a_chat_continuing_a_kept_prompt_prefills_only_its_new_tokens(checkpoint, tmp_path, monkeypatch):
+    """The chat prompt cache: an agent's next step (its earlier prompt, the answer, a new message) takes the earlier
+    prompt's cache and prefills only the rest, and builds the cache, and the answer, a cold prefill gives. The fixture's
+    sliding window (4 tokens) is far shorter than these prompts, so the kept caches cannot be trimmed, as on E4B-it past
+    512 tokens. A new session with the same system prompt takes the system prompt's cache; a prompt that only shares
+    part of a kept one is prefilled cold."""
+    import mlx.core as mx
+    from d1a.backends.checkpoint import Checkpoint, LoadOptions, load
+    from d1a.backends.mlx import export_mlx
+    from d1a.serving import openai_compat
+    from d1a.serving.openai_compat import ChatRequest, PromptCache, generate_chat
+    run = tmp_path / "unmerged"
+    export_mlx(Checkpoint(checkpoint), run, unmerged=True)
+    (run / "chat_template.jinja").write_text("{% for m in messages %}{{ m['content'] }}{% endfor %}", encoding="utf-8")
+    tok, model = load(str(run), "mps", LoadOptions(backend="mlx"))
+    monkeypatch.setattr(openai_compat, "PREFILL_STEP", 8)   # several chunks, and the new tokens start mid-chunk
+    system = {"role": "system", "content": "You are the support desk's agent: check the order, then act on it.\n"}
+    first = [system, {"role": "user", "content": "Order 4411 arrived late and the box was crushed; the customer wants a refund.\n"}]
+    step = first + [{"role": "assistant", "content": "Refund issued for order 4411.\n"},
+                    {"role": "user", "content": "Now email the customer and close the ticket.\n"}]
+    other = [{"role": "user", "content": "Order 4411 arrived late and the box was crushed; the customer wants a replacement.\n"}]
+    ask = lambda messages, cache=None: generate_chat(model, tok, ChatRequest(messages=messages, max_tokens=6, temperature=0.0), run, cache=cache)
+    cache = PromptCache(1 << 30)
+    n_first, n_step = (len(tok("".join(m["content"] for m in ms))["input_ids"]) for ms in (first, step))   # with <bos>, as the chat encodes
+    assert ask(first, cache)["usage"]["prompt_tokens_details"]["cached_tokens"] == 0
+    warm = ask(step, cache)
+    assert warm["usage"]["prompt_tokens_details"]["cached_tokens"] == n_first - 1   # the kept prompt but its last token
+    assert warm["choices"] == ask(step)["choices"]
+    assert ask(step, cache)["usage"]["prompt_tokens_details"]["cached_tokens"] == n_step - 1   # the same prompt again
+    assert ask(other, cache)["usage"]["prompt_tokens_details"]["cached_tokens"] == 0
+    session = [system, {"role": "user", "content": "Order 5120 never arrived.\n"}]
+    fresh = ask(session, cache)
+    assert fresh["usage"]["prompt_tokens_details"]["cached_tokens"] == len(tok(system["content"])["input_ids"])
+    assert fresh["choices"] == ask(session)["choices"]
+    # the kept cache of the step's prompt, built warm, gives the next-token logits a cold prefill gives
+    from mlx_lm.tokenizer_utils import TokenizerWrapper
+    prompt = "".join(m["content"] for m in step)
+    ids, cold = tok(prompt)["input_ids"], PromptCache(1 << 30)
+    with model.adapter(False):
+        list(openai_compat.pieces(model.lm, TokenizerWrapper(tok), prompt, 1, lambda x: mx.argmax(x, axis=-1), cache=cold))
+        (a, rest), (b, _) = cache.fetch(ids), cold.fetch(ids)
+        assert rest == ids[-1:]
+        warm_logits, cold_logits = (model.lm(mx.array([rest]), cache=c) for c in (a, b))
+    assert mx.allclose(warm_logits, cold_logits, atol=1e-4)

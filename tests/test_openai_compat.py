@@ -99,11 +99,12 @@ def test_a_decision_taken_between_tokens_gets_the_error_when_the_adapter_switch_
         server.close()
 
 
-def held(model):
+def held(model, chat_prompts="the server's prompt cache"):
     """server_async stand-in: one Server-like object holding `model`, whose run_task runs fn at once."""
     def run_task(fn):
         f = Future(); f.set_result(fn(model, "tok")); return f
-    s = SimpleNamespace(model=model, checkpoint=SimpleNamespace(path="/nowhere"), run_task=run_task, between_tokens=lambda: None)
+    s = SimpleNamespace(model=model, checkpoint=SimpleNamespace(path="/nowhere"), run_task=run_task, between_tokens=lambda: None,
+                        chat_prompts=chat_prompts)
 
     @asynccontextmanager
     async def server_async():
@@ -119,7 +120,8 @@ def test_chat_on_a_merged_model_is_refused_with_501(monkeypatch):
 
 
 def test_a_stream_sends_each_piece_as_it_comes_then_the_finish_and_done(monkeypatch):
-    def fake_generate(model, tok, req, model_dir=None, model_name="d1a", on_text=None, between=None):
+    def fake_generate(model, tok, req, model_dir=None, model_name="d1a", on_text=None, between=None, cache=None):
+        assert cache == "the server's prompt cache"   # every chat of the server shares one, so a next step finds the last one's
         for piece in ("Hel", "lo"): on_text(piece)
         return {"choices": [{"finish_reason": "stop", "message": {"role": "assistant", "content": "Hello"}}]}
     monkeypatch.setattr(serve, "server_async", held(SimpleNamespace(loras=["one"])))
@@ -131,6 +133,20 @@ def test_a_stream_sends_each_piece_as_it_comes_then_the_finish_and_done(monkeypa
     assert r.headers["content-type"].startswith("text/event-stream") and events[-1] == "[DONE]"
     assert [c["choices"][0]["delta"] for c in chunks] == [{"role": "assistant", "content": ""}, {"content": "Hel"}, {"content": "lo"}, {}]
     assert chunks[-1]["choices"][0]["finish_reason"] == "stop" and all(c["object"] == "chat.completion.chunk" for c in chunks)
+
+
+def test_d1a_chat_cache_mb_0_turns_the_chat_prompt_cache_off(monkeypatch):
+    seen = []
+
+    def fake_generate(model, tok, req, model_dir=None, model_name="d1a", on_text=None, between=None, cache=None):
+        seen.append(cache)
+        return {"choices": [{"finish_reason": "stop", "message": {"role": "assistant", "content": "Hello"}}]}
+    monkeypatch.setattr(serve, "server_async", held(SimpleNamespace(loras=["one"]), chat_prompts=None))
+    monkeypatch.setattr(serve, "CHAT_CACHE_MB", 0)
+    monkeypatch.setattr(openai_compat, "generate_chat", fake_generate)
+    with TestClient(serve.app) as client:
+        r = client.post("/v1/chat/completions", json={"messages": [{"role": "user", "content": "hi"}]})
+    assert r.status_code == 200 and seen == [None]
 
 
 @needs_mlx

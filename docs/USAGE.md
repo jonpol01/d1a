@@ -167,6 +167,11 @@ r = client.chat.completions.create(model="d1a-chat", messages=[{"role": "user", 
   model (`--idle-unload`).
 - **Any model id is answered**, so an app configured for another model (an LM Studio id, say) needs only the URL.
 - **Streaming** sends the answer token by token; with `tools` it comes as one chunk, once the tool calls are parsed.
+- **Prompt cache:** a chat whose prompt continues an earlier one (an agent's next step, the next turn of a conversation, a
+  new session with the same system prompt) prefills only its new tokens; `usage.prompt_tokens_details.cached_tokens`
+  says how many it took from the cache. Up to 16 prompts are kept in 1 GiB (`D1A_CHAT_CACHE_MB`, `0` turns it off),
+  and they go with the model at an idle unload. Measured with D1A-E4B-it on an M1 Max: an agent step on a 20k-token prompt takes 1–1.7 s instead of 33 s, and a
+  new session with the same 20k-token system prompt 2.2 s.
 - **JSON mode** asks the model for JSON in the prompt; there is no constrained decoding.
 - **A tool call cut off by `max_tokens`** is dropped: the answer keeps the text before it, with no tool call and
   `finish_reason` `"length"`, so retry with a larger `max_tokens`.
