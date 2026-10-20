@@ -68,12 +68,32 @@ and `--extra mcp` for the MCP server.
 | `D1A_FEEDBACK_LOG` | unset | See Self-learning. | |
 | `D1A_OUTCOME_CALIBRATOR` | unset | See Self-learning. | |
 | `D1A_CHAT_CACHE_MB` | `1024` | Memory for the chat prompt cache: the KV cache of up to 16 recent chat prompts, so a chat that continues one (an agent's next step, a new session with the same system prompt) prefills only its new tokens. With D1A-E4B-it, 1024 holds three or four 20k-token prompts. `0` turns it off. | Raise it when many agents or long prompts share a big machine; lower it on a small one. `0` for an exact-memory budget, or when clients must not share a server's cache: `cached_tokens` tells a client that the server has seen its prompt's start before. |
+| `D1A_CHAT_LOG` | `1` | Prints a line per chat: prompt tokens, how many came from the prompt cache, completion tokens and time ([Logs](#logs)). `0` turns it off. | `0` to keep the output to request lines only. |
 | `D1A_CHAT_NAME` | `d1a-chat` | The model id `/v1/chat/completions` answers as and `/v1/models` lists. Any id a client sends is answered. | When an OpenAI client insists on a particular id. |
 | `D1A_EMBED_GGUF` | unset (off) | A GGUF embedding model `/v1/embeddings` serves through llama.cpp (the `embed` extra), e.g. `nomic-embed-text-v1.5.Q4_K_M.gguf`. | To serve embeddings, e.g. for mem0 ([Chat with D1A](USAGE.md#chat-with-d1a)). |
 | `D1A_EMBED_NAME` | `text-embedding-nomic-embed-text-v1.5` | The embedding model id `/v1/models` lists (LM Studio's id for nomic, so clients set up for it need no change). | With a different embedder. |
 
 Fixed in code, not settings: up to 64 requests per batch (`MAX_BATCH`), a 75 s keep-alive, and the model list
 (`/v1/models` lists `d1a-latest`, but any model name in a request is answered).
+
+## Logs
+
+The server writes its log to standard output and standard error. It keeps no log file of its own: whatever starts it
+decides where the output goes. On the Mac mini, the LaunchAgents write it to `~/Library/Logs/d1a-model.log`
+([below](#the-mac-mini-playground-deployment)).
+
+| Line | When | Holds |
+|---|---|---|
+| startup lines | once, at start | the run, device, backend and dtype, the load time, warnings (an uncalibrated checkpoint, a device that failed its test); `--show-config` prints the settings instead of serving |
+| `INFO: <client> - "POST /v1/systemone HTTP/1.1" 200 OK` | each request (uvicorn) | the client address, method, path and status; never the body |
+| `<date> <time> chat: N prompt tokens (M cached), K completion tokens, T s[, tools]` | each chat, unless `D1A_CHAT_LOG=0` | counts and time only; never the prompt or the answer. M is the prompt tokens taken from the [prompt cache](USAGE.md#chat-with-d1a) |
+| a traceback | an error | the code path that failed |
+
+None of these hold request or answer text, so they are safe to keep and to share in a bug report. About 90 bytes a
+request: a busy day of 10,000 requests adds under 1 MB. Rotation is left to whatever keeps the log.
+
+The decision log (`D1A_FEEDBACK_LOG`, [Self-learning](#self-learning)) is separate and off by default. When it is on,
+it does hold each request's text and answers, because outcomes are matched to them.
 
 ## Model loading (`D1A_*` load options)
 
@@ -203,3 +223,5 @@ frames; its sound is not used. There are no further settings.
 The playground (jonpol01/d1a-playground) runs D1A as launchd services through `mini.sh`, configured by `.demo/mini.env`
 (`MODEL_RUN`, `FEEDBACK_LOG`, `OUTCOME_CALIBRATOR`, `LABEL_OUTCOMES`, ...). The playground's README documents those keys.
 `./mini.sh update` applies a change.
+Each service logs to `~/Library/Logs/<service>.log`: `d1a-model.log` (the model server, [Logs](#logs)), `d1a-web.log`,
+`d1a-openai.log` (the `:1234` proxy), `d1a-outcomes.log` and `d1a-promote.log` (the learning loop).

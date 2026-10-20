@@ -135,6 +135,25 @@ def test_a_stream_sends_each_piece_as_it_comes_then_the_finish_and_done(monkeypa
     assert chunks[-1]["choices"][0]["finish_reason"] == "stop" and all(c["object"] == "chat.completion.chunk" for c in chunks)
 
 
+def test_the_server_prints_each_chats_log_line(capsys, monkeypatch):
+    """The chat's log line (prompt tokens, cached tokens, time) reaches the server's output, where the Mac mini's
+    LaunchAgent log keeps it; without a handler Python dropped it."""
+    import logging
+    before = logging.getLogger("d1a.chat").handlers[:], logging.getLogger("d1a.chat").propagate, logging.getLogger("d1a.chat").level
+    monkeypatch.setattr(serve, "CHAT_LOG", True)
+    try:
+        serve.log_chats()
+        openai_compat.log.info("chat: %d prompt tokens (%d cached), %d completion tokens, %.1f s", 20511, 20489, 48, 1.4)
+        assert "chat: 20511 prompt tokens (20489 cached), 48 completion tokens, 1.4 s" in capsys.readouterr().out
+        chat = logging.getLogger("d1a.chat"); chat.handlers, chat.propagate = before[0], before[1]; chat.setLevel(before[2])
+        serve.CHAT_LOG = False   # D1A_CHAT_LOG=0
+        serve.log_chats()
+        openai_compat.log.info("chat: a line that must not print")
+        assert "must not print" not in capsys.readouterr().out
+    finally:
+        chat = logging.getLogger("d1a.chat"); chat.handlers, chat.propagate = before[0], before[1]; chat.setLevel(before[2])
+
+
 def test_d1a_chat_cache_mb_0_turns_the_chat_prompt_cache_off(monkeypatch):
     seen = []
 
