@@ -31,7 +31,7 @@ batches, queue depth, batch latency, prefix cache, memory). D1A_PREFIX_CACHE / D
 date preprocessing (api.with_date_facts). Backend and precision follow LoadOptions (D1A_BACKEND, D1A_DTYPE, ...): on Apple
 Silicon the hybrid Qwen3.5 checkpoints run on MLX by default, elsewhere on torch in bf16.
 """
-import argparse, asyncio, atexit, copy, hmac, math, os, queue, random, re, subprocess, sys, threading, time, traceback, uuid
+import argparse, asyncio, atexit, copy, hmac, logging, math, os, queue, random, re, subprocess, sys, threading, time, traceback, uuid
 from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 from d1a.core.settings import get as setting
@@ -483,6 +483,16 @@ def chat_server_check(s):
         raise HTTPException(501, "this model has no chat: serve an export made with `scripts/export_mlx.py --unmerged` on an instruction-tuned base (#274)")
 
 
+def log_chats(stream=None):
+    """Print each chat's log line (openai_compat's "chat: N prompt tokens (M cached), ...") with its time, beside uvicorn's
+    request lines: nothing configures logging otherwise, and Python drops INFO lines by default."""
+    handler = logging.StreamHandler(stream or sys.stdout)
+    handler.setFormatter(logging.Formatter("%(asctime)s %(message)s", "%Y-%m-%d %H:%M:%S"))
+    chat = logging.getLogger(openai_compat.log.name)
+    chat.handlers, chat.propagate = [handler], False
+    chat.setLevel(logging.INFO)
+
+
 def chat_cache(s):
     """The server's chat prompt cache, made on the model thread by the first chat; None when D1A_CHAT_CACHE_MB is 0."""
     if s.chat_prompts is None and CHAT_CACHE_MB > 0:
@@ -739,6 +749,7 @@ def main():
     print(f"serving {ck.requested} ({ck.path}) on {dev} via {model.backend} ({model.dtype}) {a.host}:{a.port}"   # /v1/models reports the run as given, not the resolved cache path
           + (f"; unloads after {a.idle_unload} s idle" if a.idle_unload > 0 else ""), flush=True)
     del model, s
+    log_chats()
     import uvicorn
     uvicorn.run(app, host=a.host, port=a.port, timeout_keep_alive=KEEP_ALIVE_S)
 
