@@ -311,3 +311,30 @@ def test_a_chat_continuing_a_kept_prompt_prefills_only_its_new_tokens(checkpoint
         assert rest == ids[-1:]
         warm_logits, cold_logits = (model.lm(mx.array([rest]), cache=c) for c in (a, b))
     assert mx.allclose(warm_logits, cold_logits, atol=1e-4)
+
+
+@needs_mlx
+def test_an_agents_step_after_a_tool_call_answers_and_reuses_the_prompt_cache(checkpoint, tmp_path):
+    """A real agent loop: step 1 asks with tools, step 2 sends back the assistant's tool call (OpenAI: arguments as a JSON
+    string) and the tool's result. The template refuses string arguments as Gemma 4's does. Step 2 answers, and it takes
+    step 1's prompt from the cache."""
+    from d1a.backends.checkpoint import Checkpoint, LoadOptions, load
+    from d1a.backends.mlx import export_mlx
+    from d1a.serving.openai_compat import ChatRequest, PromptCache, generate_chat
+    run = tmp_path / "unmerged"
+    export_mlx(Checkpoint(checkpoint), run, unmerged=True)
+    template = ("{% for m in messages %}{% for c in m.get('tool_calls') or [] %}{% if c.function.arguments is string %}"
+                "{{ raise_exception('tool_calls[].function.arguments must be a JSON object') }}{% endif %}"
+                "{{ c.function.name }}({{ c.function.arguments.command }})\n{% endfor %}{{ m['content'] or '' }}\n{% endfor %}")
+    (run / "chat_template.jinja").write_text(template, encoding="utf-8")
+    tok, model = load(str(run), "mps", LoadOptions(backend="mlx"))
+    tools = [{"type": "function", "function": {"name": "terminal", "parameters": {"type": "object", "properties": {"command": {"type": "string"}}}}}]
+    step1 = [{"role": "system", "content": "You are an operations agent on the Mac mini."}, {"role": "user", "content": "How full is the disk?"}]
+    step2 = step1 + [{"role": "assistant", "content": None, "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "terminal", "arguments": '{"command": "df -h /"}'}}]},
+                     {"role": "tool", "tool_call_id": "call_1", "content": "/dev/disk3s1s1 228Gi 13Gi 12Gi 52% /"}]
+    cache = PromptCache(1 << 30)
+    ask = lambda messages: generate_chat(model, tok, ChatRequest(messages=messages, tools=tools, max_tokens=4, temperature=0.0), run, cache=cache)
+    assert ask(step1)["usage"]["prompt_tokens_details"]["cached_tokens"] == 0
+    second = ask(step2)
+    assert second["choices"][0]["finish_reason"] in ("stop", "length", "tool_calls")
+    assert second["usage"]["prompt_tokens_details"]["cached_tokens"] > 0

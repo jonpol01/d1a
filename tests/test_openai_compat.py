@@ -154,6 +154,25 @@ def test_the_server_prints_each_chats_log_line(capsys, monkeypatch):
         chat = logging.getLogger("d1a.chat"); chat.handlers, chat.propagate = before[0], before[1]; chat.setLevel(before[2])
 
 
+def test_an_agents_next_step_sends_its_tool_calls_back_as_openai_strings():
+    """OpenAI clients (Hermes, n8n) send an earlier tool call's arguments as a JSON string; Gemma 4's chat template takes
+    only an object, so every step after a tool call failed with a 500. The request decodes them; arguments that are not
+    a JSON object are refused with a 422."""
+    from pydantic import ValidationError
+    call = lambda args: {"role": "assistant", "content": None, "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "terminal", "arguments": args}}]}
+    history = lambda args: [{"role": "user", "content": "Run df -h /"}, call(args), {"role": "tool", "tool_call_id": "call_1", "content": "13Gi used"}]
+    req = openai_compat.ChatRequest(messages=history('{"command": "df -h /"}'))
+    assert req.messages[1]["tool_calls"][0]["function"]["arguments"] == {"command": "df -h /"}
+    assert openai_compat.ChatRequest(messages=history({"command": "ls"})).messages[1]["tool_calls"][0]["function"]["arguments"] == {"command": "ls"}
+    assert openai_compat.ChatRequest(messages=history("")).messages[1]["tool_calls"][0]["function"]["arguments"] == {}
+    for bad in ("not json", "[1, 2]"):
+        with pytest.raises(ValidationError, match="arguments"):
+            openai_compat.ChatRequest(messages=history(bad))
+    with TestClient(serve.app) as client:
+        r = client.post("/v1/chat/completions", json={"messages": history("not json")})
+    assert r.status_code == 422 and "arguments" in r.text
+
+
 def test_d1a_chat_cache_mb_0_turns_the_chat_prompt_cache_off(monkeypatch):
     seen = []
 
