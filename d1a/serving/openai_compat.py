@@ -27,7 +27,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 log = logging.getLogger("d1a.chat")
 DEFAULT_MAX_TOKENS = 1024
@@ -53,6 +53,21 @@ class ChatRequest(BaseModel):
     response_format: dict | None = None
     stream: bool = False
 
+    @field_validator("messages")
+    @classmethod
+    def _tool_call_arguments(cls, messages):
+        """An agent's next step sends back the assistant's earlier tool calls. OpenAI gives each call's `arguments` as a JSON
+        string, and Gemma 4's chat template refuses anything but an object, so every step after a tool call failed (500).
+        Each one is decoded here; arguments that are not a JSON object are refused (422)."""
+        out = []
+        for m in messages:
+            calls = m.get("tool_calls") if isinstance(m, dict) else None
+            if calls:
+                m = {**m, "tool_calls": [{**c, "function": {**c["function"], "arguments": arguments_of(c["function"].get("arguments"))}}
+                                         if isinstance(c, dict) and isinstance(c.get("function"), dict) else c for c in calls]}
+            out.append(m)
+        return out
+
 
 class EmbeddingRequest(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -60,6 +75,20 @@ class EmbeddingRequest(BaseModel):
     input: str | list[str]
     dimensions: int | None = None        # mem0 always sends it; the embedder's own width is what it returns
     encoding_format: str | None = None
+
+
+def arguments_of(arguments):
+    """A tool call's arguments as an object: OpenAI clients send a JSON string ("" or none: no arguments)."""
+    if arguments is None or (isinstance(arguments, str) and not arguments.strip()):
+        return {}
+    if isinstance(arguments, str):
+        try:
+            arguments = json.loads(arguments)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"tool_calls[].function.arguments is not JSON: {e}") from None
+    if not isinstance(arguments, dict):
+        raise ValueError("tool_calls[].function.arguments must be a JSON object")
+    return arguments
 
 
 def text_of(content):

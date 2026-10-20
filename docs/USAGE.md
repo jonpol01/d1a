@@ -167,6 +167,10 @@ r = client.chat.completions.create(model="d1a-chat", messages=[{"role": "user", 
   model (`--idle-unload`).
 - **Any model id is answered**, so an app configured for another model (an LM Studio id, say) needs only the URL.
 - **Streaming** sends the answer token by token; with `tools` it comes as one chunk, once the tool calls are parsed.
+- **Agent loops:** send the assistant's tool calls back as OpenAI gives them (`arguments` as a JSON string), followed
+  by `tool` messages with the results. Each step reuses the earlier prompt's cache. Measured with D1A-E4B-it on an M1
+  Max: 3 tool calls and a summary in 4 steps, 4.1 s cold, then 0.6–1.8 s a step. Arguments that are not a JSON object
+  get a 422.
 - **Prompt cache:** a chat whose prompt continues an earlier one (an agent's next step, the next turn of a conversation, a
   new session with the same system prompt) prefills only its new tokens; `usage.prompt_tokens_details.cached_tokens`
   says how many it took from the cache. Up to 16 prompts are kept in 1 GiB (`D1A_CHAT_CACHE_MB`, `0` turns it off),
