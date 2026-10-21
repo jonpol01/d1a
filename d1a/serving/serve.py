@@ -31,7 +31,7 @@ batches, queue depth, batch latency, prefix cache, memory). D1A_PREFIX_CACHE / D
 date preprocessing (api.with_date_facts). Backend and precision follow LoadOptions (D1A_BACKEND, D1A_DTYPE, ...): on Apple
 Silicon the hybrid Qwen3.5 checkpoints run on MLX by default, elsewhere on torch in bf16.
 """
-import argparse, asyncio, atexit, copy, hmac, logging, math, os, queue, random, re, subprocess, sys, threading, time, traceback, uuid
+import argparse, asyncio, atexit, base64, copy, hashlib, hmac, logging, math, os, queue, random, re, subprocess, sys, threading, time, traceback, uuid
 from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 from d1a.core.settings import get as setting
@@ -43,7 +43,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, Field
-from d1a.core.api import SystemOneRequest, answer_in_passes, conditional, in_request_order, to_record, to_answers, output_tokens, with_date_facts
+from d1a.core.api import SystemOneRequest, answer_in_passes, conditional, in_request_order, render, to_record, to_answers, output_tokens, with_date_facts
 from d1a.backends.checkpoint import EXPORT_CONFIG, Checkpoint, LoadOptions, fused_available, is_hub_id
 from d1a.backends.device import allocated_bytes, default_device, empty_cache, out_of_memory, sync
 from d1a.learning.feedback import FeedbackLog, OutcomeCalibrator
@@ -288,20 +288,23 @@ class Server:
         while graphs is not None and graphs.capture_due(idle=True): time.sleep(0.01)
         with self.lock: pass                                   # a capture in progress finishes
 
-    def answer(self, req, log=True):
-        """The /v1/systemone response body for one request. log=False: the decision is not written to the decision log."""
-        if conditional(req): return self._in_passes(req, log, lambda rec: self.probs(rec, req.use_case))
+    def answer(self, req, log=True, audit=False):
+        """The /v1/systemone response body for one request. log=False: the decision is not written to the decision log.
+        audit=True: the body also carries an `audit` block (x-d1a-audit: on, Server.audit_block)."""
+        if conditional(req): return self._in_passes(req, log, lambda rec: self.probs(rec, req.use_case), audit)
         rec, meta = to_record(prepare(req))
-        return self._body(req, meta, *self.probs(rec, req.use_case), log=log)
+        ps, m = self.probs(rec, req.use_case)
+        return self._body(req, meta, ps, m, log=log, audit={"state": rec["state"], "passes": [m]} if audit else None)
 
-    async def answer_async(self, req, log=True):
+    async def answer_async(self, req, log=True, audit=False):
         """answer() for the event loop: a request waiting on the model thread holds no worker thread, so a container takes
         as many concurrent requests as its batches can absorb (FastAPI runs sync endpoints on a 40-thread pool)."""
-        if conditional(req): return await asyncio.to_thread(self.answer, req, log)   # one pass per ask_if level (#36)
+        if conditional(req): return await asyncio.to_thread(self.answer, req, log, audit)   # one pass per ask_if level (#36)
         rec, meta = to_record(prepare(req))
-        return self._body(req, meta, *await asyncio.wrap_future(self.submit(rec, use_case=req.use_case)), log=log)
+        ps, m = await asyncio.wrap_future(self.submit(rec, use_case=req.use_case))
+        return self._body(req, meta, ps, m, log=log, audit={"state": rec["state"], "passes": [m]} if audit else None)
 
-    def _in_passes(self, req, log, run):
+    def _in_passes(self, req, log, run, audit=False, media_sha256=None):
         """A request with ask_if conditions (#36): one model pass per level of d1a.core.api.ask_order (the state prefix is
         cached, so a later pass pays for its question rows), one decision-log entry, usage and latency summed over the
         passes, and the answers in the request's order with the questions not asked reported as skipped."""
@@ -309,7 +312,8 @@ class Server:
             rec, meta = to_record(prepare(sub)); ps, m = run(rec); return meta, ps, m
         meta, ps, stats = answer_in_passes(req, one)
         m = {"tokens": sum(x["tokens"] for x in stats), "latency_ms": sum(x["latency_ms"] for x in stats)}
-        body = self._body(req, meta, ps, m, log=log)
+        audit = {"state": render(prepare(req).state), "passes": stats, "media_sha256": media_sha256} if audit else None
+        body = self._body(req, meta, ps, m, log=log, audit=audit)
         body["answers"] = in_request_order(req, body["answers"])
         return body
 
@@ -330,16 +334,18 @@ class Server:
                 self.media = MediaEncoder(str(folder), self.device)
             return self.media
 
-    async def answer_media_async(self, req, log=True):
+    async def answer_media_async(self, req, log=True, audit=False):
         """answer_async() for a request with a photo or a voice clip: the encoders run on this request's thread, the
         language model on the model thread as for any request."""
         rec, meta = to_record(prepare(req))
         try: media = await asyncio.to_thread(lambda: self.media_encoder().encode(req.media))
         except ValueError as e: raise HTTPException(422, str(e))
-        if conditional(req): return await asyncio.to_thread(self._in_passes, req, log, lambda r: self.submit(r, media, req.use_case).result())
-        return self._body(req, meta, *await asyncio.wrap_future(self.submit(rec, media, req.use_case)), log=log)
+        media_sha256 = hashlib.sha256(base64.b64decode(req.media.data)).hexdigest() if audit else None
+        if conditional(req): return await asyncio.to_thread(self._in_passes, req, log, lambda r: self.submit(r, media, req.use_case).result(), audit, media_sha256)
+        ps, m = await asyncio.wrap_future(self.submit(rec, media, req.use_case))
+        return self._body(req, meta, ps, m, log=log, audit={"state": rec["state"], "passes": [m], "media_sha256": media_sha256} if audit else None)
 
-    def _body(self, req, meta, ps, m, log=True):
+    def _body(self, req, meta, ps, m, log=True, audit=None):
         head = getattr(getattr(self, "model", None), "head", None)   # the temperature the readout used (PointerHead.temperature_for), for the log
         T = head.temperature_for(req.use_case) if hasattr(head, "temperature_for") else None
         raw = to_answers(ps, meta)
@@ -349,7 +355,36 @@ class Server:
         if fl: answers = flags.attach(copy.deepcopy(answers), fl)   # served beside the answers; the log's answers stay the model's
         body = {"model": req.model, "answers": answers, "usage": {"input_tokens": m["tokens"], "output_tokens": output_tokens(self.tok, answers)}, "latency_ms": m["latency_ms"]}
         if did is not None: body["decision_id"] = did
+        if audit is not None: body["audit"] = self.audit_block(req, audit, raw, T, getattr(head, "temperature", None), fl, fired, did)
         return body
+
+    def audit_block(self, req, got, raw, T, own, fl, fired, did):
+        """What produced an answer, for a port or a support ticket to prove it (#32): the code, the weights, the text the
+        model read, the temperature and the self-learning steps applied, and the prefix cache per model pass. Asked for
+        with x-d1a-audit: on; no request or answer text, only hashes."""
+        cal = LEARNING.calibrator()
+        calibrated = sorted(q for q in raw if cal is not None and isinstance(cal.at(T, own).params.get(q), (list, dict)))
+        use_case_T = getattr(getattr(self.model, "head", None), "use_case_temperatures", None) or {}
+        from d1a import __version__
+        return {"d1a": __version__, "run": self.checkpoint.requested, "weights_sha256": self.weights_digest(),
+                "backend": getattr(self.model, "backend", None), "dtype": str(getattr(self.model, "dtype", None)),
+                "state_sha256": hashlib.sha256(got["state"].encode("utf-8")).hexdigest(),
+                **({"media_sha256": got["media_sha256"]} if got.get("media_sha256") else {}),
+                "temperature": T, "checkpoint_temperature": own,
+                "temperature_source": f"use_case:{req.use_case}" if req.use_case in use_case_T else "checkpoint",
+                "outcome_calibrator": calibrated,
+                "rules": {q: sorted(v) for q, v in (fired or {}).items()},
+                "flags": {q: sorted(n for n, f in v.items() if not f.get("shadow")) for q, v in (fl or {}).items()},
+                "passes": [{"tokens": p["tokens"], "prefix_cache_hit": bool(p.get("prefix_cache_hit")),
+                            "cached_tokens": p.get("state_tokens", 0) if p.get("prefix_cache_hit") else 0} for p in got["passes"]],
+                "logged": did is not None}
+
+    def weights_digest(self):
+        """Checkpoint.weights_sha256, computed once per loaded model: an MLX export hashes every shard, seconds on the
+        first audited request."""
+        if getattr(self, "_weights_sha256", None) is None:
+            self._weights_sha256 = self.checkpoint.weights_sha256()
+        return self._weights_sha256
 
 
 class Learning:
@@ -401,6 +436,7 @@ LEARNING = Learning(FEEDBACK_LOG, OUTCOME_CALIBRATOR)
 FLAGS = flags.Configured()   # the learned flags (#237) in the D1A_LEARNING file, re-read when it changes
 RULES = rules.Configured()   # the served decode rules (#252) in the same file
 LOG_HEADER = "x-d1a-decision-log"   # "off": answer, but keep the decision out of the log (a demo, a smoke test: no outcome follows)
+AUDIT_HEADER = "x-d1a-audit"        # "on": the answer carries an audit block (Server.audit_block, #32)
 REPLAY_HEADER = "x-d1a-replay-of"   # <decision id>: d1a.learning.loop.replay re-scoring that decision with the model served now
 DECISION_ID = re.compile(r"^[0-9a-f]{32}$")
 
@@ -412,6 +448,10 @@ def logged(request):
     if not replay_of: return True
     if not DECISION_ID.match(replay_of): raise HTTPException(422, f"{REPLAY_HEADER} must be a 32-character hex decision id")
     return {"replay_of": replay_of}
+
+
+def audited(request):
+    return request.headers.get(AUDIT_HEADER, "").strip().lower() == "on"
 
 
 def latency_summary(ms):
@@ -468,14 +508,14 @@ async def server_async():
 async def systemone(req: SystemOneRequest, request: Request):
     """TypeSafe-compatible endpoint: typed questions in, typed answers out, one prefill pass."""
     async with server_async() as s:
-        return await s.answer_async(req, logged(request))
+        return await s.answer_async(req, logged(request), audited(request))
 
 
 @app.post("/v1/systemone/media")
 async def systemone_media(req: MediaRequest, request: Request):
     """/v1/systemone with a photo, a voice clip or a video (d1a.serving.media.MediaRequest), answered by the same model."""
     async with server_async() as s:
-        return await s.answer_media_async(req, logged(request))
+        return await s.answer_media_async(req, logged(request), audited(request))
 
 
 def chat_server_check(s):

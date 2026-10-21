@@ -435,3 +435,42 @@ def test_the_time_split_holds_out_the_newest_groups_and_orders_a_replay_by_its_o
     fit, held = split_time(rows, share=0.3)
     assert {d["group"] for d in held} == {"g7", "g8", "g9"} and "g-replayed" in {d["group"] for d in fit}
     assert {d["group"] for d in fit}.isdisjoint({d["group"] for d in held})
+
+
+def test_x_d1a_audit_on_adds_the_audit_block_and_names_the_calibrated_questions(tmp_path, monkeypatch):
+    """#32 through the endpoint: only `x-d1a-audit: on` adds the block, so the System One wire is unchanged otherwise. Its
+    outcome_calibrator lists the questions the calibrator holds entries for at the answer's temperature (the served
+    answers being a recalibrated copy proves nothing), and logged says whether the decision was written."""
+    from concurrent.futures import Future
+    from contextlib import asynccontextmanager
+    from types import SimpleNamespace
+    from fastapi.testclient import TestClient
+    from d1a.serving import serve
+
+    def submit(rec, media=None, use_case=None):
+        f = Future(); f.set_result(([[0.2, 0.8]], {"tokens": 10, "state_tokens": 6, "latency_ms": 1.0, "prefix_cache_hit": False})); return f
+    fake = SimpleNamespace(checkpoint=SimpleNamespace(requested="JohnP1/d1a-e4b-mlx-q8@v0.6", weights_sha256=lambda: "ab" * 32), tok=None, submit=submit,
+                           model=SimpleNamespace(backend="mlx", dtype="bfloat16"), probs=lambda rec, use_case=None: submit(rec).result())
+    for name in ("answer", "answer_async", "_body", "audit_block", "weights_digest"): setattr(fake, name, getattr(serve.Server, name).__get__(fake))
+    @asynccontextmanager
+    async def server_async():
+        yield fake
+    monkeypatch.setattr(serve, "server_async", server_async)
+    monkeypatch.setattr(serve, "output_tokens", lambda tok, answers: 0)
+    cal_path = tmp_path / "cal.json"
+    OutcomeCalibrator({"resolved": [1.0, -2.0, 50]}).save(cal_path)
+    monkeypatch.setattr(serve, "LEARNING", serve.Learning(tmp_path / "log.jsonl", cal_path))
+    req = {"state": "issue + patch", "questions": Q}
+    with TestClient(serve.app) as client:
+        bodies = {h: client.post("/v1/systemone", json=req, headers={"x-d1a-audit": h} if h else {}).json() for h in (None, "off", "On")}
+    assert "audit" not in bodies[None] and "audit" not in bodies["off"]
+    a = bodies["On"]["audit"]
+    assert a["run"] == "JohnP1/d1a-e4b-mlx-q8@v0.6" and a["weights_sha256"] == "ab" * 32 and a["backend"] == "mlx"
+    assert a["outcome_calibrator"] == ["resolved"] and a["logged"] is True and bodies["On"]["decision_id"]
+    assert a["passes"] == [{"tokens": 10, "prefix_cache_hit": False, "cached_tokens": 0}]
+    assert "issue + patch" not in json.dumps(a)   # hashes only, never the request's text
+    import os
+    OutcomeCalibrator({"other": [1.0, -2.0, 50]}).save(cal_path)   # entries for another question only: this answer is not recalibrated
+    os.utime(cal_path, (os.path.getmtime(cal_path) + 5,) * 2)
+    with TestClient(serve.app) as client:
+        assert client.post("/v1/systemone", json=req, headers={"x-d1a-audit": "on"}).json()["audit"]["outcome_calibrator"] == []
