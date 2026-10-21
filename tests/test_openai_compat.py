@@ -173,6 +173,16 @@ def test_an_agents_next_step_sends_its_tool_calls_back_as_openai_strings():
     assert r.status_code == 422 and "arguments" in r.text
 
 
+def test_an_empty_answer_is_logged_with_the_roles_before_it_never_their_text():
+    """The d1a bot got 3 empty answers (0 completion tokens) in 23 Hermes steps; the log kept only counts, so their context
+    was lost. last_roles names the last messages' roles, a tool-calling assistant marked, and nothing else."""
+    history = [{"role": "system", "content": "secret system prompt"}, {"role": "user", "content": "check the disk"},
+               {"role": "assistant", "content": None, "tool_calls": [{"id": "c", "type": "function", "function": {"name": "terminal", "arguments": "{}"}}]},
+               {"role": "tool", "tool_call_id": "c", "content": "/dev/disk3s1s1 52%"}]
+    assert openai_compat.last_roles(history) == "user > assistant(tool_calls) > tool"
+    assert openai_compat.last_roles(history[:1]) == "system" and openai_compat.last_roles([{"content": "x"}]) == "?"
+
+
 def test_d1a_chat_cache_mb_0_turns_the_chat_prompt_cache_off(monkeypatch):
     seen = []
 

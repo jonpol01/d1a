@@ -91,6 +91,12 @@ def arguments_of(arguments):
     return arguments
 
 
+def last_roles(messages, n=3):
+    """The roles of the last messages, an assistant message that called tools marked: the context of an empty answer in
+    the log, without any of its text."""
+    return " > ".join(m.get("role", "?") + ("(tool_calls)" if m.get("tool_calls") else "") for m in messages[-n:])
+
+
 def text_of(content):
     """A message's content as text: OpenAI allows a string or a list of parts ({"type": "text", "text": ...})."""
     if content is None or isinstance(content, str):
@@ -237,9 +243,10 @@ def generate_chat(model, tok, req, model_dir=None, model_name="d1a", on_text=Non
             if between is not None:
                 between()
     prompt_tokens = len(tok(prompt, add_special_tokens=False)["input_ids"])
-    log.info("chat: %d prompt tokens (%d cached), %d completion tokens, %.1f s%s", prompt_tokens, stats["cached"], completion_tokens,
-             time.time() - t, ", tools" if req.tools else "")
     content, calls = tool_calls_of(text) if req.tools else (text, [])
+    empty = "" if content.strip() or calls else f", empty answer after {last_roles(req.messages)}"
+    log.info("chat: %d prompt tokens (%d cached), %d completion tokens, %.1f s%s%s", prompt_tokens, stats["cached"], completion_tokens,
+             time.time() - t, ", tools" if req.tools else "", empty)
     message = {"role": "assistant", "content": content.strip() or (None if calls else "")}
     if req.tools is not None:
         message["tool_calls"] = calls   # always a list when tools were sent: mem0's graph memory indexes it unconditionally

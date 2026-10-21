@@ -338,3 +338,30 @@ def test_an_agents_step_after_a_tool_call_answers_and_reuses_the_prompt_cache(ch
     second = ask(step2)
     assert second["choices"][0]["finish_reason"] in ("stop", "length", "tool_calls")
     assert second["usage"]["prompt_tokens_details"]["cached_tokens"] > 0
+
+
+@needs_mlx
+def test_an_empty_chat_answer_logs_its_context_without_text(checkpoint, tmp_path, monkeypatch, caplog):
+    """generate_chat's log line for an answer with no text and no tool call ends with the roles before it; any other
+    answer's line is unchanged. No message text reaches the log."""
+    import logging
+    from d1a.backends.checkpoint import Checkpoint, LoadOptions, load
+    from d1a.backends.mlx import export_mlx
+    from d1a.serving import openai_compat
+    from d1a.serving.openai_compat import ChatRequest, generate_chat
+    run = tmp_path / "unmerged"
+    export_mlx(Checkpoint(checkpoint), run, unmerged=True)
+    (run / "chat_template.jinja").write_text("{% for m in messages %}{{ m['content'] or '' }}{% endfor %}", encoding="utf-8")
+    tok, model = load(str(run), "mps", LoadOptions(backend="mlx"))
+    messages = [{"role": "user", "content": "the private question"},
+                {"role": "assistant", "content": None, "tool_calls": [{"id": "c", "type": "function", "function": {"name": "t", "arguments": "{}"}}]},
+                {"role": "tool", "tool_call_id": "c", "content": "the private tool output"}]
+    caplog.set_level(logging.INFO, logger="d1a.chat")
+    monkeypatch.setattr(openai_compat, "pieces", lambda *a, **k: iter([("", 0, "stop")]))   # the model ends its turn at once
+    body = generate_chat(model, tok, ChatRequest(messages=messages, max_tokens=4), run)
+    assert body["choices"][0]["message"]["content"] == "" and body["usage"]["completion_tokens"] == 0
+    line = caplog.records[-1].getMessage()
+    assert line.endswith(", empty answer after user > assistant(tool_calls) > tool") and "private" not in line
+    monkeypatch.setattr(openai_compat, "pieces", lambda *a, **k: iter([("Fine.", 1, "stop")]))
+    generate_chat(model, tok, ChatRequest(messages=messages, max_tokens=4), run)
+    assert "empty answer" not in caplog.records[-1].getMessage()
