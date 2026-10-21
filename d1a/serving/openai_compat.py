@@ -91,10 +91,15 @@ def arguments_of(arguments):
     return arguments
 
 
+ROLES = {"system", "developer", "user", "assistant", "tool"}   # the OpenAI chat roles
+
+
 def last_roles(messages, n=3):
     """The roles of the last messages, an assistant message that called tools marked: the context of an empty answer in
-    the log, without any of its text."""
-    return " > ".join(m.get("role", "?") + ("(tool_calls)" if m.get("tool_calls") else "") for m in messages[-n:])
+    the log, without any of its text. A role is the client's string, so one outside ROLES is logged as "other": it could
+    carry text, or a newline that forges a log line."""
+    role = lambda m: m["role"] if isinstance(m.get("role"), str) and m["role"] in ROLES else "other"
+    return " > ".join(role(m) + ("(tool_calls)" if m.get("tool_calls") else "") for m in messages[-n:])
 
 
 def text_of(content):

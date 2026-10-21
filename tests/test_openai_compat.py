@@ -180,7 +180,9 @@ def test_an_empty_answer_is_logged_with_the_roles_before_it_never_their_text():
                {"role": "assistant", "content": None, "tool_calls": [{"id": "c", "type": "function", "function": {"name": "terminal", "arguments": "{}"}}]},
                {"role": "tool", "tool_call_id": "c", "content": "/dev/disk3s1s1 52%"}]
     assert openai_compat.last_roles(history) == "user > assistant(tool_calls) > tool"
-    assert openai_compat.last_roles(history[:1]) == "system" and openai_compat.last_roles([{"content": "x"}]) == "?"
+    assert openai_compat.last_roles(history[:1]) == "system" and openai_compat.last_roles([{"content": "x"}]) == "other"
+    forged = [{"role": "user\n2026-10-21 00:00:00 chat: forged line"}, {"role": ["user"]}, {"role": "my secret note"}]
+    assert openai_compat.last_roles(forged) == "other > other > other"   # a client's role string never reaches the log as is
 
 
 def test_d1a_chat_cache_mb_0_turns_the_chat_prompt_cache_off(monkeypatch):
