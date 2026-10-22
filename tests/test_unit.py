@@ -245,6 +245,29 @@ def test_video_frames_are_sampled_evenly_and_never_repeated():
         decode_video(b"not a video")
 
 
+def test_a_video_hands_the_encoder_its_frame_count_when_the_processor_gives_one(monkeypatch):
+    # transformers 5.20's video processor sends a video's frames flat with num_frames_per_video, and its get_video_features
+    # refuses to run without it; 5.17's sends neither and takes no such argument. The encoder passes it exactly when the
+    # processor gives it (#322). Checked on the real encoders: soft tokens bit-identical under 5.17 and 5.20.2.
+    import threading
+    from types import SimpleNamespace
+    from d1a.serving import media as M
+    calls = []
+    enc = object.__new__(M.MediaEncoder)
+    enc.proc, enc.tok, enc.device, enc.lock, enc.placeholders = None, None, "cpu", threading.Lock(), {7}
+    enc._video = lambda **kw: calls.append(set(kw)) or SimpleNamespace(pooler_output=[torch.zeros(2, 4)])
+    monkeypatch.setattr(M, "layout", lambda tok: ([],))
+    older = {"input_ids": torch.tensor([[1, 7, 7, 2]]), "pixel_values_videos": torch.zeros(1, 2, 3, 5),
+             "video_position_ids": torch.zeros(1, 2, 3, 2, dtype=torch.long)}
+    newer = {**older, "pixel_values_videos": torch.zeros(2, 3, 5), "video_position_ids": torch.zeros(2, 3, 2, dtype=torch.long),
+             "num_frames_per_video": torch.tensor([2])}
+    for mm in (older, newer):
+        monkeypatch.setattr(M, "processor_inputs", lambda proc, media, mm=mm: mm)
+        ids, at, feats = enc.encode(M.Media(type="video", data=""))
+        assert ids == [1, 7, 7, 2] and at == [1, 2] and feats.shape == (2, 4)
+    assert calls == [{"pixel_values_videos", "video_position_ids"}, {"pixel_values_videos", "video_position_ids", "num_frames_per_video"}]
+
+
 def test_media_model_loads_on_demand_and_never_unloads_while_in_use():
     # an idle media server must give its ~10 GB back, but a request in flight keeps the model it is using
     from d1a.serving.media import OnDemand
