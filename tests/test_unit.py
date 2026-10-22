@@ -268,6 +268,30 @@ def test_a_video_hands_the_encoder_its_frame_count_when_the_processor_gives_one(
     assert calls == [{"pixel_values_videos", "video_position_ids"}, {"pixel_values_videos", "video_position_ids", "num_frames_per_video"}]
 
 
+def test_an_sdpa_load_of_gemma4_leaves_the_choice_to_transformers(monkeypatch):
+    # transformers 5.20 refuses attn_implementation="sdpa" for Gemma 4, whose audio tower has no SDPA, where 5.17 took it.
+    # Left unset, both give the text model SDPA, so D1A never names it at load: the CUDA default, D1A_ATTN=sdpa and the
+    # serving default on Apple GPUs all load on either version (#324)
+    from transformers import AutoModelForCausalLM
+    from transformers.models.gemma4.configuration_gemma4 import Gemma4AudioConfig, Gemma4Config, Gemma4TextConfig, Gemma4VisionConfig
+    import d1a.backends.torch as T
+    text = Gemma4TextConfig(vocab_size=64, hidden_size=32, intermediate_size=64, num_hidden_layers=2, num_attention_heads=2, num_key_value_heads=1,
+                            head_dim=16, vocab_size_per_layer_input=64, hidden_size_per_layer_input=8, num_kv_shared_layers=0)
+    cfg = Gemma4Config(text_config=text, vision_config=Gemma4VisionConfig(hidden_size=32, intermediate_size=64, num_hidden_layers=1, num_attention_heads=2),
+                       audio_config=Gemma4AudioConfig(hidden_size=32, num_hidden_layers=1, num_attention_heads=2))
+    model = AutoModelForCausalLM.from_config(cfg, attn_implementation=T.attn_to_load("sdpa"))
+    assert model.config.get_text_config()._attn_implementation == "sdpa" and T.attn_to_load("eager") == "eager"
+    asked = []
+
+    def from_pretrained(name, **kw):
+        asked.append(kw["attn_implementation"]); raise RuntimeError("stop")
+    monkeypatch.setattr(T.AutoModelForCausalLM, "from_pretrained", from_pretrained)
+    for device, attn in (("cuda", None), ("cpu", "sdpa"), ("cpu", None)):
+        with pytest.raises(RuntimeError, match="stop"):
+            T.DecisionModel("base", None, device, attn=attn)
+    assert asked == [None, None, "eager"]
+
+
 def test_media_model_loads_on_demand_and_never_unloads_while_in_use():
     # an idle media server must give its ~10 GB back, but a request in flight keeps the model it is using
     from d1a.serving.media import OnDemand
