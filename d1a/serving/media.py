@@ -232,7 +232,9 @@ class MediaEncoder:
                 out = self._image(pixel_values=dev("pixel_values").to(torch.bfloat16), image_position_ids=dev("image_position_ids"))
                 feats = torch.cat(out.pooler_output, dim=0)
             elif media.type == "video":
-                out = self._video(pixel_values_videos=dev("pixel_values_videos").to(torch.bfloat16), video_position_ids=dev("video_position_ids"))
+                # transformers 5.20 passes a video's frames flat and needs their count back; 5.17 neither sends nor takes it (#322)
+                frames = {"num_frames_per_video": dev("num_frames_per_video")} if "num_frames_per_video" in mm else {}
+                out = self._video(pixel_values_videos=dev("pixel_values_videos").to(torch.bfloat16), video_position_ids=dev("video_position_ids"), **frames)
                 feats = torch.cat(out.pooler_output, dim=0)
             else:
                 out = self._audio(input_features=dev("input_features").to(torch.bfloat16), input_features_mask=dev("input_features_mask"))
