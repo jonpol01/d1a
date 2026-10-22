@@ -60,6 +60,7 @@ DATE_FACTS = setting("D1A_DATE_FACTS") == "1"
 FEEDBACK_LOG = setting("D1A_FEEDBACK_LOG")                         # set = log every decision (d1a.learning.feedback) and accept outcomes at POST /v1/feedback
 OUTCOME_CALIBRATOR = setting("D1A_OUTCOME_CALIBRATOR")             # set = apply this d1a.learning.feedback calibrator to yes/no and choice answers, reloaded when the file changes
 CHAT_LOG = setting("D1A_CHAT_LOG") == "1"                           # print a line per chat (log_chats); counts and time, never text
+CHAT_CONTEXT = int(setting("D1A_CHAT_CONTEXT") or 0) or None       # a chat's prompt + completion cap below the model's context; unset: the model's
 CHAT_CACHE_MB = int(setting("D1A_CHAT_CACHE_MB"))                   # the chat prompt cache's budget (openai_compat.PromptCache); 0 disables
 CHAT_NAME = setting("D1A_CHAT_NAME")                                # the model id /v1/chat/completions answers as (#274)
 EMBED_GGUF, EMBED_NAME = setting("D1A_EMBED_GGUF"), setting("D1A_EMBED_NAME")   # /v1/embeddings: a GGUF embedder via llama.cpp; unset = off
@@ -549,12 +550,19 @@ async def chat_completions(req: openai_compat.ChatRequest):
     exactly), on the model thread between decision batches; decisions that arrive meanwhile are answered between its
     tokens (Server.between_tokens, d1a.serving.openai_compat). stream=true sends the answer
     token by token; with tools it is sent whole, once the tool calls can be parsed."""
+    async with server_async() as s:   # a prompt past the context is refused at once, on this thread: not after the chats queued on the model, and before any stream byte
+        chat_server_check(s)
+        context = openai_compat.context_length(s.checkpoint.path, CHAT_CONTEXT)
+        if context is not None:
+            try: await asyncio.to_thread(openai_compat.check_context, s.tok, req, context)
+            except openai_compat.ContextTooLong as e: return JSONResponse(e.body(), 400)
     if req.stream and not req.tools:
         return StreamingResponse(chat_stream(req), media_type="text/event-stream")
     async with server_async() as s:
         chat_server_check(s)
         model_dir = s.checkpoint.path
-        body = await asyncio.wrap_future(s.run_task(lambda model, tok: openai_compat.generate_chat(model, tok, req, model_dir, CHAT_NAME, between=s.between_tokens, cache=chat_cache(s))))
+        try: body = await asyncio.wrap_future(s.run_task(lambda model, tok: openai_compat.generate_chat(model, tok, req, model_dir, CHAT_NAME, between=s.between_tokens, cache=chat_cache(s), context=context)))
+        except openai_compat.ContextTooLong as e: return JSONResponse(e.body(), 400)
     return StreamingResponse(openai_compat.stream_chunks(body), media_type="text/event-stream") if req.stream else body
 
 
@@ -565,7 +573,8 @@ async def chat_stream(req):
         chat_server_check(s)
         pieces, done = queue.Queue(), object()
         model_dir = s.checkpoint.path
-        future = s.run_task(lambda model, tok: openai_compat.generate_chat(model, tok, req, model_dir, CHAT_NAME, on_text=pieces.put, between=s.between_tokens, cache=chat_cache(s)))
+        context = openai_compat.context_length(model_dir, CHAT_CONTEXT)
+        future = s.run_task(lambda model, tok: openai_compat.generate_chat(model, tok, req, model_dir, CHAT_NAME, on_text=pieces.put, between=s.between_tokens, cache=chat_cache(s), context=context))
         future.add_done_callback(lambda _: pieces.put(done))
         body_id, created, name = f"chatcmpl-{uuid.uuid4().hex}", int(time.time()), req.model or CHAT_NAME
         yield openai_compat.chunk(body_id, created, name, {"role": "assistant", "content": ""})

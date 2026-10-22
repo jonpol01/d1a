@@ -18,6 +18,7 @@ llama.cpp (D1A_EMBED_GGUF), the engine and file LM Studio served them with, so v
 """
 import base64
 import copy
+import functools
 import json
 import logging
 import struct
@@ -92,6 +93,62 @@ def arguments_of(arguments):
 
 
 ROLES = {"system", "developer", "user", "assistant", "tool"}   # the OpenAI chat roles
+
+
+class ContextTooLong(ValueError):
+    """A chat whose prompt and requested completion do not fit the model's context, refused before any prefill: past it
+    the model reads positions it was never trained on, and a 237k-token prompt held the model thread 16 minutes."""
+
+    def __init__(self, prompt, completion, context):
+        self.prompt, self.completion, self.context = prompt, completion, context
+        super().__init__(f"This model's maximum context length is {context} tokens. However, you requested {prompt + completion} tokens "
+                         f"({prompt} in the messages, {completion} in the completion). Please reduce the length of the messages or completion.")
+
+    def body(self):
+        """OpenAI's error body: clients read code context_length_exceeded as "compress and retry" (Hermes does)."""
+        return {"error": {"message": str(self), "type": "invalid_request_error", "param": "messages", "code": "context_length_exceeded"}}
+
+
+@functools.lru_cache(maxsize=8)
+def model_context(model_dir):
+    """The model's context in tokens: config.json's max_position_embeddings (Gemma 4: under text_config); None when there
+    is no config or it names none."""
+    cfg = Path(model_dir) / "config.json" if model_dir else None
+    if cfg is None or not cfg.exists():
+        return None
+    c = json.loads(cfg.read_text(encoding="utf-8"))
+    n = (c.get("text_config") or {}).get("max_position_embeddings") or c.get("max_position_embeddings")
+    return int(n) if n else None
+
+
+def context_length(model_dir, cap=None):
+    """The longest prompt plus completion a chat may ask for: the model's context, or `cap` (D1A_CHAT_CONTEXT) when that
+    is lower. A prompt near the model's context still holds the one model thread for minutes (prefill ~230 tokens/s on
+    an M4: 131k tokens ~9 min), and every other chat waits behind it. None: no limit."""
+    model = model_context(model_dir)
+    return min(x for x in (model, cap) if x) if (model or cap) else None
+
+
+def chat_messages(req):
+    """The request's messages as the chat template takes them: text content, and JSON mode asked for in a system message."""
+    messages = [{**m, "content": text_of(m.get("content"))} for m in req.messages]
+    if req.response_format and req.response_format.get("type") == "json_object":   # no constrained decoding: ask for it
+        messages = [{"role": "system", "content": "Respond with a single valid JSON object only."}] + messages
+    return messages
+
+
+def completion_limit(req):
+    return req.max_completion_tokens or req.max_tokens or DEFAULT_MAX_TOKENS
+
+
+def check_context(tok, req, context, prompt=None):
+    """-> the prompt's tokens; raises ContextTooLong when they and the completion asked for exceed `context` (None: no
+    limit)."""
+    prompt = prompt if prompt is not None else tok.apply_chat_template(chat_messages(req), tools=req.tools or None, tokenize=False, add_generation_prompt=True)
+    n = len(tok(prompt, add_special_tokens=False)["input_ids"])
+    if context and n + completion_limit(req) > context:
+        raise ContextTooLong(n, completion_limit(req), context)
+    return n
 
 
 def last_roles(messages, n=3):
@@ -214,22 +271,22 @@ def pieces(lm, tokenizer, prompt, limit, sampler, between=None, cache=None, stat
     yield detok.last_segment, n + 1, "length"
 
 
-def generate_chat(model, tok, req, model_dir=None, model_name="d1a", on_text=None, between=None, cache=None):
+def generate_chat(model, tok, req, model_dir=None, model_name="d1a", on_text=None, between=None, cache=None, context=None):
     """One chat completion with the adapter off. Run on the model thread (Server.run_task). on_text, if given, receives
     each new piece of the answer as it is generated (streaming), never text past a stop string. between, if given, is
     called after every token and between the prompt's prefill chunks, still inside the adapter switch
     (Server.between_tokens: the decisions waiting meanwhile, #289, #290). cache, a PromptCache, holds adapter-off caches
-    only: never pass it one a decision wrote. -> the OpenAI response body."""
+    only: never pass it one a decision wrote. context: the longest prompt plus completion allowed (context_length), the
+    model's own when not given; a longer request raises ContextTooLong before any prefill. -> the OpenAI response body."""
     from mlx_lm.sample_utils import make_sampler
     from mlx_lm.tokenizer_utils import TokenizerWrapper
-    messages = [{**m, "content": text_of(m.get("content"))} for m in req.messages]
-    if req.response_format and req.response_format.get("type") == "json_object":   # no constrained decoding: ask for it
-        messages = [{"role": "system", "content": "Respond with a single valid JSON object only."}] + messages
+    messages = chat_messages(req)
     prompt = tok.apply_chat_template(messages, tools=req.tools or None, tokenize=False, add_generation_prompt=True)
+    prompt_tokens = check_context(tok, req, context or context_length(model_dir), prompt)   # before any prefill
     n_system = next((i for i, m in enumerate(messages) if m.get("role") != "system"), len(messages))
     system = tok.apply_chat_template(messages[:n_system], tools=req.tools or None, tokenize=False) if 0 < n_system < len(messages) else None
     system = system if system and prompt.startswith(system) else None   # a template that renders it differently alone: no mark
-    limit = req.max_completion_tokens or req.max_tokens or DEFAULT_MAX_TOKENS
+    limit = completion_limit(req)
     sampler = make_sampler(temp=req.temperature, top_p=req.top_p if req.top_p < 1.0 else 0.0)
     wrapper = TokenizerWrapper(tok, eos_token_ids=eos_ids(tok, model_dir))
     stops = [s for s in ([req.stop] if isinstance(req.stop, str) else req.stop or []) if s]
@@ -247,7 +304,6 @@ def generate_chat(model, tok, req, model_dir=None, model_name="d1a", on_text=Non
                 break
             if between is not None:
                 between()
-    prompt_tokens = len(tok(prompt, add_special_tokens=False)["input_ids"])
     content, calls = tool_calls_of(text) if req.tools else (text, [])
     empty = "" if content.strip() or calls else f", empty answer after {last_roles(req.messages)}"
     log.info("chat: %d prompt tokens (%d cached), %d completion tokens, %.1f s%s%s", prompt_tokens, stats["cached"], completion_tokens,
