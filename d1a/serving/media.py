@@ -23,6 +23,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import Literal
+from d1a.core.settings import get as setting
 from d1a.core.api import SystemOneRequest, answer_in_passes, conditional, in_request_order, output_tokens, to_answers, to_record
 from d1a.backends.checkpoint import Checkpoint
 from d1a.backends.device import default_device, empty_cache
@@ -305,7 +306,8 @@ class OnDemand:
 
 
 app = FastAPI(title="d1a-media")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(CORSMiddleware, allow_origins=[o.strip() for o in setting("D1A_CORS_ORIGINS").split(",") if o.strip()],   # as d1a.serving.serve (#320)
+                   allow_methods=["*"], allow_headers=["*"])
 
 
 @app.post("/v1/systemone/media")

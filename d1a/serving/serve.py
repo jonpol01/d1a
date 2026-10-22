@@ -1,5 +1,5 @@
 # Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); lists only d1a-latest and answers any model name; model cards name D1A; serves MLX export folders; --device with a GPU usability probe; a startup self-check of the readout and a warning when serving an uncalibrated checkpoint; recent batch latency in /v1/models; a 75 s keep-alive for proxies in front of it; --idle-unload; photos and voice clips through the same model (POST /v1/systemone/media); prefix cache keyed by state ids only (option isolation removed); self-learning hooks (decision log, POST /v1/feedback, outcome calibrator, the x-d1a-decision-log: off and x-d1a-replay-of request headers); GET /metrics; PrefixCache.make_room ported from later upstream Kev (1d77363).
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); lists only d1a-latest and answers any model name; model cards name D1A; serves MLX export folders; --device with a GPU usability probe; a startup self-check of the readout and a warning when serving an uncalibrated checkpoint; recent batch latency in /v1/models; a 75 s keep-alive for proxies in front of it; --idle-unload; photos and voice clips through the same model (POST /v1/systemone/media); prefix cache keyed by state ids only (option isolation removed); self-learning hooks (decision log, POST /v1/feedback, outcome calibrator, the x-d1a-decision-log: off and x-d1a-replay-of request headers); GET /metrics; PrefixCache.make_room ported from later upstream Kev (1d77363); CORS only for the origins in D1A_CORS_ORIGINS, and POST /v1/feedback only for a logged decision (#320).
 """FastAPI sidecar for the playground: loads one checkpoint, exposes prefill-only decisions.
 
 Run: uv run --extra serve python -m d1a.serving.serve --run runs/d1a --port 8008
@@ -31,7 +31,7 @@ batches, queue depth, batch latency, prefix cache, memory). D1A_PREFIX_CACHE / D
 date preprocessing (api.with_date_facts). Backend and precision follow LoadOptions (D1A_BACKEND, D1A_DTYPE, ...): on Apple
 Silicon the hybrid Qwen3.5 checkpoints run on MLX by default, elsewhere on torch in bf16.
 """
-import argparse, asyncio, atexit, base64, copy, hashlib, hmac, logging, math, os, queue, random, re, subprocess, sys, threading, time, traceback, uuid
+import argparse, asyncio, atexit, base64, copy, hashlib, hmac, json, logging, math, os, queue, random, re, subprocess, sys, threading, time, traceback, uuid
 from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 from d1a.core.settings import get as setting
@@ -65,6 +65,7 @@ CHAT_CACHE_MB = int(setting("D1A_CHAT_CACHE_MB"))                   # the chat p
 CHAT_NAME = setting("D1A_CHAT_NAME")                                # the model id /v1/chat/completions answers as (#274)
 EMBED_GGUF, EMBED_NAME = setting("D1A_EMBED_GGUF"), setting("D1A_EMBED_NAME")   # /v1/embeddings: a GGUF embedder via llama.cpp; unset = off
 API_KEY = setting("D1A_API_KEY")                                  # unset = open server; set = require Authorization: Bearer <key>, as the TypeSafe clients always send
+CORS_ORIGINS = [o.strip() for o in setting("D1A_CORS_ORIGINS").split(",") if o.strip()]   # web origins a browser may call from ("*": any); none by default, so another site open in a browser here cannot (#320)
 MAX_BATCH = 64                                                           # requests the model thread takes at once (d1a.backends.cuda_graphs splits them to fit its buffers)
 KEEP_ALIVE_S = 75                                                        # idle keep-alive; above Node's pooled-socket reuse window, so a proxy (the playground's Next.js rewrite) never reuses a socket uvicorn just closed (ECONNRESET, #42); uvicorn's default is 5
 MODEL_NAMES = ("d1a-latest",)   # what /v1/models lists; any model name is answered, so a client that sends another name (the TypeSafe SDK default, say) still works
@@ -395,6 +396,7 @@ class Learning:
     def __init__(self, log_path=None, calibrator_path=None):
         self.log = FeedbackLog(log_path) if log_path else None
         self.calibrator_path, self._mtime, self._cal, self._lock = calibrator_path, None, None, threading.Lock()
+        self._ids, self._read, self._file = set(), 0, None   # decision ids in the log, the bytes logged() has read, and which file
 
     def calibrator(self):
         if not self.calibrator_path: return None
@@ -420,9 +422,28 @@ class Learning:
         replay_of = log.get("replay_of") if isinstance(log, dict) else None   # d1a.learning.loop.replay re-scoring an earlier decision
         meta = {**({"served": served} if served is not answers else {}), **({"flags": flags} if flags else {}),
                 **({"rules": fired} if fired else {})} or None   # flags: #237; rules: #252
-        with self._lock: did = self.log.decision(req.state, questions, answers, run=run, meta=meta,
-                                                 use_case=req.use_case, temperature=temperature, replay_of=replay_of)
+        with self._lock:
+            did = self.log.decision(req.state, questions, answers, run=run, meta=meta,
+                                    use_case=req.use_case, temperature=temperature, replay_of=replay_of)
+            self._ids.add(did)
         return served, did
+
+    def logged(self, did):
+        """Whether the log holds decision `did`. This server's own decisions are known as they are logged; any other id is
+        looked up in the part of the log not read yet, and all of it is read again once the file was replaced or rotated."""
+        with self._lock:
+            try: st = self.log.path.stat()
+            except FileNotFoundError: return False
+            if (st.st_dev, st.st_ino) != self._file or st.st_size < self._read:
+                self._ids, self._read, self._file = set(), 0, (st.st_dev, st.st_ino)
+            if did in self._ids: return True
+            with open(self.log.path, "rb") as f:
+                f.seek(self._read)
+                for line in f:
+                    if not line.endswith(b"\n"): break   # still being written: read it next time
+                    self._read += len(line)
+                    if line.strip() and (e := json.loads(line))["kind"] == "decision": self._ids.add(e["id"])
+            return did in self._ids
 
     def outcome(self, did, labels, meta=None):
         with self._lock: self.log.outcome(did, labels, meta)
@@ -469,7 +490,7 @@ def prepare(req):
 
 app = FastAPI(title="d1a")
 app.state.embedder = None   # /v1/embeddings: loaded on first use (D1A_EMBED_GGUF)
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"], expose_headers=["x-typesafe-request-id", "server-timing"])
+app.add_middleware(CORSMiddleware, allow_origins=CORS_ORIGINS, allow_methods=["*"], allow_headers=["*"], expose_headers=["x-typesafe-request-id", "server-timing"])
 
 
 PROTECTED = ("/v1", "/metrics")   # paths that need the bearer key when D1A_API_KEY is set: the API and the operational metrics
@@ -607,6 +628,8 @@ def feedback(f: Feedback):
     """Report the real outcome of an earlier decision (its decision_id from /v1/systemone), for d1a.learning.feedback to learn from."""
     if LEARNING.log is None:
         raise HTTPException(404, "feedback is off: start d1a.serving.serve with D1A_FEEDBACK_LOG=<path>")
+    if not LEARNING.logged(f.decision_id):   # an outcome for no decision would only grow the log: what a forged or mistyped id sends
+        raise HTTPException(422, "decision_id names no decision in the decision log")
     LEARNING.outcome(f.decision_id, f.labels, {k: v for k, v in (("src", f.src), ("group", f.group)) if v} or None)
     return {"ok": True}
 

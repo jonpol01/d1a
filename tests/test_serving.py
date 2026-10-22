@@ -3,9 +3,14 @@ memory, the permute demo endpoint and the API key. Also the pass-sizing it relie
 d1a.backends.cuda_graphs, and DecisionModel._rows_hidden's copies of a cached state. No weights; stand-in models record
 what the server asks of them."""
 import itertools
+import json
+import os
 import random
+import subprocess
+import sys
 import weakref
 from contextlib import nullcontext
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -224,6 +229,31 @@ def test_api_key_gates_the_api_and_every_response_names_its_request(monkeypatch)
             r = client.get("/v1/models", headers=headers)
             assert r.status_code == 401 and r.headers["x-typesafe-request-id"], headers
         assert client.get("/openapi.json").status_code == 200
+
+
+def test_browsers_may_call_only_from_the_origins_in_d1a_cors_origins():
+    """CORS was open to every origin, so any site open in a browser on the server's machine could post to it, outcomes
+    included (#320). Now no origin may by default, and D1A_CORS_ORIGINS names those that may, on both servers. The
+    middleware is built at import, so each setting gets its own interpreter."""
+    code = """if True:
+        import json
+        from fastapi.testclient import TestClient
+        from d1a.serving import media, serve
+        allowed = {}
+        for name, app, path in (("serve", serve.app, "/v1/feedback"), ("media", media.app, "/v1/systemone/media")):
+            for origin in ("https://app.example", "https://elsewhere.example"):
+                r = TestClient(app).options(path, headers={"origin": origin, "access-control-request-method": "POST",
+                                                           "access-control-request-headers": "content-type"})
+                allowed[f"{name} {origin}"] = r.headers.get("access-control-allow-origin")
+        print(json.dumps(allowed))"""
+    root = Path(__file__).resolve().parent.parent
+    for setting, ok in (("", set()), ("https://app.example, https://other.example", {"https://app.example"})):
+        env = {**os.environ, "D1A_CORS_ORIGINS": setting}
+        out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=env, cwd=root, encoding="utf-8")
+        assert out.returncode == 0, out.stderr
+        allowed = json.loads(out.stdout.splitlines()[-1])
+        assert allowed == {f"{n} {o}": (o if o in ok else None) for n in ("serve", "media")
+                           for o in ("https://app.example", "https://elsewhere.example")}, (setting, allowed)
 
 
 # --- sizing passes ------------------------------------------------------------------------------------------------------
