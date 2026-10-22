@@ -26,6 +26,7 @@ from typing import Literal
 from d1a.core.api import SystemOneRequest, answer_in_passes, conditional, in_request_order, output_tokens, to_answers, to_record
 from d1a.backends.checkpoint import Checkpoint
 from d1a.backends.device import default_device, empty_cache
+from d1a.backends.torch import attn_to_load
 from d1a.core.encoding import encode, layout, rows_of
 from d1a.core.head import PointerHead
 
@@ -104,7 +105,7 @@ class MediaModel:
         self.proc = AutoProcessor.from_pretrained(meta.base, revision=meta.base_revision)
         self.tok = self.proc.tokenizer
         # straight onto the device: loading on the CPU and moving it holds two copies at once (15 GB peak for E2B on a Mac)
-        full = AutoModelForImageTextToText.from_pretrained(meta.base, revision=meta.base_revision, dtype=dtype, attn_implementation="sdpa", device_map=device)
+        full = AutoModelForImageTextToText.from_pretrained(meta.base, revision=meta.base_revision, dtype=dtype, attn_implementation=attn_to_load("sdpa"), device_map=device)
         inner = full.model
         if not (hasattr(inner, "vision_tower") and hasattr(inner, "audio_tower")):
             raise SystemExit(f"{meta.base} has no vision and audio encoders; the media server is for Gemma 4 bases")
