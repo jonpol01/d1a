@@ -99,12 +99,15 @@ def test_a_decision_taken_between_tokens_gets_the_error_when_the_adapter_switch_
         server.close()
 
 
-def held(model, chat_prompts="the server's prompt cache"):
+def held(model, chat_prompts="the server's prompt cache", tok="tok"):
     """server_async stand-in: one Server-like object holding `model`, whose run_task runs fn at once."""
     def run_task(fn):
-        f = Future(); f.set_result(fn(model, "tok")); return f
+        f = Future()
+        try: f.set_result(fn(model, tok))
+        except Exception as e: f.set_exception(e)
+        return f
     s = SimpleNamespace(model=model, checkpoint=SimpleNamespace(path="/nowhere"), run_task=run_task, between_tokens=lambda: None,
-                        chat_prompts=chat_prompts)
+                        chat_prompts=chat_prompts, tok=tok)
 
     @asynccontextmanager
     async def server_async():
@@ -120,7 +123,7 @@ def test_chat_on_a_merged_model_is_refused_with_501(monkeypatch):
 
 
 def test_a_stream_sends_each_piece_as_it_comes_then_the_finish_and_done(monkeypatch):
-    def fake_generate(model, tok, req, model_dir=None, model_name="d1a", on_text=None, between=None, cache=None):
+    def fake_generate(model, tok, req, model_dir=None, model_name="d1a", on_text=None, between=None, cache=None, context=None):
         assert cache == "the server's prompt cache"   # every chat of the server shares one, so a next step finds the last one's
         for piece in ("Hel", "lo"): on_text(piece)
         return {"choices": [{"finish_reason": "stop", "message": {"role": "assistant", "content": "Hello"}}]}
@@ -185,10 +188,48 @@ def test_an_empty_answer_is_logged_with_the_roles_before_it_never_their_text():
     assert openai_compat.last_roles(forged) == "other > other > other"   # a client's role string never reaches the log as is
 
 
+class WordTok:
+    """A tokenizer stand-in: one token per word; the chat template joins the messages' text."""
+    def apply_chat_template(self, messages, tools=None, tokenize=False, add_generation_prompt=True):
+        return " ".join(m.get("content") or "" for m in messages)
+
+    def __call__(self, text, add_special_tokens=False):
+        return {"input_ids": text.split()}
+
+
+def test_a_prompt_past_the_models_context_is_refused_with_openais_error(tmp_path, monkeypatch):
+    """A 237,592-token prompt held the model thread 16 minutes, 5 times (2026-10-21), while every other chat waited. A
+    prompt whose tokens and asked-for completion exceed the context (config.json's max_position_embeddings) is refused
+    before any prefill, with OpenAI's context_length_exceeded, which clients such as Hermes answer by compressing; both
+    the plain and the streamed endpoint answer it with a 400 before any stream byte."""
+    for d, cfg in (("gemma", {"text_config": {"max_position_embeddings": 131072}}), ("flat", {"max_position_embeddings": 4096}), ("none", {})):
+        (tmp_path / d).mkdir(); (tmp_path / d / "config.json").write_text(json.dumps(cfg), encoding="utf-8")
+    assert [openai_compat.model_context(str(tmp_path / d)) for d in ("gemma", "flat", "none", "missing")] == [131072, 4096, None, None]
+    req = lambda words, **kw: openai_compat.ChatRequest(messages=[{"role": "user", "content": " ".join(["w"] * words)}], **kw)
+    assert openai_compat.check_context(WordTok(), req(90, max_tokens=10), 100) == 90           # exactly fits
+    assert openai_compat.check_context(WordTok(), req(5000), None) == 5000                     # no context known: no limit
+    with pytest.raises(openai_compat.ContextTooLong) as e:
+        openai_compat.check_context(WordTok(), req(60), 100)                                   # 60 + the default 1024 > 100
+    assert (e.value.prompt, e.value.completion, e.value.context) == (60, 1024, 100)
+    body = e.value.body()["error"]
+    assert body["code"] == "context_length_exceeded" and body["type"] == "invalid_request_error" and "maximum context length is 100 tokens" in body["message"]
+    assert openai_compat.context_length(str(tmp_path / "gemma"), 32768) == 32768     # D1A_CHAT_CONTEXT caps below the model's
+    assert openai_compat.context_length(str(tmp_path / "flat"), 200000) == 4096      # and never raises it
+    assert openai_compat.context_length(str(tmp_path / "none"), 2048) == 2048 and openai_compat.context_length(str(tmp_path / "none")) is None
+    monkeypatch.setattr(openai_compat, "context_length", lambda model_dir, cap=None: 100)
+    monkeypatch.setattr(serve, "server_async", held(SimpleNamespace(loras=["one"]), tok=WordTok()))
+    monkeypatch.setattr(openai_compat, "generate_chat", lambda *a, **k: pytest.fail("the model ran on a prompt past its context"))
+    with TestClient(serve.app) as client:
+        for stream in (False, True):
+            r = client.post("/v1/chat/completions", json={"messages": [{"role": "user", "content": " ".join(["w"] * 200)}], "stream": stream})
+            assert r.status_code == 400 and r.headers["content-type"].startswith("application/json")
+            assert r.json()["error"]["code"] == "context_length_exceeded"
+
+
 def test_d1a_chat_cache_mb_0_turns_the_chat_prompt_cache_off(monkeypatch):
     seen = []
 
-    def fake_generate(model, tok, req, model_dir=None, model_name="d1a", on_text=None, between=None, cache=None):
+    def fake_generate(model, tok, req, model_dir=None, model_name="d1a", on_text=None, between=None, cache=None, context=None):
         seen.append(cache)
         return {"choices": [{"finish_reason": "stop", "message": {"role": "assistant", "content": "Hello"}}]}
     monkeypatch.setattr(serve, "server_async", held(SimpleNamespace(loras=["one"]), chat_prompts=None))

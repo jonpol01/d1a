@@ -177,6 +177,9 @@ r = client.chat.completions.create(model="d1a-chat", messages=[{"role": "user", 
   and they go with the model at an idle unload. Measured with D1A-E4B-it on an M1 Max: an agent step on a 20k-token prompt takes 1–1.7 s instead of 33 s, and a
   new session with the same 20k-token system prompt 2.2 s.
 - **JSON mode** asks the model for JSON in the prompt; there is no constrained decoding.
+- **The model's context is a hard limit:** a request whose prompt and `max_tokens` (1024 when not sent) exceed it
+  (131,072 tokens for D1A-E4B-it, `max_position_embeddings` in the model's config) gets a 400 at once, OpenAI's
+  `context_length_exceeded`, and is never run. Clients that compress on that error (Hermes does) shorten and resend.
 - **A tool call cut off by `max_tokens`** is dropped: the answer keeps the text before it, with no tool call and
   `finish_reason` `"length"`, so retry with a larger `max_tokens`.
 - **mem0:** set the OpenAI LLM and embedder base URL to the server. Measured with D1A-E2B-it: facts extracted, graph relations

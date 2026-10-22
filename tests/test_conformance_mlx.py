@@ -365,3 +365,27 @@ def test_an_empty_chat_answer_logs_its_context_without_text(checkpoint, tmp_path
     monkeypatch.setattr(openai_compat, "pieces", lambda *a, **k: iter([("Fine.", 1, "stop")]))
     generate_chat(model, tok, ChatRequest(messages=messages, max_tokens=4), run)
     assert "empty answer" not in caplog.records[-1].getMessage()
+
+
+@needs_mlx
+def test_a_chat_past_the_models_context_is_refused_before_any_prefill(checkpoint, tmp_path, monkeypatch):
+    """generate_chat refuses a prompt that, with its completion, exceeds the model's context, before the prefill: it
+    raises ContextTooLong (served as a 400) and never runs the model. A prompt that fits answers as before."""
+    from d1a.backends.checkpoint import Checkpoint, LoadOptions, load
+    from d1a.backends.mlx import export_mlx
+    from d1a.serving import openai_compat
+    from d1a.serving.openai_compat import ChatRequest, ContextTooLong, generate_chat
+    run = tmp_path / "unmerged"
+    export_mlx(Checkpoint(checkpoint), run, unmerged=True)
+    (run / "chat_template.jinja").write_text("{% for m in messages %}{{ m['content'] }}{% endfor %}", encoding="utf-8")
+    tok, model = load(str(run), "mps", LoadOptions(backend="mlx"))
+    monkeypatch.setattr(openai_compat, "context_length", lambda model_dir, cap=None: 64)
+    short = ChatRequest(messages=[{"role": "user", "content": "Order 4411 arrived late."}], max_tokens=4, temperature=0.0)
+    assert generate_chat(model, tok, short, run)["usage"]["completion_tokens"] <= 4
+    def no_prefill(*a, **k):
+        raise AssertionError("the model ran on a prompt past its context")
+    monkeypatch.setattr(openai_compat, "pieces", no_prefill)
+    long = ChatRequest(messages=[{"role": "user", "content": "Order 4411 arrived late. " * 40}], max_tokens=4)
+    with pytest.raises(ContextTooLong) as e:
+        generate_chat(model, tok, long, run)
+    assert e.value.context == 64 and e.value.prompt + e.value.completion > 64
