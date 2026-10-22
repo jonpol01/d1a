@@ -98,6 +98,13 @@ def probs_one(model, enc, prefix, keep):
 
 # --- the model ----------------------------------------------------------------------------------------------------------
 
+def attn_to_load(attn):
+    """The attn_implementation to load a model with. SDPA is left to transformers, which gives it to every part of the
+    model that has it: named, it fails on transformers 5.20 for a model with a part that has none (Gemma 4's audio
+    tower), where 5.17 took it (#324). The text model gets SDPA either way."""
+    return None if attn == "sdpa" else attn
+
+
 class DecisionModel(nn.Module):
     def __init__(self, name, tok, device, lora=None, revision=None, attn=None, head_dim=256, lora_targets="all", dtype=torch.float32):
         super().__init__()
@@ -105,7 +112,7 @@ class DecisionModel(nn.Module):
         # with the float 4D mask), SDPA on CUDA (which accepts arbitrary additive masks). fp32 trains and gives the exact
         # numbers; bf16 is a serving option for large backbones.
         attn = attn or ("sdpa" if str(device).startswith("cuda") else "eager")
-        self.lm = AutoModelForCausalLM.from_pretrained(name, revision=revision, dtype=dtype, attn_implementation=attn).model
+        self.lm = AutoModelForCausalLM.from_pretrained(name, revision=revision, dtype=dtype, attn_implementation=attn_to_load(attn)).model
         # a multimodal checkpoint (Gemma 4) loads as a wrapper around its text model: keep the text model only, so the vision
         # and audio towers are neither in memory nor matched by the LoRA target names
         self.lm = Attention.unwrap(self.lm)
