@@ -442,7 +442,9 @@ class Learning:
                 for line in f:
                     if not line.endswith(b"\n"): break   # still being written: read it next time
                     self._read += len(line)
-                    if line.strip() and (e := json.loads(line))["kind"] == "decision": self._ids.add(e["id"])
+                    try: e = json.loads(line) if line.strip() else {}
+                    except ValueError: continue   # cut short by a crash mid-write and run into the next line: no decision to vouch for
+                    if e.get("kind") == "decision": self._ids.add(e["id"])
             return did in self._ids
 
     def outcome(self, did, labels, meta=None):

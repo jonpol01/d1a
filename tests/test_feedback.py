@@ -270,7 +270,8 @@ def test_serve_logs_decisions_accepts_outcomes_and_applies_a_reloaded_calibrator
 def test_feedback_takes_outcomes_only_for_decisions_in_the_log(tmp_path, monkeypatch):
     """POST /v1/feedback refuses a decision_id the log does not hold, and writes nothing (#320): an outcome for no decision
     only grows the log, and is what a forged or mistyped id sends. A decision another writer logged is found by reading the
-    log, and a replaced log is read again from its start."""
+    log, one still being written once its line ends, past a line a crash cut short; a replaced log is read again from its
+    start. A body sent as text/plain, the form a cross-site page can send without CORS, is refused whatever it holds."""
     from fastapi.testclient import TestClient
     from d1a.serving import serve
     path = tmp_path / "log.jsonl"
@@ -284,12 +285,23 @@ def test_feedback_takes_outcomes_only_for_decisions_in_the_log(tmp_path, monkeyp
         assert post(first).json() == {"ok": True}
         second = decide()                                                   # logged after the log was read
         assert post(second).json() == {"ok": True}
+        size = path.stat().st_size
+        r = client.post("/v1/feedback", content=json.dumps({"decision_id": second, "labels": {"resolved": True}}),
+                        headers={"content-type": "text/plain"})
+        assert r.status_code == 422 and path.stat().st_size == size
+        partial = "p" * 32
+        with open(path, "a", encoding="utf-8") as f:
+            f.write('{"kind": "decision", "id": "' + "c" * 32 + '", "st' + json.dumps({"kind": "outcome", "id": "x"}) + "\n")   # a crash mid-write, run into the next append
+            f.write(json.dumps({"kind": "decision", "id": partial}))       # its line not ended yet
+        assert post(partial).status_code == 422
+        with open(path, "a", encoding="utf-8") as f: f.write("\n")
+        assert post(partial).json() == {"ok": True}
         replaced = tmp_path / "new.jsonl"
         replaced.write_text("\n" * (path.stat().st_size + 10), encoding="utf-8")   # a longer file, so only its identity says it is new
         os.replace(replaced, path)
         third = decide()
         assert post(first).status_code == 422 and post(third).json() == {"ok": True}
-    assert [e["id"] for e in FeedbackLog(path).events() if e["kind"] == "outcome"] == [third]
+    assert [json.loads(l)["id"] for l in path.read_text(encoding="utf-8").splitlines() if '"outcome"' in l] == [third]
 
 
 def test_the_outcome_calibrator_keeps_answers_read_at_different_temperatures_apart(tmp_path, capsys, monkeypatch):
