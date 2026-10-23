@@ -15,7 +15,7 @@ accuracy drops or whose calibration (ECE, NLL) gets worse. Exit 0 PASS, 1 FAIL, 
     python scripts/quality_gate.py --base origin/main --head <pr branch> --post-status     # sets the PR's required check
     python scripts/quality_gate.py --base origin/main --head origin/main --run JohnP1/d1a-e4b-mlx-q8@v0.6 \
         --head-run <new checkpoint> --card-suites --playground ../d1a-playground    # a new checkpoint against the served one
-    python scripts/quality_gate.py ... --all-suites --sequential    # one model in memory at a time (the Mac mini, 32 GB)
+    python scripts/quality_gate.py ... --all-suites --sequential    # one model in memory at a time (the serving Mac, 32 GB)
     python scripts/quality_gate.py --base <old pin> --head <new pin> --playground . --post-status jonpol01/d1a-playground@<pr head>
     python scripts/quality_gate.py --base origin/main --head <pr branch> --playground ../d1a-playground --use-case routing
         # the routing requests also carry "use_case": "routing", as d1a.agents.presets' clients send them
@@ -288,7 +288,7 @@ def suite_list(suites, card, every=False):
 
 def module(path, name):
     """A module's path in the checkout at `path`: d1a's layout since #60 (d1a.serving.serve, d1a.eval.benchmark), or the
-    flat one before it (d1a.serve, d1a.benchmark), so a version from either side can be gated, e.g. the Mac mini's pin."""
+    flat one before it (d1a.serve, d1a.benchmark), so a version from either side can be gated, e.g. the serving Mac's pin."""
     new = {"serve": "d1a.serving.serve", "benchmark": "d1a.eval.benchmark"}[name]
     return new if (Path(path) / (new.replace(".", "/") + ".py")).exists() else f"d1a.{name}"
 
@@ -351,7 +351,7 @@ def one_side(reqs, port):
 def run_pair(base_dir, head_dir, reqs, run, ports, logs, head_run=None, head_learning=None, sequential=False):
     """Both servers answer every request, interleaved; the head server loads `head_run` when given (a new checkpoint) and
     reads `head_learning` (a settings file) when given. `sequential`: one server at a time, base then head, for a machine
-    that cannot hold both models at once (the Mac mini, #285). The floor is measured the same way, so the latency check
+    that cannot hold both models at once (the serving Mac, #285). The floor is measured the same way, so the latency check
     still compares like with like; the suites already load one model at a time."""
     if not sequential:
         with server(base_dir, ports[0], run, f"{logs}.base.log"), server(head_dir, ports[1], head_run or run, f"{logs}.head.log", head_learning):
@@ -472,7 +472,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--base", required=True, help="git ref or directory of the version to compare against")
     ap.add_argument("--head", default=str(ROOT), help="git ref or directory of the new version (default: this working tree)")
-    ap.add_argument("--run", default="JohnP1/d1a-e4b-mlx-q8@v0.6", help="the weights both servers load (default: what the Mac mini serves)")
+    ap.add_argument("--run", default="JohnP1/d1a-e4b-mlx-q8@v0.6", help="the weights both servers load (default: what the serving Mac serves)")
     ap.add_argument("--playground", help="a d1a-playground checkout (npm ci done): its demo examples, as its smoke test builds them")
     ap.add_argument("--demo-requests", default=str(ROOT / "runs/labeler-replay/demo-requests.json"), help="the demo requests as a file, without --playground")
     ap.add_argument("--replay", default=str(ROOT / "runs/labeler-replay"), help="the labeler replay kit (labeler-calls.jsonl, questions.json); private, never committed")
@@ -496,7 +496,7 @@ def main():
     ap.add_argument("--tol", type=float, default=1e-6, help="largest probability move allowed (default 1e-6)")
     ap.add_argument("--ports", default="8101,8102")
     ap.add_argument("--sequential", action="store_true", help="run the base server, then the head server, never both at once: "
-                    "half the peak memory, for a machine that cannot hold both models (the Mac mini); requests are not interleaved")
+                    "half the peak memory, for a machine that cannot hold both models (the serving Mac); requests are not interleaved")
     ap.add_argument("--out", default=str(ROOT / "runs/quality-gate"))
     ap.add_argument("--post-status", nargs="?", const="", metavar="OWNER/REPO@COMMIT",
                     help="set the required quality-gate status to the verdict: on the head's commit (no value), or on that commit")

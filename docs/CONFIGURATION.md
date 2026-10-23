@@ -83,8 +83,8 @@ Fixed in code, not settings: up to 64 requests per batch (`MAX_BATCH`), a 75 s k
 ## Logs
 
 The server writes its log to standard output and standard error. It keeps no log file of its own: whatever starts it
-decides where the output goes. On the Mac mini, the LaunchAgents write it to `~/Library/Logs/d1a-model.log`
-([below](#the-mac-mini-playground-deployment)).
+decides where the output goes. On the serving Mac, the LaunchAgents write it to `~/Library/Logs/d1a-model.log`
+([below](#the-always-on-playground-deployment)).
 
 | Line | When | Holds |
 |---|---|---|
@@ -244,7 +244,7 @@ learned from; `python -m d1a.agents.demo` keeps its decisions out of it.
 |---|---|---|
 | `D1A_REMOTE_API_KEY` | `local` | The bearer key sent to `--remote`; match the server's `D1A_API_KEY`. |
 
-## The Mac mini playground deployment
+## The always-on playground deployment
 
 The playground (jonpol01/d1a-playground) runs D1A as launchd services through `mini.sh`, configured by `.demo/mini.env`
 (`MODEL_RUN`, `FEEDBACK_LOG`, `OUTCOME_CALIBRATOR`, `LABEL_OUTCOMES`, ...). The playground's README documents those keys.

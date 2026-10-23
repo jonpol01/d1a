@@ -50,7 +50,7 @@ and every decision stays as it was in 0.5.0.
 
 - The model server prints a line per chat: prompt tokens, how many came from the prompt cache, completion tokens and
   time (#306). It holds counts only, never text. `D1A_CHAT_LOG=0` turns it off. docs/CONFIGURATION.md gains a Logs
-  section: what the server writes, what it never holds, and where the Mac mini keeps it.
+  section: what the server writes, what it never holds, and where the serving Mac keeps it.
 - The OpenAI chat endpoint keeps a prompt cache (#304). A chat that continues an earlier one prefills only its new
   tokens: an agent's next step, a conversation's next turn, or a new session with the same system prompt. This covers
   up to 16 prompts in 1 GiB (`D1A_CHAT_CACHE_MB`; `0` turns it off). With D1A-E4B-it on an M1 Max, an agent step
@@ -77,7 +77,7 @@ and every decision stays as it was in 0.5.0.
   `promotion.hold` (serve the recalibrated top option, but keep the model's own answer for held options such as severity
   P0/P1). Flags and rules may name a local-path run.
 - `scripts/quality_gate.py --sequential` (#286): the base server answers every request, stops, then the head server does, so
-  only one model is in memory at a time. The Mac mini (32 GB, with its other services) cannot hold two, which stopped the
+  only one model is in memory at a time. The serving Mac (32 GB, with its other services) cannot hold two, which stopped the
   #285 baseline gate there. The latency floor is measured the same way, so the latency check still compares like with like.
 - OpenAI-compatible chat and embeddings on `d1a.serving.serve` (#274), so apps written for the OpenAI API (mem0, n8n,
   chat UIs) can use D1A's model instead of a separate chat server.
@@ -175,7 +175,7 @@ and every decision stays as it was in 0.5.0.
 - `scripts/quality_gate.py --expect-flips` with `--head-learning` also fails a request a decode rule applies to that did not flip
   (its use case, the run, the base's choice in `from`, p(option) >= t), so the gate shows the rule fired everywhere it should,
   not only that every flip was eligible (#259).
-- docs/SELF_LEARNING.md and the PR-labeler recipe: severity's decode rule (#259) is available, not active. On John's repositories a blind
+- docs/SELF_LEARNING.md and the PR-labeler recipe: severity's decode rule (#259) is available, not active. On the maintainer's repositories a blind
   check found it right on 3 of the 6 states it fires on, against 2 for v0.6's own answer, so it stays unset there (#252).
 - README.md is now a short front page: what D1A is, what it is proven at, a quick start, which build to pick, the API
   shape, how it works, a plain account of what is learned from outcomes, and a dated status. The rest moved, unchanged
@@ -221,7 +221,7 @@ and every decision stays as it was in 0.5.0.
 - OpenAI chat with `tools`: an answer that ran out of `max_tokens` inside a tool call returned the half-written Gemma 4
   markup as `content` (#278). It now returns the text before it and no tool call, with `finish_reason` `"length"`.
 - `/v1/embeddings` runs its GGUF embedder on the GPU (#277). On the CPU, llama-cpp-python's default, its vectors were only
-  ~0.99 cosine to the ones LM Studio stored from the same file; now they are the same (1.00000 on the Mac mini).
+  ~0.99 cosine to the ones LM Studio stored from the same file; now they are the same (1.00000 on the serving Mac).
 - `uv.lock` matches `pyproject.toml` again: it still named d1a 0.3.0, and newer uv narrows the CUDA wheels to Linux (#269).
 - A `noul` question whose criteria use keys other than `true` and `false` (for example `yes` and `no`) is refused with
   a 422 that names the accepted keys (#265). Before, the request validated and the question was answered without its
@@ -336,7 +336,7 @@ model server no longer aborts when photo, voice or video requests overlap other 
 | D1A-E2B v0.6, MLX 8-bit (with photo, voice and video encoders) | `JohnP1/d1a-e2b-mlx-q8@v0.6` |
 | D1A-E2B v0.6, Core ML (text, ≤ 512 tokens) | `JohnP1/d1a-e2b-coreml@v0.6` |
 
-The Mac mini serves `JohnP1/d1a-e4b-mlx-q8@v0.6` with this code (demo smoke test 145/145), and the quality gate
+The serving Mac serves `JohnP1/d1a-e4b-mlx-q8@v0.6` with this code (demo smoke test 145/145), and the quality gate
 on real weights finds no changed answer between 0.4.0 and 0.5.0. Package 0.5.0 serves every model tag from v0.1 to v0.6.
 
 ### Upgrade notes (from 0.4.0)
@@ -356,7 +356,7 @@ Core ML builds for the Apple Neural Engine, one page for every setting, and the 
 
 - **v0.6 models.** D1A-E4B v0.6 and D1A-E2B v0.6 are the defaults (`d1a.core.versions.LATEST`). E4B labels current pull
   requests better than v0.5 (severity 79.1%, change type 90.6% on 487 PRs newer than its training). E2B v0.6 learns
-  every D1A skill at a fraction of the cost (0.20 s per request on a Mac mini M4). Both ship as release exceptions,
+  every D1A skill at a fraction of the cost (0.20 s per request on an M4 Mac). Both ship as release exceptions,
   with the reasons in their model cards.
 - **Apple Neural Engine.** Both models run through Core ML (`JohnP1/d1a-e4b-coreml`, `JohnP1/d1a-e2b-coreml`, text up
   to 512 tokens, with a reference runner); README "Apple Neural Engine (Core ML)" compares all four builds.
@@ -563,14 +563,14 @@ Core ML builds for the Apple Neural Engine, one page for every setting, and the 
 - README: JohnP1/d1a-e4b-coreml, the E4B v0.6 Core ML build, is public (#224).
 - `GET /v1/models` lists only `d1a-latest`; `kev-latest` and `jev-latest` are no longer listed (#230). The server still answers
   any model name a request sends, so existing clients and an unconfigured TypeSafe SDK client keep working.
-- `scripts/quality_gate.py`'s default `--run` is `JohnP1/d1a-e4b-mlx-q8@v0.6`, what the Mac mini serves since 2026-10-10 (#225, #226), and the README's model table and examples name v0.6. v0.6 has no routing temperature yet.
+- `scripts/quality_gate.py`'s default `--run` is `JohnP1/d1a-e4b-mlx-q8@v0.6`, what the serving Mac serves since 2026-10-10 (#225, #226), and the README's model table and examples name v0.6. v0.6 has no routing temperature yet.
 - The newest D1A-E4B is `v0.6` (`JohnP1/d1a-e4b@v0.6` and `JohnP1/d1a-e4b-mlx-q8@v0.6`, #225): v0.5 trained further on
   current pull-request labels (479 hermes-agent PRs created 2026-10-02 to 10-05, #198), with documents-v1, routing and low
   replay of every earlier skill. On 487 PRs created after all its training, MLX 8-bit: severity 74.7% → 79.1% (+4.3
   [+0.8, +7.8]), change type 86.7% → 90.6% (+3.9 [+1.2, +6.6]), P1 recall 0.22 → 0.35. Also documents-v1 +2.0 and
   factory routing +3.4, with lower calibration error on most suites (T 1.95). It is an explicit release exception:
   `scripts/decide.py` vetoes it against v0.5 (V1, hard-v1 −2.7 [−4.9, −0.5]; change type on the older frozen PR test set
-  −4.1 [−6.0, −2.3]; pooled −0.20 [−0.98, +0.52]), and it ships because the Mac mini's job is labelling current PRs.
+  −4.1 [−6.0, −2.3]; pooled −0.20 [−0.98, +0.52]), and it ships because the serving Mac's job is labelling current PRs.
   Pin `@v0.5` for hard-v1-style reasoning or the older PR-label conventions. v0.6 carries no use-case temperatures, so a
   `"use_case": "routing"` request is read at T 1.95; a refitted routing temperature follows as v0.6.1.
   `d1a.core.versions.latest()`, and the scripts and demos that take their default from it, now resolve to v0.6.
@@ -717,7 +717,7 @@ Core ML builds for the Apple Neural Engine, one page for every setting, and the 
   (`zero_shot.REVISION`, `--revision` to override).
 - `scripts/quality_gate.py` gates versions from before the package layout (#60) again. Each checkout's servers and
   benchmarks run its own module paths (`d1a.serving.serve`, or `d1a.serve` before #166), so it can gate a new main
-  against the Mac mini's pin.
+  against the serving Mac's pin.
 - `d1a.benchmark` no longer crashes after scoring a suite when an identical-option control (#38) is too long: the
   first option repeated K times can outgrow the row its question fit in (20 of decision-v2's first 100 on Gemma 4).
   Such controls are skipped and counted in `identical_options.skipped_overlong`, and the report is written.

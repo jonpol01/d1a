@@ -181,7 +181,7 @@ def sidecar_counts(meta):
 
 
 def source_coverage(a):
-    """A fine-tune (--init_from) trains on or replays every required_sources() entry (John, 2026-10-08: "make sure all gets
+    """A fine-tune (--init_from) trains on or replays every required_sources() entry (the maintainer, 2026-10-08: "make sure all gets
     in"), checked before any weights load. Its sources: the --data mix's sidecar <data>.json (or --data itself, a D1A
     partition), --suite (its whole train partition, or --replay records of it beside --data) and --extra_suites. A source
     left out on purpose is named in --allow_missing_sources with a --reason. -> what training_config.json records (None for
