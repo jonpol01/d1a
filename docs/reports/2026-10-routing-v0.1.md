@@ -6,7 +6,7 @@
 
 ## What we trained, and why
 
-The first work use case for D1A is model routing in an agent "software factory" (the SEAOS Hermes agent kit): send each task to the smallest model that handles it (small ~2-4B, medium ~9-30B, large = frontier), and answer the kit's other decisions in the same pass: at intake (which agent, is the target named, is the spec given, is "done" clear, should the operator ask the user first), when judging a card (done, blocked, needs a person, next step), and at tool calls (allow, ask, deny).
+The first work use case for D1A is model routing in an agent "software factory" (a Hermes agent kit): send each task to the smallest model that handles it (small ~2-4B, medium ~9-30B, large = frontier), and answer the kit's other decisions in the same pass: at intake (which agent, is the target named, is the spec given, is "done" clear, should the operator ask the user first), when judging a card (done, blocked, needs a person, next step), and at tool calls (allow, ask, deny).
 
 Zero-shot, D1A-E4B was usable but not reliable: 76-80% routing accuracy, the medium tier right about half the time, 6-8% of prompts sent to a model too small, and answers that moved when the wording of the tier descriptions changed.
 
