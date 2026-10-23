@@ -292,6 +292,31 @@ def test_an_sdpa_load_of_gemma4_leaves_the_choice_to_transformers(monkeypatch):
     assert asked == [None, None, "eager"]
 
 
+def test_the_torch_media_server_hands_a_video_its_frame_count_for_one_forward():
+    # transformers 5.20.2's Gemma4Model.forward takes num_frames_per_video but calls get_video_features without it, and that
+    # refuses to run (#325); 5.17 sends no count. The count is bound to that call for one forward, then removed.
+    from d1a.serving.media import video_frame_count
+
+    class Gemma4520:
+        def get_video_features(self, pixel_values_videos, video_position_ids=None, num_frames_per_video=None, **kw):
+            if num_frames_per_video is None: raise ValueError("`num_frames_per_video` is required")
+            return ("features", num_frames_per_video)
+
+        def forward(self, pixel_values_videos, video_position_ids=None, num_frames_per_video=None):
+            return self.get_video_features(pixel_values_videos, video_position_ids, return_dict=True)   # drops the count
+
+    model = Gemma4520()
+    extra = {"pixel_values_videos": "pv", "video_position_ids": "vp", "num_frames_per_video": 16}
+    with pytest.raises(ValueError):
+        model.forward(**extra)
+    with video_frame_count(model, extra):
+        assert model.forward(**extra) == ("features", 16)
+    assert "get_video_features" not in vars(model) and "num_frames_per_video" not in extra
+    older = {"pixel_values_videos": "pv", "video_position_ids": "vp"}
+    with video_frame_count(model, older):   # 5.17: nothing to hand over, nothing bound
+        assert "get_video_features" not in vars(model)
+
+
 def test_media_model_loads_on_demand_and_never_unloads_while_in_use():
     # an idle media server must give its ~10 GB back, but a request in flight keeps the model it is using
     from d1a.serving.media import OnDemand

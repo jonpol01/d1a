@@ -16,7 +16,7 @@ Two ways to serve it:
   It starts without the model, loads it on the first request (about 20-30 s) and drops it again after --idle-unload
   seconds without one (default 600; 0 keeps it loaded), so an idle server holds almost no memory.
 """
-import argparse, base64, copy, gc, io, sys, threading, time
+import argparse, base64, copy, functools, gc, io, sys, threading, time
 from contextlib import contextmanager
 import torch
 from fastapi import FastAPI, HTTPException
@@ -93,6 +93,21 @@ def decode_image(raw):
     return ImageOps.exif_transpose(Image.open(io.BytesIO(raw))).convert("RGB")
 
 
+@contextmanager
+def video_frame_count(model, extra):
+    """transformers 5.20.2's Gemma4Model.forward takes num_frames_per_video but drops it before get_video_features, which then
+    refuses to run (#325): for one forward, bind the processor's count to that call on this model (the caller holds the lock).
+    Without a count in `extra` (transformers 5.17 sends none), nothing changes."""
+    n = extra.pop("num_frames_per_video", None)
+    if n is None:
+        yield; return
+    model.get_video_features = functools.partial(type(model).get_video_features, model, num_frames_per_video=n)
+    try:
+        yield
+    finally:
+        del model.get_video_features
+
+
 class MediaModel:
     """A LoRA checkpoint on a Gemma 4 base, loaded with the base's vision and audio encoders."""
 
@@ -137,7 +152,7 @@ class MediaModel:
         n_head = len(layout(self.tok)[0]) + 1                  # leading ids + <state>
         prefix = state_ids[:n_head] + media_ids + state_ids[n_head:]
         types = [0] * n_head + media_types + [0] * (len(state_ids) - n_head)
-        with self.lock:
+        with self.lock, video_frame_count(self.model, extra):
             out = self.model(input_ids=torch.tensor([prefix], device=self.device), mm_token_type_ids=torch.tensor([types], device=self.device),
                              use_cache=True, **extra)
             ps = []
