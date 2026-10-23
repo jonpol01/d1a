@@ -3,7 +3,7 @@
 Every dataset a D1A model can train on, what it teaches, and which runs used how much. A model serves about 13 use
 cases with one set of weights, so it drifts away from whatever a fine-tune leaves out.
 
-**Two rules** (John, 2026-10-08):
+**Two rules** (the maintainer, 2026-10-08):
 - **All gets in.** Every fine-tune trains on or replays every source below. The mix tools refuse or replay a source a mix
   leaves out (#194), and `d1a.training.train` refuses the run (#211).
 - **All gets tested.** Every new checkpoint is gated on every suite (`scripts/quality_gate.py --all-suites`) and judged
@@ -30,7 +30,7 @@ cases with one set of weights, so it drifts away from whatever a fine-tune leave
 **Never trained on** (evaluation only):
 - every development and test partition;
 - `transfer-v4`, `night2` and the `external` suites;
-- the owner's hand-checked PR labels, the labeler replay kit, and the Mac mini's decision log (privacy: weights get
+- the owner's hand-checked PR labels, the labeler replay kit, and the serving Mac's decision log (privacy: weights get
   published).
 
 ## What each run used

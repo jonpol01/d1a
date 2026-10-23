@@ -1,6 +1,6 @@
 """A rewrite of the loading or model code against the module at --ref, on real weights: the same checkpoint loaded
 through each version in turn (one in memory at a time), the golden-vector record set (scripts/golden_vectors.py, ~209
-requests) scored by both, every probability compared, and load time and per-request latency measured. John's rule for
+requests) scored by both, every probability compared, and load time and per-request latency measured. The maintainer's rule for
 model.py, checkpoint.py and train.py rewrites: identical answers and equal-or-better latency, main against the branch.
 
     uv run python scripts/equivalence/real_weights.py --module d1a/backends/checkpoint.py --run JohnP1/d1a-e2b --device mps

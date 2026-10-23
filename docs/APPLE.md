@@ -35,11 +35,11 @@ D1A also runs on the Apple Neural Engine through Core ML, as a preview for iPhon
 - Each chunk runs in its own process.
 
 Both Core ML builds give the same answers as the full-precision model on every clear-cut question. On a Mac, MLX on the GPU
-is several times faster, so the Mac mini keeps MLX; Core ML is for iPhone and iPad, where it keeps the GPU free. The
+is several times faster, so the serving Mac keeps MLX; Core ML is for iPhone and iPad, where it keeps the GPU free. The
 photo, voice and video encoders are not converted yet. Each Core ML repository's `reference/run.py` answers a request from
 the downloaded files.
 
-Measured on 2026-10-11 on the same 28 real requests (42 questions, all ≤ 512 tokens), on an Apple M1 Max and a Mac mini M4.
+Measured on 2026-10-11 on the same 28 real requests (42 questions, all ≤ 512 tokens), on an Apple M1 Max and an Apple M4.
 
 | | E2B · MLX | E2B · Core ML | E4B · MLX | E4B · Core ML |
 |---|---|---|---|---|

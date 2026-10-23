@@ -1,6 +1,7 @@
 """d1a.core.hygiene and the pull-request checks (scripts/check_hygiene.py, scripts/release_notes.py --check-pr): AI
 attribution and local machine paths are refused, ordinary lines and other people's paths are not, and every pull request
 carries a changes fragment named for it. Paths here are built from pieces, so this file passes the check it tests."""
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -10,7 +11,14 @@ import pytest
 from d1a.core.hygiene import attribution, local_paths_in_diff, refuse_local_paths
 
 ROOT = Path(__file__).resolve().parents[1]
-HOME = "/Users/" + "john/"
+HOME = "/Users/" + "tester/"
+
+
+@pytest.fixture(autouse=True)
+def tester_is_one_of_ours(monkeypatch):
+    """The real list holds the owners' user names as hashes; the tests use a made-up one."""
+    from d1a.core import hygiene
+    monkeypatch.setattr(hygiene, "OWN_HOMES", hygiene.OWN_HOMES | {hashlib.sha256(b"tester").hexdigest()})
 TMP = "/private/tmp/" + "claude-501/x"
 
 
@@ -24,6 +32,13 @@ def test_local_paths_are_found_only_on_added_lines_and_only_ours():
     diff = "\n".join(["+++ b/docs/a.md", f"+run from {HOME}Develop", f"-was {TMP}", "+++ b/data/x.jsonl",
                       "+/Users/" + "Shared/d1a/labeler-decisions.jsonl", "+/Users/" + "seb/project/file.py", f"+see {TMP}/out"])
     assert [f for f, _ in local_paths_in_diff(diff)] == ["docs/a.md", "data/x.jsonl"]
+
+
+def test_an_own_home_is_found_wherever_and_however_it_is_written():
+    # inside another path, in capitals (macOS paths ignore case), and with no slash after it
+    for line in ("+cp /Users/x" + HOME + "a b", "+see " + HOME.upper() + "Develop", "+cd " + HOME.rstrip("/")):
+        assert local_paths_in_diff("+++ b/a.md\n" + line), line
+    assert not local_paths_in_diff("+++ b/a.md\n+cd " + HOME.rstrip("/") + "ny/x")   # another user whose name starts the same
 
 
 def test_the_hygiene_module_passes_its_own_check():

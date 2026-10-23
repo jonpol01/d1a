@@ -337,7 +337,7 @@ def test_each_pass_of_rows_gets_its_own_copy_of_the_cached_state(monkeypatch):
 def test_an_mlx_model_thread_never_touches_torchs_mps_stream(monkeypatch):
     """#244: torch's MPS stream is not thread-safe, and the media encoder uses it from a request thread. With an MLX model
     (mx.eval already waits) the model thread must never sync or free torch's MPS, even on a Mac whose server device is
-    "mps": a sync there racing an encode aborted the Mac mini's server ("commit an already committed command buffer")."""
+    "mps": a sync there racing an encode aborted the serving Mac's server ("commit an already committed command buffer")."""
     from d1a.serving import serve
     seen = []
     monkeypatch.setattr(serve, "sync", lambda device: seen.append(("sync", device)))
