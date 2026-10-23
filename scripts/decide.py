@@ -1,4 +1,4 @@
-"""One scorecard for a new checkpoint against the one it would replace (John, 2026-10-07, #202): every suite, the demos and
+"""One scorecard for a new checkpoint against the one it would replace (the maintainer, 2026-10-07, #202): every suite, the demos and
 the labeler replay judged together. One use case's drop is a follow-up, not a veto. CPU only: reads the files
 scripts/quality_gate.py writes (--out: suites/<suite>/{base,head}/rows.json, report.json), the live labeler check's dump
 and the replay kit's labels; loads no model; prints aggregates only (no PR text).

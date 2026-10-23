@@ -329,7 +329,7 @@ def test_an_agents_step_after_a_tool_call_answers_and_reuses_the_prompt_cache(ch
     (run / "chat_template.jinja").write_text(template, encoding="utf-8")
     tok, model = load(str(run), "mps", LoadOptions(backend="mlx"))
     tools = [{"type": "function", "function": {"name": "terminal", "parameters": {"type": "object", "properties": {"command": {"type": "string"}}}}}]
-    step1 = [{"role": "system", "content": "You are an operations agent on the Mac mini."}, {"role": "user", "content": "How full is the disk?"}]
+    step1 = [{"role": "system", "content": "You are an operations agent on the serving Mac."}, {"role": "user", "content": "How full is the disk?"}]
     step2 = step1 + [{"role": "assistant", "content": None, "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "terminal", "arguments": '{"command": "df -h /"}'}}]},
                      {"role": "tool", "tool_call_id": "call_1", "content": "/dev/disk3s1s1 228Gi 13Gi 12Gi 52% /"}]
     cache = PromptCache(1 << 30)

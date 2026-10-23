@@ -26,7 +26,7 @@ def test_nothing_here_uses_an_old_path():
     names = "|".join(sorted(MOVED, key=len, reverse=True))
     old = re.compile(rf"\bd1a\.({names})\b(?!\.py)|^\s*from d1a import ({names})\b|^\s*from \.({names}) import|\bd1a/({names})\.py\b", re.M)
     exempt = {"d1a/_layout.py", "tests/test_layout.py", "CHANGELOG.md",
-              # the gate starts OLD checkouts (the Mac mini's pin) by their own flat module paths
+              # the gate starts OLD checkouts (the serving Mac's pin) by their own flat module paths
               "scripts/quality_gate.py", "tests/test_quality_gate.py"}
     files = subprocess.run(["git", "ls-files", "*.py", "*.md", "*.sh", "*.yml", "*.toml"], cwd=ROOT, capture_output=True, text=True, check=True).stdout.split()
     hits = [f"{f}:{text.count(chr(10), 0, m.start()) + 1}: {m[0]}" for f in files

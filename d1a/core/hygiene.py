@@ -1,12 +1,25 @@
-"""What must never be published: a local path of the machines D1A is built on, and an AI-attribution line (John's rule:
+"""What must never be published: a local path of the machines D1A is built on, and an AI-attribution line (the maintainer's rule:
 commits and pull requests carry no Co-Authored-By: Claude and no "Generated with Claude Code"). Used by CI
 (scripts/check_hygiene.py) and before every Hugging Face upload, since a local path once reached a public model repo.
 """
+import hashlib
 import re
 from pathlib import Path
 
-# split so this file never holds one of the paths it looks for (CI scans every added line)
-LOCAL_PATH = re.compile(r"/Users/(john|soliva)/" "|" r"/private/tmp/" r"claude-" "|" r"/Vol" r"umes/")
+# The home folders of the machines D1A is built on, by the sha256 of their user name, so this public file names no one;
+# other people's paths (/Users/Shared, a contributor's own) are left alone. The other patterns are split so this file never
+# holds one of the paths it looks for (CI scans every added line).
+OWN_HOMES = {"96d9632f363564cc3032521409cf22a852f2032eec099ed5967c0d000cec607a",
+             "b2b5d2b6d117e164f8f6e551cccdbdca2e3d5014432008463b924c047d83ff0a"}
+HOME_PATH = re.compile(r"(?=/Users/([^/\s\"'`]+))", re.I)   # a lookahead: every /Users/ is read, even one inside another path
+LOCAL_OTHER = re.compile(r"/private/tmp/" r"claude-" "|" r"/Vol" r"umes/")
+
+
+def is_local_path(line):
+    """Whether `line` holds a path that exists only on the machines D1A is built on (macOS paths ignore case, so the
+    name is lowercased before it is hashed)."""
+    return bool(LOCAL_OTHER.search(line)) or any(hashlib.sha256(m.group(1).lower().encode()).hexdigest() in OWN_HOMES
+                                                 for m in HOME_PATH.finditer(line))
 ATTRIBUTION = re.compile(r"(?im)^\s*co-authored-by:.*\b(claude|anthropic)\b|generated with \[?claude code")
 TEXT_SUFFIXES = {".json", ".jsonl", ".md", ".txt", ".yaml", ".yml", ".cfg", ".toml", ".py", ".sh", ""}
 
@@ -22,7 +35,7 @@ def local_paths_in_diff(diff):
     for line in diff.splitlines():
         if line.startswith("+++ "):
             path = line[6:] if line.startswith("+++ b/") else line[4:]
-        elif line.startswith("+") and not line.startswith("+++") and LOCAL_PATH.search(line):
+        elif line.startswith("+") and not line.startswith("+++") and is_local_path(line):
             out.append((path, line[1:].strip()[:160]))
     return out
 
@@ -36,7 +49,7 @@ def local_paths_in_folder(folder, max_bytes=50_000_000):
             continue
         try: text = f.read_text(encoding="utf-8")
         except (UnicodeDecodeError, OSError): continue
-        out += [(str(f), line.strip()[:160]) for line in text.splitlines() if LOCAL_PATH.search(line)]
+        out += [(str(f), line.strip()[:160]) for line in text.splitlines() if is_local_path(line)]
     return out
 
 

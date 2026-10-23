@@ -41,7 +41,7 @@ SECTIONS = {"derived": "Derived files", "derived_noheader": "Derived files witho
 # "kev" is allowed in user-facing files only inside these, each for a reason:
 ALLOWED = [
     (r"jaredpalmer/kev[\w./-]*", "credit and upstream links, and Kev's Hub ids (the kev-suites dataset, Kev checkpoints)"),
-    (r"jonpol01/kev[\w./-]*", "John's Kev fork and the kev-usecases-poc demo repo, both named before D1A existed"),
+    (r"jonpol01/kev[\w./-]*", "the maintainer's Kev fork and the kev-usecases-poc demo repo, both named before D1A existed"),
     (r"JohnP1/kev-gemma4-e2b", "the prototype checkpoint's Hub id, published before the rename"),
     (r"Built on Kev|built on Kev|Modified from Kev|from Kev|by the Kev authors|Kev authors", "credit lines"),
 ]

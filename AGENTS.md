@@ -46,7 +46,7 @@ the question's `<decide>` token. README.md is the front page and docs/ is the us
   that moves them on purpose rebuilds it (`tests/golden/build_tiny_gemma4.py`) in the same PR and says why.
 
 ## Mac resources (mandatory)
-John's M1 Max (64 GB RAM, 1.8 TB data volume kept near full) ran out of disk on 2026-10-10: an fp32 4B benchmark grew swap
+The development Mac (an M1 Max with 64 GB RAM and a 1.8 TB data volume kept near full) ran out of disk on 2026-10-10: an fp32 4B benchmark grew swap
 to 11 GB on the same APFS container and the shell failed with ENOSPC at 121 MiB free.
 - Every long job (training, benchmark, gate, calibration, export, swe-verifier scoring) starts behind
   `. ~/d1a-runs/guard/preflight.sh; d1a_preflight <name> <new GB> <peak RAM GB> [--dtype fp32 --params-b N] || exit 1`.
@@ -61,7 +61,7 @@ to 11 GB on the same APFS container and the shell failed with ENOSPC at 121 MiB 
   Where the tool no longer lists a repo, delete one store file only after its `.refs` names nothing else, and log it.
 
 ## Quality bar (mandatory)
-John, 2026-10-06: every PR and every deploy is checked against the test suite, with numbers; nothing is downgraded or
+The maintainer, 2026-10-06: every PR and every deploy is checked against the test suite, with numbers; nothing is downgraded or
 stripped off, and new features come with their tests.
 - **Numbers in every PR body**, from the PR's own head:
   - the unit run and the golden vectors (`tests/test_conformance.py`);
@@ -75,7 +75,7 @@ stripped off, and new features come with their tests.
     flips on that question only, every request the rule applies to flipped, max |dp| 0 everywhere, and 0 flips without
     the file. For a
     torch-only path, also `scripts/equivalence/real_weights.py --interleave`;
-  - **the `quality-gate` check: off by default (John, 2026-10-06), turned on on demand,** for a pull request whose
+  - **the `quality-gate` check: off by default (the maintainer, 2026-10-06), turned on on demand,** for a pull request whose
     severity calls for it, and only when the local machine is free to run the gate (no training, scoring or other GPU
     work), so it never sits pending. To turn it on, run `gh workflow enable quality-gate` and add `quality-gate` to the
     `main` ruleset's required status checks; undo both afterwards. When on, a
@@ -84,21 +84,21 @@ stripped off, and new features come with their tests.
     passes on its exact head (`.github/workflows/quality-gate.yml` leaves it pending; any other pull request gets it as
     success). A new head starts pending again. A playground pin move posts to that pull request
     (`--post-status jonpol01/d1a-playground@<head>`, which checks that its mini.sh pins the gated head);
-  - after a pin move, the Mac mini's demo smoke test (`./mini.sh update` ends with `scripts/demo_smoke.mjs` in
+  - after a pin move, the serving Mac's demo smoke test (`./mini.sh update` ends with `scripts/demo_smoke.mjs` in
     jonpol01/d1a-playground).
 - **No downgrade.** The answers stay identical, or the PR shows they are better on held-out data. Accuracy and
   calibration never drop, and latency stays within run-to-run noise (measured interleaved, against main).
 - **No stripping.** No endpoint, demo, example, CLI flag or feature disappears silently. A removal updates a failing
   test on purpose, and the PR says why.
 - **New features ship with their tests** in the same PR.
-- **Fine-tunes keep every skill** (#167; `recipes/README.md`; John, 2026-10-07): a run that starts from a trained
+- **Fine-tunes keep every skill** (#167; `recipes/README.md`; the maintainer, 2026-10-07): a run that starts from a trained
   checkpoint trains on or replays every training source, as `d1a.eval.suites.train_sources()` lists them: hard-v1,
   devtools-v1, documents-v1 and every D1A train partition (PR labels incl. blast and Japanese, routing, JGLUE), plus
   decision-v7 through the trainer. Both mix tools refuse a new mix that leaves one out, and so does `d1a.training.train`
   with `--init_from` (#211): it reads the mix's sidecar `<data>.json` before any weights load. A source left out on
   purpose takes `--allow_missing_sources <source,...|all> --reason "<why>"`, recorded in `training_config.json`. Its gate
   adds `--all-suites` (below).
-- **Every model is judged on every suite** (John, 2026-10-07). A new or changed checkpoint runs
+- **Every model is judged on every suite** (the maintainer, 2026-10-07). A new or changed checkpoint runs
   `scripts/quality_gate.py --head-run <new> --all-suites`. That scores, against the checkpoint it replaces:
   - the five card suites;
   - every D1A suite's evaluation partitions, at the serving context;

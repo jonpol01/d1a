@@ -110,7 +110,7 @@ def test_card_suites():
 
 
 def test_all_suites_scores_every_card_suite_and_every_d1a_eval_partition_at_the_serving_context(tmp_path, monkeypatch):
-    """--all-suites (John's rule: a model is judged on every suite): the five card suites, then every evaluation partition
+    """--all-suites (the maintainer's rule: a model is judged on every suite): the five card suites, then every evaluation partition
     of every D1A suite, train partitions never, composites ("all", "<a>-<b>") once through their parts. A D1A partition is
     benchmarked at the serving context, so no record is skipped as longer than the training context."""
     import json
@@ -182,7 +182,7 @@ def test_the_head_server_loads_the_new_checkpoint(monkeypatch):
 
 
 def test_sequential_never_holds_two_servers_and_pairs_the_same_records(monkeypatch):
-    """--sequential (#285): the Mac mini cannot hold two models at once, so base answers everything, its server stops, then
+    """--sequential (#285): the serving Mac cannot hold two models at once, so base answers everything, its server stops, then
     head does. Never two servers alive together; the records pair as interleaved ones do (same order, both sides)."""
     from contextlib import contextmanager
     alive, peak, order = set(), [0], []
@@ -207,7 +207,7 @@ def test_sequential_never_holds_two_servers_and_pairs_the_same_records(monkeypat
 
 
 def test_each_checkout_runs_its_own_module_paths(tmp_path):
-    """A version from before the package layout (#60), such as the Mac mini's pin, serves as d1a.serve; a newer one as d1a.serving.serve."""
+    """A version from before the package layout (#60), such as the serving Mac's pin, serves as d1a.serve; a newer one as d1a.serving.serve."""
     old, new = tmp_path / "old", tmp_path / "new"
     (old / "d1a").mkdir(parents=True); (old / "d1a/serve.py").write_text("", encoding="utf-8"); (old / "d1a/benchmark.py").write_text("", encoding="utf-8")
     for f in ("d1a/serving/serve.py", "d1a/eval/benchmark.py"):

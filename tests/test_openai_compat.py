@@ -139,7 +139,7 @@ def test_a_stream_sends_each_piece_as_it_comes_then_the_finish_and_done(monkeypa
 
 
 def test_the_server_prints_each_chats_log_line(capsys, monkeypatch):
-    """The chat's log line (prompt tokens, cached tokens, time) reaches the server's output, where the Mac mini's
+    """The chat's log line (prompt tokens, cached tokens, time) reaches the server's output, where the serving Mac's
     LaunchAgent log keeps it; without a handler Python dropped it."""
     import logging
     before = logging.getLogger("d1a.chat").handlers[:], logging.getLogger("d1a.chat").propagate, logging.getLogger("d1a.chat").level
@@ -286,7 +286,7 @@ def test_embeddings_are_off_without_a_gguf_and_unit_length_with_one(monkeypatch)
 
 def test_the_embedder_runs_every_layer_on_the_gpu(monkeypatch):
     """llama.cpp on the CPU (llama-cpp-python's default, n_gpu_layers=0) gives vectors ~0.99 cosine to the ones LM Studio
-    stored with Metal; all layers offloaded gives the same vectors. Measured on the Mac mini (#274)."""
+    stored with Metal; all layers offloaded gives the same vectors. Measured on the serving Mac (#274)."""
     made = {}
     class Llama(StubLlama):
         def __init__(self, **kw): super().__init__(); made.update(kw)
