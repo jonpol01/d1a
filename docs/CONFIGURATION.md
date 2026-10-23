@@ -35,6 +35,7 @@ settings come from. The list lives in `d1a/core/settings.py`; every module reads
 | serve a released model | `--run JohnP1/d1a-e4b-mlx-q8@v0.6` (Apple Silicon) or `--run JohnP1/d1a-e4b@v0.6` (CUDA, CPU); pin the tag |
 | reach the server from another machine or a container | `--host 0.0.0.0`, and set `D1A_API_KEY` |
 | require a key | `D1A_API_KEY=<key>`; clients send `Authorization: Bearer <key>` |
+| call the server from a web page on another origin | `D1A_CORS_ORIGINS=https://app.example` (comma-separated) |
 | free memory when idle | `--idle-unload 600` |
 | answer about photos, voice and video | install the `media` extra and serve an MLX export that carries `media/` |
 | learn from outcomes | `D1A_FEEDBACK_LOG`, `POST /v1/feedback`, `python -m d1a.learning.feedback promote`, `D1A_OUTCOME_CALIBRATOR` (see Self-learning) |
@@ -62,6 +63,7 @@ and `--extra mcp` for the MCP server.
 | Variable | Default | What it does | When to change it |
 |---|---|---|---|
 | `D1A_API_KEY` | unset (open) | Requires `Authorization: Bearer <key>` on `/v1/*` and `/metrics`. | Always when the server is reachable beyond localhost. Never commit the key. |
+| `D1A_CORS_ORIGINS` | unset (none) | The web origins a browser may call the server from, comma-separated, each `scheme://host[:port]` with no path or trailing slash (`null` for a page opened from a file); `*` allows any. Unset, a page on another site cannot call it; programs and same-origin proxies (the playground's) are not affected. `d1a.serving.media` reads it too. | When a web page on another origin calls the server directly. Avoid `*`: any site open in a browser on a machine that reaches the server could then call it, `POST /v1/feedback` included. |
 | `D1A_PREFIX_CACHE` | `4` | States (documents) kept in the prefix cache, so repeated questions on one document skip its prefill. `0` turns it off. | Raise it for many clients asking about different documents; `0` for an exact-memory budget. |
 | `D1A_PREFIX_MAX_TOKENS` | `65536` | State tokens the cache holds in total, least recently used evicted first. A longer state is not cached. | Lower it on small-memory machines. |
 | `D1A_PREFIX_MIN_TOKENS` | the model's (0 for MLX and hybrid backbones, 384 for attention-only torch models) | States shorter than this are not cached. | Rarely. |
@@ -141,9 +143,9 @@ a statistical gate. Details are in [SELF_LEARNING.md](SELF_LEARNING.md) and in t
 
 | Setting | Default | What it does |
 |---|---|---|
-| `D1A_FEEDBACK_LOG=<path>` | unset (off) | Logs every decision to this append-only JSONL file, and gives each answer a `decision_id`. Enables `POST /v1/feedback`. |
+| `D1A_FEEDBACK_LOG=<path>` | unset (off) | Logs every decision to this append-only JSONL file, and gives each answer a `decision_id`. Enables `POST /v1/feedback`. To start a new log, move the file aside (`mv`) rather than copy over it: the server reads a log from its start again when the file is a new one. |
 | header `x-d1a-decision-log: off` | logged | Answers the request but keeps it out of the log. Use it for demos, smoke tests and anything no outcome will follow. |
-| `POST /v1/feedback` | — | `{"decision_id", "labels": {question_id: answer}, "src": "human" or "reviewer", "group": "<e.g. owner/repo#123>"}`. When sources disagree on a question, the most trusted one's label wins. Returns 404 when logging is off. |
+| `POST /v1/feedback` | — | `{"decision_id", "labels": {question_id: answer}, "src": "human" or "reviewer", "group": "<e.g. owner/repo#123>"}`. When sources disagree on a question, the most trusted one's label wins. Returns 404 when logging is off, and 422 for a `decision_id` the log does not hold. Anyone who can reach the server can report outcomes, so set `D1A_API_KEY` when it is reachable beyond localhost. |
 | `D1A_OUTCOME_CALIBRATOR=<path>` | unset (off) | Applies this calibrator to yes/no and choice answers. The server reloads it when the file changes, so promotion needs no restart. |
 | `D1A_LEARNING=<path>` | unset (today's behaviour) | The self-learning settings file (below), read by `promote`, `replay` and `tick` on every run, so a change needs no restart. The server reads only its `flags` and `rules`, re-read when the file changes; decision logging stays `D1A_FEEDBACK_LOG`, because the outcome poster and `/review` depend on that log. |
 | header `x-d1a-replay-of: <decision id>` | — | Sent by `replay` only. The server logs the answer as a decision of the model it serves now, marked as a replay of that earlier decision, so the replay takes its outcomes. `/v1/systemone` only. |

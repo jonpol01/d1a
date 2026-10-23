@@ -92,6 +92,8 @@ What D1A assumes, so you can tell a vulnerability from a configuration choice:
   - Binding to another interface (`--host 0.0.0.0`) exposes them to that network.
   - For `d1a.serving.serve`, set `D1A_API_KEY` to require a bearer token. `d1a.serving.media` has no auth of its own: keep it on 127.0.0.1, or put an authenticating reverse proxy in front.
   - Put TLS in front (a reverse proxy) for either one.
+  - Browsers: neither server answers a cross-origin call unless `D1A_CORS_ORIGINS` names that origin, so another site open in a browser on the machine cannot use it. `*` opens it to every site.
+  - `POST /v1/feedback` takes outcomes only for decisions in the decision log. Anyone who can reach the server can still report one for a decision id they know: set `D1A_API_KEY` when it is reachable beyond localhost.
   - Request size and length are bounded: states are truncated to the serving limit; media is limited to 12 MB (photos, audio up to 30 s) and 32 MB for video, of which 16 frames are read.
 - **Checkpoints are code you choose to run.**
   - Load checkpoints only from sources you trust. A run saved by D1A 0.4 or later is read from `d1a_config.json` (JSON) and safetensors, with no unpickling. An older run's `head.pt` is read with PyTorch's `torch.load` in weights-only mode, explicitly, so it can hold only tensors and plain data; weights are always read from safetensors.
