@@ -305,7 +305,10 @@ def generate_chat(model, tok, req, model_dir=None, model_name="d1a", on_text=Non
             if between is not None:
                 between()
     content, calls = tool_calls_of(text) if req.tools else (text, [])
-    empty = "" if content.strip() or calls else f", empty answer after {last_roles(req.messages)}"
+    # a reply cut off by max_tokens before any text is the client's limit, not an empty answer: logging it as one hid the
+    # real ones among smoke tests that cut a tool call short on purpose (#314)
+    empty = "" if content.strip() or calls else (", cut off by max_tokens before any text" if finish == "length"
+                                                 else f", empty answer after {last_roles(req.messages)}")
     log.info("chat: %d prompt tokens (%d cached), %d completion tokens, %.1f s%s%s", prompt_tokens, stats["cached"], completion_tokens,
              time.time() - t, ", tools" if req.tools else "", empty)
     message = {"role": "assistant", "content": content.strip() or (None if calls else "")}

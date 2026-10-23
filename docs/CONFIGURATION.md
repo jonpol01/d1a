@@ -90,7 +90,7 @@ decides where the output goes. On the serving Mac, the LaunchAgents write it to 
 |---|---|---|
 | startup lines | once, at start | the run, device, backend and dtype, the load time, warnings (an uncalibrated checkpoint, a device that failed its test); `--show-config` prints the settings instead of serving |
 | `INFO: <client> - "POST /v1/systemone HTTP/1.1" 200 OK` | each request (uvicorn) | the client address, method, path and status; never the body |
-| `<date> <time> chat: N prompt tokens (M cached), K completion tokens, T s[, tools][, empty answer after <roles>]` | each chat, unless `D1A_CHAT_LOG=0` | counts and time only; never the prompt or the answer. M is the prompt tokens taken from the [prompt cache](USAGE.md#chat-with-d1a). An answer with no text and no tool call ends with the roles of the last three messages (for example `user > assistant(tool_calls) > tool`; a role outside the OpenAI roles is logged as `other`), never their text |
+| `<date> <time> chat: N prompt tokens (M cached), K completion tokens, T s[, tools][, empty answer after <roles> \| , cut off by max_tokens before any text]` | each chat, unless `D1A_CHAT_LOG=0` | counts and time only; never the prompt or the answer. M is the prompt tokens taken from the [prompt cache](USAGE.md#chat-with-d1a). An answer with no text and no tool call ends with the roles of the last three messages (for example `user > assistant(tool_calls) > tool`; a role outside the OpenAI roles is logged as `other`), never their text; one cut off by `max_tokens` before any text says so instead |
 | a traceback | an error | the code path that failed |
 
 None of these hold request or answer text, so they are safe to keep and to share in a bug report. About 90 bytes a

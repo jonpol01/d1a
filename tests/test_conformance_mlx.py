@@ -342,8 +342,9 @@ def test_an_agents_step_after_a_tool_call_answers_and_reuses_the_prompt_cache(ch
 
 @needs_mlx
 def test_an_empty_chat_answer_logs_its_context_without_text(checkpoint, tmp_path, monkeypatch, caplog):
-    """generate_chat's log line for an answer with no text and no tool call ends with the roles before it; any other
-    answer's line is unchanged. No message text reaches the log."""
+    """generate_chat's log line for an answer with no text and no tool call ends with the roles before it; one cut off by
+    max_tokens before any text says that instead (#314); any other answer's line is unchanged. No message text reaches the
+    log."""
     import logging
     from d1a.backends.checkpoint import Checkpoint, LoadOptions, load
     from d1a.backends.mlx import export_mlx
@@ -362,9 +363,14 @@ def test_an_empty_chat_answer_logs_its_context_without_text(checkpoint, tmp_path
     assert body["choices"][0]["message"]["content"] == "" and body["usage"]["completion_tokens"] == 0
     line = caplog.records[-1].getMessage()
     assert line.endswith(", empty answer after user > assistant(tool_calls) > tool") and "private" not in line
+    monkeypatch.setattr(openai_compat, "pieces", lambda *a, **k: iter([("", 4, "length")]))   # a tool call cut short at max_tokens
+    generate_chat(model, tok, ChatRequest(messages=messages, max_tokens=4), run)
+    line = caplog.records[-1].getMessage()
+    assert line.endswith(", cut off by max_tokens before any text") and "empty answer" not in line
     monkeypatch.setattr(openai_compat, "pieces", lambda *a, **k: iter([("Fine.", 1, "stop")]))
     generate_chat(model, tok, ChatRequest(messages=messages, max_tokens=4), run)
-    assert "empty answer" not in caplog.records[-1].getMessage()
+    line = caplog.records[-1].getMessage()
+    assert "empty answer" not in line and "cut off" not in line
 
 
 @needs_mlx
