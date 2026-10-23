@@ -12,7 +12,8 @@ an SSH or GPG key registered on your GitHub account (`git config commit.gpgsign 
 `license`. CodeQL also blocks high-severity alerts.
 
 Every pull request also runs `repo hygiene` (`blob size`, `shared history`, `uv.lock in sync`; not required yet), and
-OSV-Scanner checks `uv.lock` weekly. Run `python scripts/check_blob_size.py origin/main` and `uv lock --check` locally.
+OSV-Scanner checks `uv.lock` weekly. Every day, `newest-deps` runs the unit tests on the newest versions `pyproject.toml`
+allows, as a fresh install gets them, and lists which differ from `uv.lock`; a failure there is a heads-up, not a gate. Run `python scripts/check_blob_size.py origin/main` and `uv lock --check` locally.
 
 Inside those checks:
 - `verified commits` also refuses AI attribution in any commit message or in the pull request's body (a
