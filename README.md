@@ -154,7 +154,7 @@ As of 2026-10-22:
 - Core ML is a preview: text only, inputs up to 512 tokens, slower than MLX on Macs ([docs/APPLE.md](docs/APPLE.md)).
 - Options within one question can still influence each other; asking questions together or separately gives the same probabilities, but option order is not irrelevant.
 - The benchmark numbers Kev publishes are for Kev's own Qwen checkpoints, not D1A.
-- Reports are in [docs/reports/](docs/reports/): [D1A-E4B routing v0.1](docs/reports/2026-10-routing-v0.1.md) ([日本語](docs/reports/2026-10-routing-v0.1.ja.md)): model routing and agent-kit decisions, before and after training, with what the numbers do and do not show.
+- Reports are in [docs/reports/](docs/reports/).
 
 ## Development
 
