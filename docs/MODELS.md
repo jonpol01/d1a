@@ -20,7 +20,7 @@ What each D1A model line can do today. "Decisions" means D1A's System One API (`
 | Builds | PyTorch adapter `JohnP1/d1a-e4b-it`; MLX `JohnP1/d1a-e4b-it-mlx-q8` (7.0 GB with media) and `-mlx-q4` (4.9 GB), both merged; Core ML 4-bit `JohnP1/d1a-e4b-it-coreml-4bit` (text only, ≤512 tokens; 3 of 42 test answers move, int8 not built) | PyTorch `JohnP1/d1a-e4b`; MLX 8-bit `JohnP1/d1a-e4b-mlx-q8` (7.6 GB with 1.0 GB of media encoders) and mirror `mlx-community/d1a-e4b-8bit`; Core ML int8 preview `JohnP1/d1a-e4b-coreml` (text only, ≤512 tokens) | PyTorch `JohnP1/d1a-e2b`; MLX 8-bit `JohnP1/d1a-e2b-mlx-q8` (4.8 GB) and mirror `mlx-community/d1a-e2b-8bit`; Core ML int8 `JohnP1/d1a-e2b-coreml` (text only, ≤512 tokens) | PyTorch adapter `JohnP1/d1a-e2b-it`; MLX `JohnP1/d1a-e2b-it-mlx-q8` (4.8 GB) and `-mlx-q4` (3.6 GB), both merged; Core ML `JohnP1/d1a-e2b-it-coreml` and `-coreml-4bit` | 4-bit Q4_0 export ready (`scripts/export_mlx.py --q4-0`, #272) |
 | Calibration temperature | 1.55 | 1.95 | 1.45 | 1.41 | — |
 
-Older single-purpose builds: `JohnP1/d1a-e4b-pr-labeler-mlx-q8` (v1) and `JohnP1/d1a-e4b-routing` / `-routing-mlx-q8` (v0.1), superseded by D1A-E4B v0.6.1.
+Older single-purpose builds for PR labelling and routing were superseded by D1A-E4B v0.6.1.
 
 ## Builds
 

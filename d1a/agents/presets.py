@@ -88,7 +88,7 @@ def fail_up(probs, small=0.7, medium=0.5, ratio=1.0):
     """The smallest tier the model is sure enough is enough: small only if p(small) >= `small`, medium only if
     p(small) + p(medium) >= `medium`, else large. `small` is set for answers read at the checkpoint's temperature; at a
     use case's temperature (`ratio`, temperature_ratio) it is carried through the ratio (carried), `medium` is not.
-    On the calibrated routing checkpoint (JohnP1/d1a-e4b-routing, held-out factory cards) small >= 0.7 sends 2.8% too low
+    On a calibrated routing checkpoint (held-out factory cards) small >= 0.7 sends 2.8% too low
     against 4.6% at 0.6, for 9% sent too high; zero-shot it also beats argmax (6% vs 8% too low). On v0.5's factory tier
     cards (108): 3 too low and 12 too high at its T 1.78; read at the routing T 0.85, 0.7 gives 5 too low, and 0.855 (0.7
     carried by 1.78 / 0.85) 3 too low and 12 too high again."""
