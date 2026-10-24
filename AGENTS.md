@@ -97,6 +97,10 @@ stripped off, and new features come with their tests.
 - **No stripping.** No endpoint, demo, example, CLI flag or feature disappears silently. A removal updates a failing
   test on purpose, and the PR says why.
 - **New features ship with their tests** in the same PR.
+- **Docs with every change** (the maintainer, 2026-10-24). A PR updates every doc its change touches (README, docs/,
+  docs/CONFIGURATION.md, recipes, model cards, the playground's README) in the same PR. A new feature, setting, endpoint,
+  script or model that no doc covers yet gets one: a section in the closest existing doc, or a new page linked from the
+  README. The PR body says which: `Docs: <pages>`, or `Docs: none needed, <why>`.
 - **Fine-tunes keep every skill** (#167; `recipes/README.md`; the maintainer, 2026-10-07): a run that starts from a trained
   checkpoint trains on or replays every training source, as `d1a.eval.suites.train_sources()` lists them: hard-v1,
   devtools-v1, documents-v1 and every D1A train partition (PR labels incl. blast and Japanese, routing, JGLUE), plus
