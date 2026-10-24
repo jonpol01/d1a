@@ -27,7 +27,7 @@ October 2026. Cloudflare released two open decision models on October 1: **Clef*
 |---|---|---|
 | Base | Gemma 4 E4B (~4B effective, 8B with per-layer embeddings) | Qwen3.5-9B |
 | Build tested | `JohnP1/d1a-e4b-mlx-q8@v0.3`: MLX, 8-bit, per-layer embeddings 4-bit | `clef-flash` in Ollama 0.35.1: Q8_0, 10 GB |
-| Server | `d1a.serve` | Ollama `/v1/systemone` |
+| Server | `d1a.serving.serve` | Ollama `/v1/systemone` |
 | Inputs | text, image, audio, video | text, image |
 | License | Apache-2.0 | Apache-2.0 |
 
@@ -126,7 +126,7 @@ Its latency numbers were taken while other GPU work ran, so they're left out. Th
 
 ```bash
 ollama pull clef-flash                                   # Ollama 0.35.1 or later
-uv run --extra serve python -m d1a.serve --run JohnP1/d1a-e4b-mlx-q8@v0.3 --port 8019
+uv run --extra serve python -m d1a.serving.serve --run JohnP1/d1a-e4b-mlx-q8@v0.3 --port 8019
 python scripts/compare_systemone.py --endpoint http://127.0.0.1:8019 --model d1a-latest --out runs/compare/d1a \
   --data transfer=evals/v4/transfer-v4/development.jsonl
 python scripts/compare_systemone.py --endpoint http://127.0.0.1:11434 --model clef-flash --out runs/compare/clef \

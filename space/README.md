@@ -21,7 +21,7 @@ tags:
 # D1A
 
 D1A answers typed questions about a document (choice, yes/no, score) with a probability for every option, in one
-forward pass. This Space runs D1A-E4B v0.4 on ZeroGPU: model routing, guardrails, tool-call gating, the PR labeler,
+forward pass. This Space runs D1A-E4B v0.6.1 on ZeroGPU: model routing, guardrails, tool-call gating, the PR labeler,
 and zero-shot photo and voice checks through Gemma 4's own encoders.
 
 - Code: [jonpol01/d1a](https://github.com/jonpol01/d1a) (this Space is `space/` there)

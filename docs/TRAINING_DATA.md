@@ -30,7 +30,7 @@ cases with one set of weights, so it drifts away from whatever a fine-tune leave
 **Never trained on** (evaluation only):
 - every development and test partition;
 - `transfer-v4`, `night2` and the `external` suites;
-- the owner's hand-checked PR labels, the labeler replay kit, and the serving Mac's decision log (privacy: weights get
+- the owner's hand-checked PR labels, the labeler replay kit, and the serving host's decision log (privacy: weights get
   published).
 
 ## What each run used

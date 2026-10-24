@@ -45,10 +45,10 @@ You need Python 3.12 or 3.13 and [uv](https://docs.astral.sh/uv/).
 ```bash
 git clone https://github.com/jonpol01/d1a.git && cd d1a
 uv sync --extra serve
-uv run --extra serve python -m d1a.serving.serve --run JohnP1/d1a-e4b-mlx-q8@v0.6 --port 8009
+uv run --extra serve python -m d1a.serving.serve --run JohnP1/d1a-e4b-mlx-q8@v0.6.1 --port 8009
 ```
 
-That serves the MLX build on Apple Silicon. Elsewhere pass the PyTorch build, `--run JohnP1/d1a-e4b@v0.6` (CUDA if you have a GPU; `D1A_BACKEND=torch` runs PyTorch on MPS, see [Apple Silicon (MLX)](docs/APPLE.md#apple-silicon-mlx)). The first run downloads the model. `--run` also takes a local checkpoint directory or a Hub revision (`repo@rev`).
+That serves the MLX build on Apple Silicon. Elsewhere pass the PyTorch build, `--run JohnP1/d1a-e4b@v0.6.1` (CUDA if you have a GPU; `D1A_BACKEND=torch` runs PyTorch on MPS, see [Apple Silicon (MLX)](docs/APPLE.md#apple-silicon-mlx)). The first run downloads the model. `--run` also takes a local checkpoint directory or a Hub revision (`repo@rev`).
 
 Every setting (server flags, `D1A_*` variables, self-learning, photos and voice, agents) is listed with its default and
 when to change it in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
@@ -71,12 +71,12 @@ curl -s localhost:8009/v1/systemone -H 'content-type: application/json' -d '{
 
 | | PyTorch | MLX 8-bit (Apple Silicon) | Core ML (preview) | Use when |
 |---|---|---|---|---|
-| D1A-E4B | [d1a-e4b](https://huggingface.co/JohnP1/d1a-e4b) | [d1a-e4b-mlx-q8](https://huggingface.co/JohnP1/d1a-e4b-mlx-q8), ~6 GB | [d1a-e4b-coreml](https://huggingface.co/JohnP1/d1a-e4b-coreml), 6.1 GB | decisions on a server or a Mac: the default build, with a routing temperature |
-| D1A-E2B | [d1a-e2b](https://huggingface.co/JohnP1/d1a-e2b) | [d1a-e2b-mlx-q8](https://huggingface.co/JohnP1/d1a-e2b-mlx-q8), 3.5 GB | [d1a-e2b-coreml](https://huggingface.co/JohnP1/d1a-e2b-coreml), 3.5 GB | decisions on a phone or a small machine |
-| D1A-E4B-it | [d1a-e4b-it](https://huggingface.co/JohnP1/d1a-e4b-it) (adapter) | [d1a-e4b-it-mlx-q8](https://huggingface.co/JohnP1/d1a-e4b-it-mlx-q8), 7.0 GB with media; [-mlx-q4](https://huggingface.co/JohnP1/d1a-e4b-it-mlx-q4), 4.9 GB | [d1a-e4b-it-coreml-4bit](https://huggingface.co/JohnP1/d1a-e4b-it-coreml-4bit), 4.6 GB | decisions and chat in one model: agents and local apps |
+| D1A-E4B | [d1a-e4b](https://huggingface.co/JohnP1/d1a-e4b) | [d1a-e4b-mlx-q8](https://huggingface.co/JohnP1/d1a-e4b-mlx-q8), 7.5 GB with media | [d1a-e4b-coreml](https://huggingface.co/JohnP1/d1a-e4b-coreml), 6.5 GB | decisions on a server or a Mac: the default build, with a routing temperature |
+| D1A-E2B | [d1a-e2b](https://huggingface.co/JohnP1/d1a-e2b) | [d1a-e2b-mlx-q8](https://huggingface.co/JohnP1/d1a-e2b-mlx-q8), 4.8 GB with media | [d1a-e2b-coreml](https://huggingface.co/JohnP1/d1a-e2b-coreml), 3.8 GB | decisions on a phone or a small machine |
+| D1A-E4B-it | [d1a-e4b-it](https://huggingface.co/JohnP1/d1a-e4b-it) (adapter) | [d1a-e4b-it-mlx-q8](https://huggingface.co/JohnP1/d1a-e4b-it-mlx-q8), 7.5 GB with media; [-mlx-q4](https://huggingface.co/JohnP1/d1a-e4b-it-mlx-q4), 5.2 GB | [d1a-e4b-it-coreml-4bit](https://huggingface.co/JohnP1/d1a-e4b-it-coreml-4bit), 4.6 GB | decisions and chat in one model: agents and local apps |
 | D1A-E2B-it | [d1a-e2b-it](https://huggingface.co/JohnP1/d1a-e2b-it) (adapter) | [d1a-e2b-it-mlx-q8](https://huggingface.co/JohnP1/d1a-e2b-it-mlx-q8), 4.8 GB with media; [-mlx-q4](https://huggingface.co/JohnP1/d1a-e2b-it-mlx-q4), 3.6 GB | [d1a-e2b-it-coreml](https://huggingface.co/JohnP1/d1a-e2b-it-coreml), 3.8 GB; [-4bit](https://huggingface.co/JohnP1/d1a-e2b-it-coreml-4bit), 2.9 GB | decisions and chat on a phone |
 
-E4B is the more accurate size; E2B is smaller and faster, for phones and small machines. The `-it` models are trained the same way on the instruction-tuned Gemma 4 trunks, so one model also chats: with its D1A adapter off it is Gemma 4 E4B-it / E2B-it. Chat needs an unmerged build (`scripts/export_mlx.py --unmerged`, [Chat with D1A](docs/USAGE.md#chat-with-d1a)); the published `-mlx-q8` / `-mlx-q4` repos have the adapter merged and answer decisions only. D1A-E4B-it is about 2.9× slower per decision than D1A-E2B-it and more accurate on 21 of 22 suites. All builds are at `v0.6`. Core ML is a preview for iPhone/iPad: text only, inputs up to 512 tokens, and MLX is faster on Macs ([docs/APPLE.md](docs/APPLE.md)); the 4-bit E4B-it build moves 3 of 42 test answers, so use MLX 8-bit where answers must not move. Sizes, exceptions and older versions: [docs/MODELS.md](docs/MODELS.md).
+E4B is the more accurate size; E2B is smaller and faster, for phones and small machines. The `-it` models are trained the same way on the instruction-tuned Gemma 4 trunks, so one model also chats: with its D1A adapter off it is Gemma 4 E4B-it / E2B-it. Chat needs an unmerged build (`scripts/export_mlx.py --unmerged`, [Chat with D1A](docs/USAGE.md#chat-with-d1a)); the published `-mlx-q8` / `-mlx-q4` repos have the adapter merged and answer decisions only. D1A-E4B-it is about 2.9× slower per decision than D1A-E2B-it and more accurate on 21 of 22 suites. The PyTorch and MLX builds of D1A-E4B and D1A-E2B are at `v0.6.1` (v0.6 plus a routing temperature); the `-it` and Core ML builds are at `v0.6`. Core ML is a preview for iPhone/iPad: text only, inputs up to 512 tokens, and MLX is faster on Macs ([docs/APPLE.md](docs/APPLE.md)); the 4-bit E4B-it build moves 3 of 42 test answers, so use MLX 8-bit where answers must not move. Sizes, exceptions and older versions: [docs/MODELS.md](docs/MODELS.md).
 
 ## Use It
 
@@ -85,11 +85,11 @@ E4B is the more accurate size; E2B is smaller and faster, for phones and small m
 ```python
 from d1a import D1A
 
-m = D1A.load("JohnP1/d1a-e2b-mlx-q8")   # Apple Silicon (MLX, 3.0 GB); JohnP1/d1a-e2b on NVIDIA or CPU
+m = D1A.load("JohnP1/d1a-e2b-mlx-q8")   # Apple Silicon (MLX, 3.8 GB download); JohnP1/d1a-e2b on NVIDIA or CPU
 answers = m.decide("Shoes arrived late and I was charged twice.",
-                   {"team": {"type": "choice", "instr": "Which team should handle this?",
+                   {"team": {"type": "choice", "instructions": "Which team should handle this?",
                              "criteria": {"returns": "returns", "shipping": "shipping", "billing": "billing"}},
-                    "urgent": {"type": "noul", "instr": "Is this urgent?"}})
+                    "urgent": {"type": "noul", "instructions": "Is this urgent?"}})
 print(answers["team"]["probabilities"], answers["urgent"]["noul"])
 ```
 
@@ -130,7 +130,7 @@ D1A logs every decision. When outcomes come back it recalibrates its probabiliti
 
 ## Demos
 
-Twelve use cases, each answered in one forward pass, are in [jonpol01/d1a-playground](https://github.com/jonpol01/d1a-playground); the recordings of all twelve are in [docs/DEMOS.md](docs/DEMOS.md).
+Thirteen use cases, each answered in one forward pass, are in [jonpol01/d1a-playground](https://github.com/jonpol01/d1a-playground); the recordings of twelve of them (all but the video check) are in [docs/DEMOS.md](docs/DEMOS.md).
 
 <table>
 <tr><td align="center" width="33%"><img src="https://raw.githubusercontent.com/jonpol01/d1a-playground/129a15d464f6731dcbeaf390d0cf54f3126cd643/docs/gifs/en/routing.gif" alt="Model routing demo running on D1A" width="100%"><br><b>Model routing</b></td><td align="center" width="33%"><img src="https://raw.githubusercontent.com/jonpol01/d1a-playground/129a15d464f6731dcbeaf390d0cf54f3126cd643/docs/gifs/en/tools.gif" alt="Tool-call gating demo running on D1A" width="100%"><br><b>Tool-call gating</b></td><td align="center" width="33%"><img src="https://raw.githubusercontent.com/jonpol01/d1a-playground/057ed20659fe42d5192345cfa7ec754e09e3394d/docs/gifs/en/photo.gif" alt="Photo check demo running on D1A" width="100%"><br><b>Photo check</b></td></tr>

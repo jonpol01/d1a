@@ -8,20 +8,26 @@ the question's `<decide>` token. README.md is the front page and docs/ is the us
 - `d1a/` the package, by subpackage (#60; the old flat module paths were removed in 0.5, and `d1a/_layout.py` still maps
   them for scripts/kev_share.py and scripts/check_license.py):
   - `core/`: `api.py` (the System One request and answer schema), `encoding.py` (how a request is packed into tokens, the
-    context limits, rows), `head.py` (the pointer head), `versions.py`;
+    context limits, rows), `head.py` (the pointer head), `versions.py`, `settings.py` (every `D1A_*` setting, its default and
+    reader), `hygiene.py` (what must never be published: local paths, AI-attribution lines);
   - `backends/`: `torch.py` (DecisionModel, masks; re-exports encoding and the head), `mlx.py` (Apple Silicon backend for Qwen3.5
     and Gemma 4, and the MLX export folders `scripts/export_mlx.py` writes), `checkpoint.py` (loading; `D1A_*` load options
     are read only by `LoadOptions.from_env`), `backbone.py`, `device.py`, `shared_prefix.py` (Qwen3.5 training through a
-    shared state prefix), `fused_qwen35.py`, `cuda_graphs.py`;
-  - `serving/`: `serve.py` (FastAPI System One server), `media.py`, `lib.py` (in-process `from d1a import D1A`);
-  - `learning/`: `feedback.py` (the decision log, outcomes, the outcome calibrator and its promotion gate);
+    shared state prefix), `fused_qwen35.py`, `cuda_graphs.py`, `q4_0.py` (llama.cpp's Q4_0 grid, in numpy);
+  - `serving/`: `serve.py` (FastAPI System One server), `media.py`, `lib.py` (in-process `from d1a import D1A`),
+    `openai_compat.py` (OpenAI-format chat and embeddings, #274);
+  - `learning/`: `feedback.py` (the decision log, outcomes, the outcome calibrator and its promotion gate), `settings.py` (the
+    `D1A_LEARNING` settings file), `loop.py` (the trained manifest, replay and the tick), `flags.py` (learned decision flags,
+    #237), `rules.py` (served decode rules, #252);
   - `training/`: `train.py` (trainer; default base Gemma 4 E2B), `data.py`, `resume.py` (training resume points),
     `recipe.py` (versioned YAML stages run through d1a.training.train), `calibrate.py` (writes a checkpoint's temperature,
     or with --use-case one use case's, refusing fit rows that are not held out from its training), `study.py` (recipe -> calibrate -> evaluate -> report ->
-    publish; publishing refuses an uncalibrated checkpoint), `composition.py`;
+    publish; publishing refuses an uncalibrated checkpoint), `composition.py`, `temperature_gate.py` (the rule a refitted
+    temperature must pass);
   - `eval/`: `benchmark.py` (scores a checkpoint or a remote endpoint on a suite), `metrics.py`, `predictors.py`,
     `suite.py` (frozen suites, Hub-mirrored partitions), `suites.py` (D1A's own suites);
-  - `agents/`: `presets.py`, `mcp_server.py`.
+  - `agents/`: `presets.py`, `mcp_server.py`, `claude_code_gate.py` (the Claude Code PreToolUse hook), `demo.py` (one task
+    through an agent's day).
 - `evals/` frozen suites from Kev (manifests pin every partition's sha256; never edit them in place). `evals/d1a/` holds D1A's
   own suites (`d1a/eval/suites.py`): a manifest per dataset pins its Hub commit and each partition's sha256 and role
   (train/eval); the text stays in the private dataset. Re-pin with `python -m d1a.eval.suites freeze`, never by hand.
@@ -45,17 +51,17 @@ the question's `<decide>` token. README.md is the front page and docs/ is the us
 - `tests/test_conformance.py` pins the answers of the committed tiny checkpoint (`tests/golden/tiny-gemma4`). A change
   that moves them on purpose rebuilds it (`tests/golden/build_tiny_gemma4.py`) in the same PR and says why.
 
-## Mac resources (mandatory)
-The development Mac (an M1 Max with 64 GB RAM and a 1.8 TB data volume kept near full) ran out of disk on 2026-10-10: an fp32 4B benchmark grew swap
-to 11 GB on the same APFS container and the shell failed with ENOSPC at 121 MiB free.
-- Every long job (training, benchmark, gate, calibration, export, swe-verifier scoring) starts behind
-  `. ~/d1a-runs/guard/preflight.sh; d1a_preflight <name> <new GB> <peak RAM GB> [--dtype fp32 --params-b N] || exit 1`.
-  It refuses below new + 15 GB free, a peak above (64 - RAM in use) - 8 GB, and while the guard holds paused jobs.
-  Size downloads with `d1a_hf_size <repo> <rev>`; never guess.
-- fp32 models of 4B or more need `--allow-fp32-big`: 25 GB free, no other D1A job, and 23:00-07:00 JST only.
-- The diskguard LaunchAgent SIGSTOPs D1A jobs below 6 GB free, or when swap grows by 3 GB within 10 minutes while one
-  runs (swap growth, not a percentage: swap sits near 88% at rest). It SIGTERMs them below 3 GB and resumes them after
-  10 minutes above 12 GB free with swap growth under 0.5 GB (`~/d1a-runs/guard/diskguard.sh --status | --resume`).
+## Development machine resources (mandatory)
+The development machine's disk and memory are shared with other work, and a long job once ran its disk full and killed
+the shell. The resource guard enforces the rules below; this machine's numbers and paths are in `AGENTS.local.md`
+(untracked) where the checkout has one.
+- Every long job (training, benchmark, gate, calibration, export, swe-verifier scoring) starts behind the guard's
+  preflight: `d1a_preflight <name> <new GB> <peak RAM GB> [--dtype fp32 --params-b N] || exit 1`. It refuses when free
+  disk is below the new data plus a headroom, when the peak would not fit the free memory less a margin, and while the
+  guard holds paused jobs. Size downloads with `d1a_hf_size <repo> <rev>`; never guess.
+- fp32 models of 4B or more need `--allow-fp32-big`: more free disk, no other D1A job, and the overnight window only.
+- The guard pauses D1A jobs (SIGSTOP) when free disk runs low or swap grows fast while one runs, stops them (SIGTERM)
+  when the disk is nearly full, and resumes them once both have recovered for a while.
 - Delete Hugging Face cache entries only with `scan_cache_dir().delete_revisions(...).execute()`, never `rm` on a repo folder:
   the cache shares blobs (`hub/blobs/<xx>/<hash>` + `.refs`), so a hand delete frees nothing and leaves stale `.refs` behind.
   Where the tool no longer lists a repo, delete one store file only after its `.refs` names nothing else, and log it.
@@ -84,7 +90,7 @@ stripped off, and new features come with their tests.
     passes on its exact head (`.github/workflows/quality-gate.yml` leaves it pending; any other pull request gets it as
     success). A new head starts pending again. A playground pin move posts to that pull request
     (`--post-status jonpol01/d1a-playground@<head>`, which checks that its mini.sh pins the gated head);
-  - after a pin move, the serving Mac's demo smoke test (`./mini.sh update` ends with `scripts/demo_smoke.mjs` in
+  - after a pin move, the serving host's demo smoke test (`./mini.sh update` ends with `scripts/demo_smoke.mjs` in
     jonpol01/d1a-playground).
 - **No downgrade.** The answers stay identical, or the PR shows they are better on held-out data. Accuracy and
   calibration never drop, and latency stays within run-to-run noise (measured interleaved, against main).

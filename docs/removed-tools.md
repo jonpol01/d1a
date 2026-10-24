@@ -59,7 +59,7 @@ entirely in the browser and autosaves to localStorage, keyed by a hash of the fi
   `{id, verdict: accept|relabel|drop, label, proposed_label, note, reviewed_at}`. The header shows the agreement rate,
   accept / (accept + relabel).
 
-A good fit for reviewing D1A training labels, for example the PR-labeler data or Visionkit OK/NG photos, if we need
+A good fit for reviewing D1A training labels, for example the PR-labeler data or product inspection photos, if we need
 that again.
 
 ## Training options (removed October 2026)

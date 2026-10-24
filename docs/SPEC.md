@@ -123,8 +123,8 @@ A checkpoint may also carry use-case temperatures, `extra.use_case_temperatures`
 whitespace stripped and at most 64 characters long, and two entries that strip to one name are refused; a request's
 `use_case` is read stripped too. A request whose `use_case` has an entry is read at that `T` in §4; a request without `use_case`, or whose use case has no entry, at the checkpoint's `T`, and an
 unknown use case is not an error. Each request of a batch is read at its own `T`. `D1A_TEMPERATURE` serves every request at
-its value, use cases included. A port without use cases gives D1A's answers for every request that names none. Learning from outcomes (`d1a.learning.feedback`: the outcome calibrator, and the outcome
-memory) is an optional serving layer on top of these answers, off unless configured; the outcome calibrator corrects an
+its value, use cases included. A port without use cases gives D1A's answers for every request that names none. Learning from outcomes (`d1a.learning.feedback`: the outcome calibrator) is an optional
+serving layer on top of these answers, off unless configured; the outcome calibrator corrects an
 answer only with what it learned from answers read at the same temperature. A port that implements only §1 to §5 gives
 D1A's answers.
 
