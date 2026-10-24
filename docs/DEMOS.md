@@ -1,10 +1,10 @@
 # Demos
 
-Twelve use cases that D1A answers in one forward pass, recorded from the playground, and what the photo, voice and video demos do and do not show.
+Thirteen use cases that D1A answers in one forward pass, twelve of them recorded from the playground, and what the photo, voice and video demos do and do not show.
 
 ## See It Running
 
-Twelve use cases, each answered by D1A in one forward pass (recorded live from the [playground](https://github.com/jonpol01/d1a-playground): 1–9 on an M4 Mac with MLX 8-bit, 10–11 through [`d1a.serving.media`](USAGE.md#photos-voice-and-video) on an M1 Max, 12 on the serving Mac's D1A-E4B v0.2):
+Thirteen use cases, each answered by D1A in one forward pass; the twelve below were recorded live from the [playground](https://github.com/jonpol01/d1a-playground): 1–9 on an M4 Mac with MLX 8-bit, 10–11 through [`d1a.serving.media`](USAGE.md#photos-voice-and-video) on an M1 Max, 12 on the serving host's D1A-E4B v0.2:
 
 <table>
 <tr><td align="center" width="33%"><img src="https://raw.githubusercontent.com/jonpol01/d1a-playground/129a15d464f6731dcbeaf390d0cf54f3126cd643/docs/gifs/en/routing.gif" alt="Model routing demo running on D1A" width="100%"><br><b>1. Model routing</b></td><td align="center" width="33%"><img src="https://raw.githubusercontent.com/jonpol01/d1a-playground/129a15d464f6731dcbeaf390d0cf54f3126cd643/docs/gifs/en/guardrails.gif" alt="Guardrails demo running on D1A" width="100%"><br><b>2. Guardrails</b></td><td align="center" width="33%"><img src="https://raw.githubusercontent.com/jonpol01/d1a-playground/129a15d464f6731dcbeaf390d0cf54f3126cd643/docs/gifs/en/tools.gif" alt="Tool-call gating demo running on D1A" width="100%"><br><b>3. Tool-call gating</b></td></tr>

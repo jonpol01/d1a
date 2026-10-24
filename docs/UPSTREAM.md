@@ -44,9 +44,8 @@ the Apache License 2.0. This file records where D1A's code came from and what D1
   files per request (`FlashEmbedding`, #71) instead of held in memory.
 - **Default base**: `d1a.training.train` defaults to `google/gemma-4-E2B` at commit `d29ff6b45f081a49ee2733a859c9c9c2d95d1a6f`.
   Qwen bases, including the hybrid Qwen3.5 code paths, still work unchanged.
-- **Renames**: the Python package `kev` is `d1a` (`python -m d1a.serving.serve|train|benchmark|...`, all imports, pyproject
-  name); `KEV_*` environment variables are `D1A_*`; the snapshot mirror defaults
-  to `JohnP1/d1a-snapshots`.
+- **Renames**: the Python package `kev` is `d1a` (`python -m d1a.serving.serve`, `d1a.training.train`, `d1a.eval.benchmark`,
+  ..., all imports, pyproject name); `KEV_*` environment variables are `D1A_*`.
 - **Model names**: the server lists only `d1a-latest` (the old `kev-latest` and `jev-latest` listings were removed) and still
   answers any model name a request sends; requests, the benchmark's remote mode and the clients default to `d1a-latest`.
 - **Clients**: D1A's dependency-free clients live in `clients/python` (`d1a-client`, import `d1a_client`) and

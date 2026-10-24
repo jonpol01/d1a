@@ -32,7 +32,7 @@ settings come from. The list lives in `d1a/core/settings.py`; every module reads
 
 | Goal | Setting |
 |---|---|
-| serve a released model | `--run JohnP1/d1a-e4b-mlx-q8@v0.6` (Apple Silicon) or `--run JohnP1/d1a-e4b@v0.6` (CUDA, CPU); pin the tag |
+| serve a released model | `--run JohnP1/d1a-e4b-mlx-q8@v0.6.1` (Apple Silicon) or `--run JohnP1/d1a-e4b@v0.6.1` (CUDA, CPU); pin the tag |
 | reach the server from another machine or a container | `--host 0.0.0.0`, and set `D1A_API_KEY` |
 | require a key | `D1A_API_KEY=<key>`; clients send `Authorization: Bearer <key>` |
 | call the server from a web page on another origin | `D1A_CORS_ORIGINS=https://app.example` (comma-separated) |
@@ -52,7 +52,7 @@ and `--extra mcp` for the MCP server.
 
 | Flag | Default | What it does |
 |---|---|---|
-| `--run` | `runs/d1a` | The checkpoint: a Hub id with an optional `@tag` (`JohnP1/d1a-e4b-mlx-q8@v0.6`), a local training run (holds `head.pt`) or an MLX export folder. Pin a tag in production. |
+| `--run` | `runs/d1a` | The checkpoint: a Hub id with an optional `@tag` (`JohnP1/d1a-e4b-mlx-q8@v0.6.1`), a local training run (holds `head.pt`) or an MLX export folder. Pin a tag in production. |
 | `--fallback` | `runs/smoke` | Served when `--run` is a local path that does not exist. |
 | `--host` | `127.0.0.1` | The interface to bind. `0.0.0.0` serves beyond this machine; set `D1A_API_KEY` when you do. |
 | `--port` | `8008` | The port. The docs and the playground use 8009. |
@@ -83,7 +83,7 @@ Fixed in code, not settings: up to 64 requests per batch (`MAX_BATCH`), a 75 s k
 ## Logs
 
 The server writes its log to standard output and standard error. It keeps no log file of its own: whatever starts it
-decides where the output goes. On the serving Mac, the LaunchAgents write it to `~/Library/Logs/d1a-model.log`
+decides where the output goes. On the serving host, the LaunchAgents write it to `~/Library/Logs/d1a-model.log`
 ([below](#the-always-on-playground-deployment)).
 
 | Line | When | Holds |
@@ -215,7 +215,7 @@ decide. With a few outcomes a day, expect weeks rather than days.
 
 ## Photos, voice and video
 
-Install the `media` extra. Serve an MLX export that carries `media/` (E4B: `v0.3` to `v0.6`; E2B: `v0.2`, not
+Install the `media` extra. Serve an MLX export that carries `media/` (E4B: `v0.3` to `v0.6.1`; E2B: `v0.2`, `v0.6` and `v0.6.1`, not
 `v0.2.1-2epoch-calibrated`), or a torch checkpoint (the encoders come from its base). `POST /v1/systemone/media` takes a
 System One request plus `{"media": {"type": "image" | "audio" | "video", "data": <base64>}}`. A video is read as 16
 frames; its sound is not used. There are no further settings.

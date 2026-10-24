@@ -3,8 +3,8 @@
     from d1a import D1A
     m = D1A.load("JohnP1/d1a-e2b-mlx-q8")          # a Hub id or a local run / MLX export folder
     m.decide("Order 4471 was charged twice.", {
-        "intent": {"type": "choice", "instr": "What does the customer want?", "criteria": {"refund": "a refund", "track": "tracking"}},
-        "urgent": {"type": "noul", "instr": "Is this urgent?"},
+        "intent": {"type": "choice", "instructions": "What does the customer want?", "criteria": {"refund": "a refund", "track": "tracking"}},
+        "urgent": {"type": "noul", "instructions": "Is this urgent?"},
     })
     # -> {"intent": {"type": "choice", "choice": "refund", "probabilities": {...}, ...}, "urgent": {"type": "noul", "noul": 0.71}}
 

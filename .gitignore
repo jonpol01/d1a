@@ -52,3 +52,6 @@ evals/agents-ood-v1/*.jsonl
 evals/guardrails-ood-v1/*.jsonl
 dist/
 space/samples/
+
+# this machine's own numbers and paths for AGENTS.md's resource rules (CLAUDE.md reads it when present)
+AGENTS.local.md

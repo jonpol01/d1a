@@ -5,7 +5,7 @@
 | Version | Security fixes |
 | --- | --- |
 | `main` | Yes |
-| 0.2.x (latest release) | Yes |
+| 0.6.x (latest release) | Yes |
 | Earlier versions | No (0.1.0 was never released) |
 
 Fixes ship in a patch release of the latest minor version. Before 1.0, a fix that cannot be backported goes into the next minor release, and its release notes say so.

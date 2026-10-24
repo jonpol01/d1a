@@ -37,7 +37,7 @@ request. `"ask_if": {"<question id>": <condition>}`, every condition required:
   `/v1/systemone/permute` and `/v1/systemone/separate` refuse it, since they answer questions alone. `D1A.decide` takes
   the same questions.
 
-**Routing temperature (v0.5-era numbers).** Routing is the first use case: v0.5 is served at T 1.78, which leaves its routing answers under-confident; on held-out factory routing rows a routing temperature of 0.85 lowers ECE from 0.132 to 0.030 and raises the share of answers at 0.9 confidence or more from 0.28 to 0.66, with the same accuracy (#209). v0.6 ships without a routing temperature yet: its own is to be fitted on the same rows and gated before it is added.
+**Routing temperature (v0.5-era numbers).** Routing is the first use case: v0.5 is served at T 1.78, which leaves its routing answers under-confident; on held-out factory routing rows a routing temperature of 0.85 lowers ECE from 0.132 to 0.030 and raises the share of answers at 0.9 confidence or more from 0.28 to 0.66, with the same accuracy (#209). v0.6 shipped without one; v0.6.1 carries it, T 1.18 for D1A-E4B and 0.95 for D1A-E2B (#264), and every other request keeps the checkpoint's own temperature (1.95 and 1.45).
 
 Model names: `GET /v1/models` lists only `d1a-latest`, but the server answers a request whatever model name it sends, so a client written for another name (an unconfigured TypeSafe SDK client, for one) keeps working. Set `D1A_API_KEY` to require `Authorization: Bearer <key>`.
 
@@ -62,11 +62,11 @@ Load a checkpoint once and ask questions in-process. Questions and answers use t
 ```python
 from d1a import D1A
 
-m = D1A.load("JohnP1/d1a-e2b-mlx-q8")   # Apple Silicon (MLX, 3.0 GB); JohnP1/d1a-e2b on NVIDIA or CPU
+m = D1A.load("JohnP1/d1a-e2b-mlx-q8")   # Apple Silicon (MLX, 3.8 GB download); JohnP1/d1a-e2b on NVIDIA or CPU
 answers = m.decide("Shoes arrived late and I was charged twice.",
-                   {"team": {"type": "choice", "instr": "Which team should handle this?",
+                   {"team": {"type": "choice", "instructions": "Which team should handle this?",
                              "criteria": {"returns": "returns", "shipping": "shipping", "billing": "billing"}},
-                    "urgent": {"type": "noul", "instr": "Is this urgent?"}})
+                    "urgent": {"type": "noul", "instructions": "Is this urgent?"}})
 print(answers["team"]["probabilities"], answers["urgent"]["noul"])
 ```
 
@@ -150,7 +150,7 @@ D1A_EMBED_GGUF=<path to nomic-embed-text-v1.5.Q4_K_M.gguf> \
 ```
 
 The GGUF is `nomic-ai/nomic-embed-text-v1.5-GGUF`, file `nomic-embed-text-v1.5.Q4_K_M.gguf`: the file LM Studio serves.
-It runs on the GPU, as LM Studio runs it, so its vectors are the ones LM Studio stored (cosine 1.00000 on the serving Mac), and existing memories stay comparable.
+It runs on the GPU, as LM Studio runs it, so its vectors are the ones LM Studio stored (cosine 1.00000 on the serving host), and existing memories stay comparable.
 
 **3. Point an OpenAI client at it**:
 
@@ -191,7 +191,7 @@ r = client.chat.completions.create(model="d1a-chat", messages=[{"role": "user", 
 The model server answers questions about an image, a short voice clip or a video with the same model, the same request shape plus a `media` field. On Apple Silicon, serve an MLX build that carries Gemma 4's vision and audio encoders (`media/`, about 1 GB, fetched on the first such request; `JohnP1/d1a-e4b-mlx-q8@v0.3` has them, and `scripts/export_mlx.py --media` adds them to your own export):
 
 ```bash
-uv run --extra serve --extra media python -m d1a.serving.serve --run JohnP1/d1a-e4b-mlx-q8@v0.6 --port 8009 --idle-unload 600
+uv run --extra serve --extra media python -m d1a.serving.serve --run JohnP1/d1a-e4b-mlx-q8@v0.6.1 --port 8009 --idle-unload 600
 ```
 
 ```bash

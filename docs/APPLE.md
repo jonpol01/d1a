@@ -35,7 +35,7 @@ D1A also runs on the Apple Neural Engine through Core ML, as a preview for iPhon
 - Each chunk runs in its own process.
 
 Both Core ML builds give the same answers as the full-precision model on every clear-cut question. On a Mac, MLX on the GPU
-is several times faster, so the serving Mac keeps MLX; Core ML is for iPhone and iPad, where it keeps the GPU free. The
+is several times faster, so the serving host keeps MLX; Core ML is for iPhone and iPad, where it keeps the GPU free. The
 photo, voice and video encoders are not converted yet. Each Core ML repository's `reference/run.py` answers a request from
 the downloaded files.
 
@@ -52,7 +52,7 @@ Measured on 2026-10-11 on the same 28 real requests (42 questions, all ≤ 512 t
 | Questions | yes/no, choice, score, with a calibrated probability for each option | same | same | same |
 | Languages | questions in English; documents in English or Japanese | same | same | same |
 | PR labels, 487 newest PRs: type / severity | 87.5% / 77.2%; 0 of 30 P0/P1 found | same model | 90.6% / 79.1%; 13 of 30 P0/P1 | same model |
-| Size | 3.8 GB + 1.0 GB media | 3.5 GB (1.8 GB chunks + 1.6 GB embeddings) | 6.6 GB + 1.0 GB media | 6.1 GB (3.9 GB chunks + 2.1 GB embeddings) |
+| Size | 3.8 GB + 1.0 GB media | 3.8 GB (2.0 GB chunks + 1.7 GB embeddings) | 6.6 GB + 1.0 GB media | 6.5 GB (4.2 GB chunks + 2.3 GB embeddings) |
 | Median request, M4 (p95) | **0.20 s** (0.26) | 0.96 s (0.97) | 0.63 s (0.89) | 1.80 s (1.91) |
 | Median request, M1 Max (p95) | **0.17 s** (0.23) | 9.7 s (10.0) ² | 0.81 s (1.33) | 2.93 s (2.95) |
 | Load, M4 / M1 Max | 2 s / 9 s | 40 s / 247 s | 3 s / – | 52 s / 106 s |
