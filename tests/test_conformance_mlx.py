@@ -147,7 +147,9 @@ def ct_checkpoint(base, out):
             stored[k] = w
             continue
         groups = w.astype(np.float32).reshape(w.shape[0], -1, 32)
-        scale = (np.abs(groups).max(-1) / 7 + 1e-8).astype(w.dtype)
+        # scales on bf16's grid, as a real QAT checkpoint stores them: then s (q + 8) and -8 s are exact in fp32, on any
+        # device (an fp32 scale's product with q + 8 needs more than fp32's mantissa, and the CPU rounds it differently)
+        scale = ((np.abs(groups).max(-1) / 7 + 1e-8).astype(np.float32).view(np.uint32) & 0xFFFF0000).view(np.float32).astype(w.dtype)
         q = np.clip(np.round(groups / scale.astype(np.float32)[..., None]), -8, 7).astype(np.int8).reshape(w.shape)
         u = (q.astype(np.int32) + 8).reshape(w.shape[0], -1, 8).astype(np.uint32) << (4 * np.arange(8, dtype=np.uint32))
         name = k[:-len(".weight")]
