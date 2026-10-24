@@ -482,7 +482,47 @@ def q4_0_mlx(w, dtype):
     return mx.array(pack(q)), mx.array(d).astype(dtype), mx.array(-8.0 * d).astype(dtype)
 
 
-def export_mlx(ck, out, bits=None, group_size=64, embeddings=True, per_layer_bits=None, q4_0_grid=False, unmerged=False):
+CT_EXTRA = re.compile(r"\.(weight_packed|weight_scale|weight_shape|input_max|input_min|output_max|output_min)$")
+
+
+def ct_int4_mlx(packed, scale):
+    """compressed-tensors' pack-quantized int4 (symmetric, groups of 32), held exactly in MLX's affine 4-bit, group 32:
+    -> (weight, scales, biases). It packs 8 values per int32 from the low nibble up, each stored as q + 8, which is how
+    MLX packs its unsigned 4-bit values; so the words are kept as they are, scales = s and biases = -8 s (exact in any
+    float type: a power-of-two multiple), and every weight dequantizes to s (q + 8) - 8 s = s q, the checkpoint's own."""
+    return packed.view(mx.uint32), scale, scale * -8
+
+
+def ct_base_weights(lm, path):
+    """A compressed-tensors QAT checkpoint (Google's gemma-4-*-it-qat-w4a16-ct) as `lm`'s weights. Every tensor it keeps
+    unquantized replaces lm's (lm.sanitize maps the names, and drops the vision and audio towers and the lm_head, which is
+    the embeddings itself); every quantized Linear is returned as its exact MLX triple (ct_int4_mlx), to put in place
+    after quantize_model. Refuses a parameter of lm the checkpoint does not set. -> {module path: (weight, scales, biases)}"""
+    stored = {}
+    for f in weight_shards(Path(path)): stored.update(mx.load(str(f)))
+    names = sorted(k[:-len(".weight_packed")] for k in stored if k.endswith(".weight_packed"))
+    plain = lm.sanitize({k: v for k, v in stored.items() if not CT_EXTRA.search(k)})
+    params = dict(tree_flatten(lm.parameters()))
+    if "lm_head.weight" in plain:   # tied: the head is the embeddings, which it must equal
+        head = plain.pop("lm_head.weight")
+        if not mx.array_equal(head, plain["language_model.model.embed_tokens.weight"]): raise ValueError(f"{path}: an untied lm_head")
+    exact = {}
+    for name in names:
+        module = next(iter(lm.sanitize({name + ".weight": stored[name + ".weight_scale"]})))[:-len(".weight")]
+        w, scales, biases = ct_int4_mlx(stored[name + ".weight_packed"], stored[name + ".weight_scale"])
+        out, cols = (int(x) for x in stored[name + ".weight_shape"].tolist())
+        if tuple(params[module + ".weight"].shape) != (out, cols) or tuple(w.shape) != (out, cols // 8) or tuple(scales.shape) != (out, cols // 32):
+            raise ValueError(f"{path}: {name} is not [{out}, {cols}] in groups of 32")
+        exact[module] = (w, scales, biases)
+    unset = sorted(set(params) - set(plain) - {m + ".weight" for m in exact})
+    unknown = sorted(set(plain) - set(params))
+    if unset or unknown: raise ValueError(f"{path}: {len(unset)} parameters not in the checkpoint (e.g. {unset[:2]}), {len(unknown)} unknown tensors (e.g. {unknown[:2]})")
+    lm.load_weights(list(plain.items()), strict=False)
+    return exact
+
+
+def export_mlx(ck, out, bits=None, group_size=64, embeddings=True, per_layer_bits=None, q4_0_grid=False, unmerged=False, ct_base=None,
+               embedding_bits=None):
     """Write `ck` (a LoRA checkpoint, d1a.backends.checkpoint.Checkpoint) as an MLX export folder that d1a.backends.checkpoint serves
     through this backend without the base or the adapter: the adapter merged into the base in fp32 on the CPU stream
     (merge_lora, the same bits the MLX backend computes at load), then optionally quantized (`bits` per weight, affine,
@@ -491,7 +531,12 @@ def export_mlx(ck, out, bits=None, group_size=64, embeddings=True, per_layer_bit
     take 4 bits well, while the linear layers need 8), saved by mlx-lm (config.json + model*.safetensors), with the pointer head in fp32 (head.safetensors), the
     checkpoint's tokenizer files and d1a_config.json. `unmerged` keeps the adapter out of the weights (in adapter/, attached
     at load), so an instruction-tuned base still chats with the adapter off (#274). `q4_0_grid` writes 4-bit group-32 weights on llama.cpp's Q4_0 grid
-    (q4_0_mlx) instead of mlx-lm's min/max scales: for a base trained for Q4_0, such as Gemma 4 12B-it QAT. -> the d1a_config dict."""
+    (q4_0_mlx) instead of mlx-lm's min/max scales: for a base trained for Q4_0, such as Gemma 4 12B-it QAT. `ct_base`, a
+    compressed-tensors QAT checkpoint of the same model (a folder), replaces the base: its quantized Linears are kept
+    exactly as it stores them (ct_base_weights, 4 bits in groups of 32), its other tensors as they are, the embeddings
+    quantized as `embeddings` says; only with `unmerged`, since merging the adapter would leave the grid. `embedding_bits`
+    gives embed_tokens and the per-layer embeddings their own width (per_layer_bits still wins for the per-layer ones):
+    with ct_base, which the QAT checkpoint did not quantize. -> the d1a_config dict."""
     import shutil
 
     import mlx.nn as nn
@@ -505,6 +550,11 @@ def export_mlx(ck, out, bits=None, group_size=64, embeddings=True, per_layer_bit
     meta, out = ck.meta, Path(out)
     tok = load_tokenizer(meta.base, revision=meta.base_revision)
     lm, config = load_mlx_lm(base_dir(meta))
+    exact_ct = ct_base_weights(lm, ct_base) if ct_base else None
+    if exact_ct is not None and (not unmerged or q4_0_grid or bits not in (None, 4)):
+        raise ValueError("ct_base keeps the checkpoint's own 4-bit grid: unmerged, without q4_0_grid or another width for the Linears")
+    if exact_ct is not None:
+        bits, group_size = 4, 32
     if not unmerged:
         merge_lora(lm, ck.path)
     quantization = None
@@ -516,6 +566,7 @@ def export_mlx(ck, out, bits=None, group_size=64, embeddings=True, per_layer_bit
         def widths(path, module):
             if isinstance(module, nn.Embedding) and not embeddings: return False
             if per_layer_bits and path.endswith("embed_tokens_per_layer"): return {"group_size": group_size, "bits": per_layer_bits, "mode": "affine"}
+            if embedding_bits and isinstance(module, nn.Embedding): return {"group_size": group_size, "bits": embedding_bits, "mode": "affine"}
             return True
         exact = {}
         if q4_0_grid:   # computed before mlx-lm replaces the weights, one tensor at a time in fp32
@@ -528,7 +579,13 @@ def export_mlx(ck, out, bits=None, group_size=64, embeddings=True, per_layer_bit
             if set(quantized) != set(exact): raise ValueError(f"Q4_0 packing for {sorted(set(quantized) ^ set(exact))[:3]}...")
             for path, (w, scales, biases) in exact.items():
                 quantized[path].weight, quantized[path].scales, quantized[path].biases = w, scales, biases
-        quantization = {**config["quantization"], "embeddings": bool(embeddings), **({"grid": "q4_0"} if q4_0_grid else {})}
+        if exact_ct is not None:   # the Linears as the checkpoint stores them; anything else quantized is an embedding
+            linears = {path for path, m in quantized.items() if not isinstance(m, nn.QuantizedEmbedding)}
+            if linears != set(exact_ct): raise ValueError(f"int4 grid for {sorted(linears ^ set(exact_ct))[:3]}...")
+            for path, (w, scales, biases) in exact_ct.items():
+                quantized[path].weight, quantized[path].scales, quantized[path].biases = w, scales, biases
+        grid = {"grid": "q4_0"} if q4_0_grid else {"grid": "ct-int4"} if exact_ct is not None else {}
+        quantization = {**config["quantization"], "embeddings": bool(embeddings), **grid}
     norm = lm.language_model.model.norm.weight   # read before save_model donates the weights
     hidden, dtype = norm.shape[0], str(norm.dtype).removeprefix("mlx.core.")
     out.mkdir(parents=True, exist_ok=True)

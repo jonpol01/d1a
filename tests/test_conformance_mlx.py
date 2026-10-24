@@ -134,6 +134,66 @@ def test_a_q4_0_export_holds_llama_cpps_q4_0_grid_exactly(checkpoint, golden, tm
     answers(tmp_path / "q4", golden)   # checks every record's token ids
 
 
+def ct_checkpoint(base, out):
+    """`base` as a compressed-tensors QAT checkpoint would store it (pack-quantized int4, symmetric, groups of 32): every
+    Linear weight whose width is a multiple of 32 becomes weight_packed (8 values per int32 from the low nibble up, each
+    q + 8), weight_scale and weight_shape; the rest is kept. -> {name: (q int8, scale)}"""
+    import numpy as np
+    from safetensors.numpy import load_file, save_file
+    out.mkdir()
+    weights, stored, quantized = load_file(str(base / "model.safetensors")), {}, {}
+    for k, w in weights.items():
+        if not (k.endswith("_proj.weight") or k.endswith("_gate.weight") or k.endswith("_projection.weight")) or w.ndim != 2 or w.shape[1] % 32:
+            stored[k] = w
+            continue
+        groups = w.astype(np.float32).reshape(w.shape[0], -1, 32)
+        scale = (np.abs(groups).max(-1) / 7 + 1e-8).astype(w.dtype)
+        q = np.clip(np.round(groups / scale.astype(np.float32)[..., None]), -8, 7).astype(np.int8).reshape(w.shape)
+        u = (q.astype(np.int32) + 8).reshape(w.shape[0], -1, 8).astype(np.uint32) << (4 * np.arange(8, dtype=np.uint32))
+        name = k[:-len(".weight")]
+        stored |= {name + ".weight_packed": u.sum(-1, dtype=np.uint32).view(np.int32), name + ".weight_scale": scale,
+                   name + ".weight_shape": np.array(w.shape, np.int64)}
+        quantized[name] = (q, scale)
+    save_file(stored, str(out / "model.safetensors"))
+    shutil.copyfile(base / "config.json", out / "config.json")
+    return quantized
+
+
+@needs_mlx
+def test_a_ct_base_export_holds_the_checkpoints_own_int4_grid_exactly(checkpoint, golden, tmp_path):
+    """--ct-base (d1a#341): the export keeps a compressed-tensors QAT checkpoint's int4 Linears as it stores them (the
+    words, scale s and bias -8 s, so each weight dequantizes to s q exactly) and its other tensors as they are, and it
+    loads and answers. A merged adapter would leave the grid, so ct_base refuses it."""
+    import mlx.core as mx
+    import numpy as np
+    from d1a.backends.checkpoint import Checkpoint, base_dir
+    from d1a.backends.mlx import export_mlx
+    base = Path(base_dir(Checkpoint(checkpoint).meta))
+    quantized = ct_checkpoint(base, tmp_path / "ct")
+    assert quantized
+    with pytest.raises(ValueError, match="unmerged"):
+        export_mlx(Checkpoint(checkpoint), tmp_path / "merged", ct_base=tmp_path / "ct")
+    cfg = export_mlx(Checkpoint(checkpoint), tmp_path / "q4", unmerged=True, ct_base=tmp_path / "ct")
+    assert cfg["quantization"]["grid"] == "ct-int4" and cfg["quantization"]["bits"] == 4 and cfg["quantization"]["group_size"] == 32
+    out, ct = mx.load(str(tmp_path / "q4" / "model.safetensors")), mx.load(str(tmp_path / "ct" / "model.safetensors"))
+    for name, (q, scale) in quantized.items():
+        m = "language_model.model." + name.split("model.language_model.", 1)[1]
+        assert mx.array_equal(out[m + ".weight"], ct[name + ".weight_packed"].view(mx.uint32)), name
+        assert mx.array_equal(out[m + ".scales"], ct[name + ".weight_scale"]) and mx.array_equal(out[m + ".biases"], ct[name + ".weight_scale"] * -8), name
+        deq = mx.dequantize(out[m + ".weight"], out[m + ".scales"].astype(mx.float32), out[m + ".biases"].astype(mx.float32), group_size=32, bits=4)
+        ref = (q.astype(np.float32).reshape(q.shape[0], -1, 32) * scale.astype(np.float32)[..., None]).reshape(q.shape)
+        assert np.array_equal(np.array(deq), ref), name
+    norm = next(k for k in ct if k.endswith("layers.0.input_layernorm.weight"))
+    assert mx.array_equal(out["language_model.model." + norm.split("model.language_model.", 1)[1]], ct[norm])
+    answers(tmp_path / "q4", golden)   # loads, and checks every record's token ids
+    cfg8 = export_mlx(Checkpoint(checkpoint), tmp_path / "q4e8", unmerged=True, ct_base=tmp_path / "ct", embedding_bits=8)
+    widths = {k: v["bits"] for k, v in cfg8["quantization"].items() if isinstance(v, dict) and "bits" in v}
+    assert widths and all(b == 8 for k, b in widths.items() if "embed" in k), widths   # the embeddings at 8 bits, the Linears as before
+    out8 = mx.load(str(tmp_path / "q4e8" / "model.safetensors"))
+    name = next(iter(quantized)); m = "language_model.model." + name.split("model.language_model.", 1)[1]
+    assert mx.array_equal(out8[m + ".weight"], out[m + ".weight"])
+
+
 @needs_mlx
 def test_an_unmerged_export_answers_like_the_merged_one_and_switches_back_to_the_base(checkpoint, golden, tmp_path):
     """#274: export_mlx(unmerged=True) keeps the adapter beside the base. With it on, the golden answers hold within the
