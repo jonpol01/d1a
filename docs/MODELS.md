@@ -28,6 +28,7 @@ zero-shot on every build (no media in training).
 | [d1a-e2b-it-coreml-4bit](https://huggingface.co/JohnP1/d1a-e2b-it-coreml-4bit) `v0.6` | Core ML 4-bit | ✅ | ❌ | ❌ | ❌ | ❌ | preview: text only, ≤ 512 tokens |
 | [d1a-e2b-it-qat-mlx-q4](https://huggingface.co/JohnP1/d1a-e2b-it-qat-mlx-q4) | MLX 4-bit (Google's QAT int4, exact), **unmerged** | ✅ | ✅ | ✅ | ✅ | ✅ | the recommended E2B-it build, replacing D1A-E2B-it v0.6 by the owner's decision of 2026-10-25 despite transfer-v4 −5.2 points; 3.7 GB |
 | [d1a-e2b-it-qat](https://huggingface.co/JohnP1/d1a-e2b-it-qat) | PyTorch (adapter; `base_ct`: Google's QAT int4 trunk, rebuilt on load) | ✅ | ✅² | ✅¹ | ✅¹ | ✅¹ | the recommended E2B-it on PyTorch; loads Gemma 4 E2B-it and the QAT checkpoint |
+| [d1a-e2b-it-qat-coreml](https://huggingface.co/JohnP1/d1a-e2b-it-qat-coreml) | Core ML (Google's QAT int4, exact; the adapter as a switch) | ✅⁴ | ✅⁴ | ✅⁴ | ✅⁴ | ✅⁴ | the recommended E2B-it on Core ML; 4.6 GB; verified on a Mac (M1 Max, GPU), not yet on an iPhone |
 
 ¹ Through the separate PyTorch media server, `python -m d1a.serving.media --run <repo>`, which loads the full Gemma 4
 model (bf16, about 10 GB for E2B) ([Photos, voice and video](USAGE.md)).
@@ -35,7 +36,11 @@ model (bf16, about 10 GB for E2B) ([Photos, voice and video](USAGE.md)).
 ³ Chat needs an unmerged build: `scripts/export_mlx.py --run JohnP1/d1a-e2b-it --unmerged --media` makes one
 ([Chat with D1A](USAGE.md#chat-with-d1a)).
 
-Not published yet: D1A-E2B-it QAT for Core ML. No Core ML build has chat, photo, voice or video yet.
+⁴ Through the repository's Python reference runner (`reference/d1a_coreml_qat.py`, no server; `io.json` lists every model
+input and output for a port); every model on the GPU, none on the Neural Engine yet; decisions up to 1,536 tokens, chat up to
+2,048 positions ([APPLE.md](APPLE.md#d1a-e2b-it-qat-on-core-ml)).
+
+D1A-E2B-it QAT is the only Core ML build with chat, photo, voice and video; the v0.6 Core ML builds are text only.
 
 ## Capabilities (2026-10-17)
 

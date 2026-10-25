@@ -77,6 +77,7 @@ What every published build can and cannot do. Limits and footnotes: [docs/MODELS
 |---|---|---|---|---|---|---|---|
 | **D1A-E2B-it QAT** ([mlx-q4](https://huggingface.co/JohnP1/d1a-e2b-it-qat-mlx-q4)) | MLX 4-bit, unmerged | ✅ | ✅ | ✅ | ✅ | ✅ | 3.7 GB; **recommended E2B-it** |
 | **D1A-E2B-it QAT** ([d1a-e2b-it-qat](https://huggingface.co/JohnP1/d1a-e2b-it-qat)) | PyTorch | ✅ | ✅⁴ | ✅¹ | ✅¹ | ✅¹ | 126 MB adapter on Gemma 4 E2B-it + Google's QAT checkpoint |
+| **D1A-E2B-it QAT** ([coreml](https://huggingface.co/JohnP1/d1a-e2b-it-qat-coreml)) | Core ML (Google's QAT int4, exact) | ✅⁵ | ✅⁵ | ✅⁵ | ✅⁵ | ✅⁵ | 4.6 GB; verified on a Mac, not yet on an iPhone |
 | D1A-E2B-it v0.6 ([d1a-e2b-it](https://huggingface.co/JohnP1/d1a-e2b-it)) | PyTorch | ✅ | ✅⁴ | ✅¹ | ✅¹ | ✅¹ | |
 | D1A-E2B-it v0.6 ([mlx-q8](https://huggingface.co/JohnP1/d1a-e2b-it-mlx-q8), [mlx-q4](https://huggingface.co/JohnP1/d1a-e2b-it-mlx-q4)) | MLX, merged | ✅ | ❌³ | ✅ | ✅ | ✅ | 4.8 / 3.6 GB |
 | D1A-E2B-it v0.6 ([coreml](https://huggingface.co/JohnP1/d1a-e2b-it-coreml), [coreml-4bit](https://huggingface.co/JohnP1/d1a-e2b-it-coreml-4bit)) | Core ML | ✅² | ❌ | ❌ | ❌ | ❌ | 3.8 / 2.9 GB, preview |
@@ -84,7 +85,7 @@ What every published build can and cannot do. Limits and footnotes: [docs/MODELS
 | D1A-E2B ([mlx-q8](https://huggingface.co/JohnP1/d1a-e2b-mlx-q8)) | MLX 8-bit | ✅ | ❌ | ✅ | ✅ | ✅ | 4.8 GB |
 | D1A-E2B ([coreml](https://huggingface.co/JohnP1/d1a-e2b-coreml)) | Core ML int8 | ✅² | ❌ | ❌ | ❌ | ❌ | 3.8 GB, preview |
 
-**Not built yet:** D1A-E2B-it QAT for Core ML. The QAT build trades 5.2 points on unfamiliar task types
+The QAT build trades 5.2 points on unfamiliar task types
 (transfer-v4) for D1A's own jobs, speed and all five functions ([scorecard](docs/reports/2026-10-25-e2b-it-qat-scorecard.md)).
 
 ### D1A-E4B (more accurate: servers and Macs)
@@ -102,10 +103,11 @@ What every published build can and cannot do. Limits and footnotes: [docs/MODELS
 ² Text only, inputs up to 512 tokens.
 ³ Merged as published; export it `--unmerged` for chat ([Chat with D1A](docs/USAGE.md#chat-with-d1a)).
 ⁴ Served with `D1A_MERGE=0`, which keeps the adapter unmerged so chat can switch it off.
+⁵ Through the repository's Python reference runner (`reference/d1a_coreml_qat.py`; no server); on the GPU, not the Neural Engine; decisions up to 1,536 tokens.
 
-No Core ML build of any D1A model has chat today.
+D1A-E2B-it QAT is the only Core ML build with chat, photo, voice and video; the other Core ML builds are text only.
 
-E4B is the more accurate size; E2B is smaller and faster, for phones and small machines. The `-it` models are trained the same way on the instruction-tuned Gemma 4 trunks, so one model also chats: with its D1A adapter off it is Gemma 4 E4B-it / E2B-it. Chat needs an unmerged build (`scripts/export_mlx.py --unmerged`, [Chat with D1A](docs/USAGE.md#chat-with-d1a)); the published `-mlx-q8` / `-mlx-q4` repos have the adapter merged and answer decisions only. D1A-E4B-it is about 2.9× slower per decision than D1A-E2B-it and more accurate on 21 of 22 suites. The PyTorch and MLX builds of D1A-E4B and D1A-E2B are at `v0.6.1` (v0.6 plus a routing temperature); the `-it` and Core ML builds are at `v0.6`. Core ML is a preview for iPhone/iPad: text only, inputs up to 512 tokens, and MLX is faster on Macs ([docs/APPLE.md](docs/APPLE.md)); the 4-bit E4B-it build moves 3 of 42 test answers, so use MLX 8-bit where answers must not move. Sizes, exceptions and older versions: [docs/MODELS.md](docs/MODELS.md).
+E4B is the more accurate size; E2B is smaller and faster, for phones and small machines. The `-it` models are trained the same way on the instruction-tuned Gemma 4 trunks, so one model also chats: with its D1A adapter off it is Gemma 4 E4B-it / E2B-it. Chat needs an unmerged build (`scripts/export_mlx.py --unmerged`, [Chat with D1A](docs/USAGE.md#chat-with-d1a)); the published `-mlx-q8` / `-mlx-q4` repos have the adapter merged and answer decisions only. D1A-E4B-it is about 2.9× slower per decision than D1A-E2B-it and more accurate on 21 of 22 suites. The PyTorch and MLX builds of D1A-E4B and D1A-E2B are at `v0.6.1` (v0.6 plus a routing temperature); the `-it` and Core ML builds are at `v0.6`. Core ML is a preview for iPhone/iPad, and MLX is faster on Macs ([docs/APPLE.md](docs/APPLE.md)): the v0.6 Core ML builds are text only with inputs up to 512 tokens, and D1A-E2B-it QAT's does all five, verified on a Mac but not yet on an iPhone; the 4-bit E4B-it build moves 3 of 42 test answers, so use MLX 8-bit where answers must not move. Sizes, exceptions and older versions: [docs/MODELS.md](docs/MODELS.md).
 
 ## Use It
 
@@ -180,7 +182,7 @@ As of 2026-10-22:
 - D1A-E4B-it v0.6 is in daily use as one model: decisions (the PR labeler, and a Hermes agent's tool gate in shadow mode) and OpenAI-format chat and embeddings for local apps and agents, with a prompt cache.
 - The SWE verifier is no better than cheap trajectory heuristics within an issue (a null result); recalibration on outcomes works ([docs/SELF_LEARNING.md](docs/SELF_LEARNING.md)).
 - The photo, voice and video demos are zero-shot: the checkpoints are trained on text only ([docs/DEMOS.md](docs/DEMOS.md)).
-- Core ML is a preview: text only, inputs up to 512 tokens, slower than MLX on Macs ([docs/APPLE.md](docs/APPLE.md)).
+- Core ML is a preview, slower than MLX on Macs ([docs/APPLE.md](docs/APPLE.md)): the v0.6 builds are text only (inputs up to 512 tokens); D1A-E2B-it QAT's does all five, verified on a Mac but not yet on an iPhone.
 - Options within one question can still influence each other; asking questions together or separately gives the same probabilities, but option order is not irrelevant.
 - The benchmark numbers Kev publishes are for Kev's own Qwen checkpoints, not D1A.
 - Reports are in [docs/reports/](docs/reports/).
