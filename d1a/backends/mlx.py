@@ -543,11 +543,15 @@ def export_mlx(ck, out, bits=None, group_size=64, embeddings=True, per_layer_bit
     from mlx_lm.utils import quantize_model, save_config, save_model
     from safetensors.torch import save_file
 
-    from d1a.backends.checkpoint import EXPORT_CONFIG, EXPORT_HEAD, base_dir, export_config
+    from d1a.backends.checkpoint import EXPORT_CONFIG, EXPORT_HEAD, base_dir, ct_dir, ct_spec, export_config
     from d1a.core.encoding import layout, load_tokenizer, pad_id
 
     if ck.export is not None: raise ValueError(f"{ck.path} is already an MLX export")
     meta, out = ck.meta, Path(out)
+    if meta.base_ct:   # trained on a QAT trunk: the export keeps that trunk, never the base's
+        if ct_base is not None and ct_spec(ct_base) != ct_spec(meta.base_ct):
+            raise ValueError(f"ct_base {ct_base} is not the QAT checkpoint {ck.path} was trained on ({meta.base_ct})")
+        ct_base = ct_base or ct_dir(meta.base_ct)
     tok = load_tokenizer(meta.base, revision=meta.base_revision)
     lm, config = load_mlx_lm(base_dir(meta))
     exact_ct = ct_base_weights(lm, ct_base) if ct_base else None

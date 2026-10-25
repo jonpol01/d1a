@@ -117,6 +117,8 @@ class MediaModel:
         self.checkpoint = ck = Checkpoint(run); meta = ck.meta
         if ck.export is not None:
             raise SystemExit(f"{run}: the media server needs a LoRA checkpoint (torch), not an MLX export")
+        if meta.base_ct:   # it builds the base's own trunk, which this adapter was not trained on
+            raise SystemExit(f"{run}: trained on the QAT checkpoint {meta.base_ct}; the media server runs the base's trunk, so photos and voice are not served for it")
         self.device = device
         self.proc = AutoProcessor.from_pretrained(meta.base, revision=meta.base_revision)
         self.tok = self.proc.tokenizer
@@ -182,10 +184,12 @@ TOWERS = ("vision_tower", "audio_tower", "embed_vision", "embed_audio")   # Gemm
 MEDIA_DIR = "media"   # the encoders inside an MLX export folder (export_media)
 
 
-def export_media(base, revision, out):
+def export_media(base, revision, out, weights=None):
     """Write Gemma 4's vision and audio encoders (~1 GB bf16 for E4B, of a 16 GB base) as `out`/media, a folder that
     MediaEncoder loads without the base: config.json, the processor files and model.safetensors with the encoder weights
-    only. They are the base's own weights: the LoRA adapter only touches the text model."""
+    only. They are the base's own weights: the LoRA adapter only touches the text model. `weights`, a compressed-tensors
+    QAT checkpoint's folder (d1a#341), supplies the encoder weights instead: its encoders are bf16 like the base's, but
+    its vision projection was trained with its int4 text model."""
     from huggingface_hub import hf_hub_download
     from safetensors import safe_open
     from safetensors.torch import save_file
@@ -195,12 +199,12 @@ def export_media(base, revision, out):
     folder = os.path.dirname(hf_hub_download(base, "config.json", revision=revision))
     dest = os.path.join(out, MEDIA_DIR); os.makedirs(dest, exist_ok=True)
     tensors = {}
-    for shard in weight_shards(folder) or [hf_hub_download(base, "model.safetensors", revision=revision)]:
+    for shard in weight_shards(weights) if weights else weight_shards(folder) or [hf_hub_download(base, "model.safetensors", revision=revision)]:
         with safe_open(shard, "pt") as f:
             for k in f.keys():
                 name = k.removeprefix("model.")
                 if name.startswith(TOWERS): tensors[name] = f.get_tensor(k).to(torch.bfloat16)
-    if not tensors: raise SystemExit(f"{base} has no vision or audio encoders")
+    if not tensors: raise SystemExit(f"{weights or base} has no vision or audio encoders")
     save_file(tensors, os.path.join(dest, "model.safetensors"))
     shutil.copy(os.path.join(folder, "config.json"), dest)
     AutoProcessor.from_pretrained(base, revision=revision).save_pretrained(dest)

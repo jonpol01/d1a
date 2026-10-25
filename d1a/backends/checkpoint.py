@@ -88,13 +88,16 @@ class Meta:
     temperature: float = 1.0
     holdout: list = field(default_factory=list)
     weights: str = "lora"               # "lora": an adapter on the base; "mlx": an MLX export (never written to a head.pt)
+    base_ct: str | None = None          # trained on this compressed-tensors QAT checkpoint's weights, not the base's (d1a#341)
     extra: dict = field(default_factory=dict)
 
-    KNOWN = ("base", "head", "base_revision", "lora", "head_dim", "option_isolation", "special_embeddings", "weights_dtype", "temperature", "holdout", "weights")
+    KNOWN = ("base", "head", "base_revision", "lora", "head_dim", "option_isolation", "special_embeddings", "weights_dtype", "temperature", "holdout", "weights", "base_ct")
 
     @classmethod
     def from_dict(cls, d):
         known = {k: d[k] for k in cls.KNOWN if k in d}
+        if not known.get("base_ct") and (d.get("args") or {}).get("base_ct"):   # a run trained before the field records it in its arguments only
+            known["base_ct"] = d["args"]["base_ct"]
         return cls(**known, extra={k: v for k, v in d.items() if k not in cls.KNOWN})
 
     def to_dict(self):
@@ -202,6 +205,65 @@ def write_meta(run, meta):
 def weight_shards(path):
     """A saved backbone's safetensors files (model.safetensors, or model-*-of-*.safetensors), sorted."""
     return sorted(Path(path).glob("model*.safetensors"))
+
+
+# --- a compressed-tensors QAT checkpoint as the trunk (Google's gemma-4-*-it-qat-w4a16-ct; d1a#341) ------------------
+
+CT_EXTRA = (".weight_scale", ".weight_shape", ".input_max", ".input_min", ".output_max", ".output_min")
+COMPUTED_BUFFERS = ("embed_scale", "inv_freq", "original_inv_freq")   # transformers computes these at load; no checkpoint stores them
+
+
+def ct_spec(path):
+    """How a run records its QAT checkpoint: a Hugging Face cache snapshot (.../models--org--name/snapshots/<rev>) as
+    org/name@<rev>, which any machine can resolve; anything else as given."""
+    p = Path(path)
+    if p.parent.name == "snapshots" and p.parent.parent.name.startswith("models--"):
+        return p.parent.parent.name.removeprefix("models--").replace("--", "/", 1) + "@" + p.name
+    return str(path)
+
+
+def ct_dir(spec):
+    """A QAT checkpoint as a local folder: `spec` itself when it is one, else the Hub snapshot of repo@revision."""
+    if os.path.isdir(spec):
+        return spec
+    from huggingface_hub import snapshot_download
+    repo, _, revision = spec.partition("@")
+    return snapshot_download(repo, revision=revision or None)
+
+
+def load_ct_base(lm, path):
+    """Overwrite the text model's base weights with a compressed-tensors QAT checkpoint's, so an adapter trains and runs on
+    the weights the quantized build runs: each pack-quantized Linear as s q (8 int4 per int32 from the low nibble up, stored
+    as q + 8; groups of 32), exact in fp32, each other tensor as stored. Names map by suffix (model.language_model.X ->
+    ...X, a LoRA-wrapped Linear's base_layer); the vision and audio towers and the tied lm_head are skipped. Refuses a
+    checkpoint tensor that maps to nothing and a base parameter it does not set. -> (quantized Linears, other tensors)"""
+    import numpy as np
+    from safetensors import safe_open
+    prefix = "model.language_model."
+    # buffers too: Gemma 4's per-layer output scalar (layer_scalar) is one, and QAT changed it (+17-20%)
+    params = {n: p for n, p in [*lm.named_parameters(), *lm.named_buffers()] if "lora_" not in n and not n.endswith(COMPUTED_BUFFERS)}
+    by_suffix = {n.split("base_model.model.", 1)[-1].replace(".base_layer.", "."): n for n in params}
+    done, nq = set(), 0
+    with torch.no_grad():
+        for shard in weight_shards(Path(path)):
+            f = safe_open(str(shard), "pt")
+            for k in f.keys():
+                if not k.startswith(prefix) or k.endswith(CT_EXTRA): continue
+                rel = k[len(prefix):]
+                if rel.endswith(".weight_packed"):
+                    rel = rel[: -len("_packed")]
+                    w = f.get_tensor(k).numpy().view(np.uint32); scale = f.get_tensor(k[: -len("_packed")] + "_scale").float().numpy()
+                    q = ((w[..., None] >> (4 * np.arange(8, dtype=np.uint32))) & 0xF).reshape(w.shape[0], -1).astype(np.float32) - 8
+                    value = torch.from_numpy((q.reshape(q.shape[0], -1, 32) * scale[..., None]).reshape(q.shape)); nq += 1
+                else:
+                    value = f.get_tensor(k)
+                if rel not in by_suffix: raise ValueError(f"{path}: {k} maps to no parameter or buffer of the model")
+                target = params[by_suffix[rel]]
+                if target.shape != value.shape: raise ValueError(f"{path}: {k} is {tuple(value.shape)}, the model's {tuple(target.shape)}")
+                target.copy_(value.to(target.dtype)); done.add(by_suffix[rel])
+    unset = sorted(set(params) - done)
+    if unset: raise ValueError(f"{path}: {len(unset)} base parameters not in the checkpoint (e.g. {unset[:3]})")
+    return nq, len(done) - nq
 
 
 def export_config(ck, leading, delimiters, pad, hidden_size, quantization, dtype):
@@ -401,6 +463,11 @@ class Checkpoint:
             if opts.backend == "torch":
                 raise ValueError(f"{self.requested} is an MLX export: it runs on backend=mlx only; load its source checkpoint {self.export['source']} for torch")
             return "mlx"
+        if self.meta.base_ct:   # its QAT trunk is rebuilt on the torch path; MLX runs it as an export that keeps the grid
+            if opts.backend == "mlx":
+                raise ValueError(f"{self.requested} was trained on the QAT checkpoint {self.meta.base_ct}: on MLX, load its export "
+                                 f"(scripts/export_mlx.py --run {self.requested} --unmerged), or use backend=torch")
+            return "torch"
         if opts.backend != "auto":
             return opts.backend or "torch"
         exact = opts.dtype is torch.float32   # D1A_DTYPE=fp32: the caller wants the reported-numbers path, not a faster one
@@ -471,6 +538,8 @@ class Checkpoint:
         merge = merge and not self.adapter_config().get("trainable_token_indices")   # an adapter that trained token embeddings stays unmerged
         model = DecisionModel(meta.base, tok, device, lora=None, revision=meta.base_revision, head_dim=meta.head_dim, dtype=dtype, attn=opts.attn)
         model.lm = PeftModel.from_pretrained(model.lm, self.path, torch_device=str(device)).to(device)   # trained token embeddings, if any, are in the adapter
+        if meta.base_ct:   # the trunk it trained on; s q is exact in fp32 (D1A_DTYPE=fp32), rounded in bf16
+            load_ct_base(model.lm, ct_dir(meta.base_ct))
         if opts.lora_scale != 1:
             for module in model.lm.modules():
                 if isinstance(getattr(module, "scaling", None), dict):
@@ -483,7 +552,7 @@ class Checkpoint:
             model.lm = model.lm.to(dtype)
         return model, merge
 
-    COMPAT_FIELDS = ("base", "base_revision", "lora", "head_dim", "option_isolation", "special_embeddings", "weights")
+    COMPAT_FIELDS = ("base", "base_revision", "lora", "head_dim", "option_isolation", "special_embeddings", "weights", "base_ct")
 
     def warm_start(self, model, ours):
         """Delta training (d1a.training.train --init_from): this checkpoint's adapter and pointer head into `model`, a fresh
@@ -495,7 +564,10 @@ class Checkpoint:
             raise ValueError(f"--init_from {self.path} is an MLX export; start from its source checkpoint {self.export['source']}")
         for name in self.COMPAT_FIELDS:
             theirs, mine = getattr(self.meta, name), getattr(ours, name)
-            if theirs != mine and not (name == "base_revision" and None in (theirs, mine)):
+            if name == "base_ct":
+                theirs, mine = (v and ct_spec(v) for v in (theirs, mine))
+            # None: an unpinned revision, or the base's own trunk, from which a run may move to a QAT one (d1a#341's B1)
+            if theirs != mine and not (name in ("base_revision", "base_ct") and None in (theirs, mine)):
                 raise ValueError(f"--init_from {self.path}: {name} is {theirs!r} there and {mine!r} here")
         tensors = self._load_adapter_into(model.lm)
         model.head.load_state_dict(self.meta.head)
