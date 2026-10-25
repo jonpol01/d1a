@@ -30,6 +30,12 @@ The 4-bit export keeps the accuracy but moves individual probabilities too far t
 
 Gemma 4's per-layer embeddings are read from the weight files per request instead of held in memory (each request needs only its own tokens' rows): the 8-bit E2B export uses 2.96 GB after loading instead of 4.22 GB, E4B 5.37 GB instead of 6.88 GB, with bit-identical probabilities and no slower (the lookup adds about 0.25 ms per pass). `D1A_PLE_FLASH=0` keeps them in memory.
 
+PyTorch on MPS (`D1A_BACKEND=torch`, training on a Mac, the PyTorch media server): before torch 2.14, MPS returns zero
+rows from an embedding table of more than 2^31 elements for every row past 2^31 / its width (pytorch/pytorch#188756), and
+Gemma 4's per-layer table is that big: wrong from token id 239,675 for E2B (tabs, some CJK, emoji, the image tokens) and from
+199,729 for E4B (every punctuation and digit token). D1A reads such tables by indexing on MPS, which is exact (#353); MLX,
+CUDA and the CPU were never affected. PyTorch runs on MPS before this fix read those tokens' per-layer inputs as zeros.
+
 ## Apple Neural Engine (Core ML)
 
 D1A also runs on the Apple Neural Engine through Core ML, as a preview for iPhone/iPad; on Macs MLX is faster. The v0.6 builds

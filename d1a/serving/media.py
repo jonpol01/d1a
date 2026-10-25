@@ -28,7 +28,7 @@ from typing import Literal
 from d1a.core.settings import get as setting
 from d1a.core.api import SystemOneRequest, answer_in_passes, conditional, in_request_order, output_tokens, to_answers, to_record
 from d1a.backends.checkpoint import Checkpoint, ct_dir, load_ct_base, weight_shards
-from d1a.backends.device import default_device, empty_cache
+from d1a.backends.device import default_device, empty_cache, safe_embeddings
 from d1a.backends.torch import attn_to_load
 from d1a.core.encoding import encode, layout, rows_of
 from d1a.core.head import PointerHead
@@ -125,6 +125,7 @@ class MediaModel:
         # straight onto the device: loading on the CPU and moving it holds two copies at once (15 GB peak for E2B on a Mac)
         full = AutoModelForImageTextToText.from_pretrained(meta.base, revision=meta.base_revision, dtype=dtype, attn_implementation=attn_to_load("sdpa"), device_map=device)
         inner = full.model
+        safe_embeddings(full)   # Gemma 4's per-layer table is past what MPS's embedding kernel indexes right (#353)
         if not (hasattr(inner, "vision_tower") and hasattr(inner, "audio_tower")):
             raise SystemExit(f"{meta.base} has no vision and audio encoders; the media server is for Gemma 4 bases")
         if meta.base_ct:   # the trunk the adapter trained on, and the encoders that go with it (d1a#341)

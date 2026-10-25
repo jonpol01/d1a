@@ -21,6 +21,7 @@ import torch.nn.functional as F
 from transformers import AutoModelForCausalLM
 from transformers.cache_utils import LinearAttentionCacheLayerMixin
 from d1a.backends.backbone import Attention, for_config
+from d1a.backends.device import safe_embeddings
 # Encoding and the head are the backend-independent core (#60); their names stay importable from here.
 from d1a.core.encoding import (DELIMITERS, GEMMA_SPECIAL, MAX_BRANCH, MAX_PACKED, MAX_STATE, MAX_TRAIN_STATE, MAX_TRAIN_STATE_8K,  # noqa: F401
                                ROW_PASS_TOKENS, SERVE_MAX_BRANCH, SERVE_MAX_BRANCH_8K, SERVE_MAX_PACKED, SERVE_MAX_STATE,
@@ -117,6 +118,7 @@ class DecisionModel(nn.Module):
         # a multimodal checkpoint (Gemma 4) loads as a wrapper around its text model: keep the text model only, so the vision
         # and audio towers are neither in memory nor matched by the LoRA target names
         self.lm = Attention.unwrap(self.lm)
+        safe_embeddings(self.lm)   # Gemma 4's per-layer table is past what MPS's embedding kernel indexes right (#353)
         self.backbone = for_config(self.lm.config)   # d1a.backends.backbone: what this family needs (form, masks, cache, LoRA names)
         self.pad_id = pad_id(tok)
         # Hybrid backbones (Qwen3.5: recurrent Gated DeltaNet layers) cannot honour the block-causal mask, so each question
