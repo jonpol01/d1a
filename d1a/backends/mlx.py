@@ -521,8 +521,31 @@ def ct_base_weights(lm, path):
     return exact
 
 
+def keep_vision_config(written, base):
+    """Put the base's vision_config back into an export's config.json (`written`): mlx-lm's save_config deletes it, as for a
+    text model, and a vision-language loader then fails on the export even though its media/ holds the encoders."""
+    base = json.loads(Path(base).read_text(encoding="utf-8"))
+    if "vision_config" in base:
+        config = json.loads(Path(written).read_text(encoding="utf-8"))
+        Path(written).write_text(json.dumps(dict(sorted({**config, "vision_config": base["vision_config"]}.items())), indent=4), encoding="utf-8")
+
+
+def quant_widths(bits, group_size, embeddings=True, per_layer_bits=None, embedding_bits=None, embedding_group_size=None):
+    """export_mlx's quant_predicate: every quantizable layer at the export's bits and group size (True), the embeddings left
+    out (False) or at their own bits and group size, the per-layer embeddings at per_layer_bits when given."""
+    import mlx.nn as nn
+    def widths(path, module):
+        if isinstance(module, nn.Embedding) and not embeddings: return False
+        own = embedding_group_size or group_size
+        if per_layer_bits and path.endswith("embed_tokens_per_layer"): return {"group_size": own, "bits": per_layer_bits, "mode": "affine"}
+        if (embedding_bits or embedding_group_size) and isinstance(module, nn.Embedding):
+            return {"group_size": own, "bits": embedding_bits or bits, "mode": "affine"}
+        return True
+    return widths
+
+
 def export_mlx(ck, out, bits=None, group_size=64, embeddings=True, per_layer_bits=None, q4_0_grid=False, unmerged=False, ct_base=None,
-               embedding_bits=None):
+               embedding_bits=None, embedding_group_size=None):
     """Write `ck` (a LoRA checkpoint, d1a.backends.checkpoint.Checkpoint) as an MLX export folder that d1a.backends.checkpoint serves
     through this backend without the base or the adapter: the adapter merged into the base in fp32 on the CPU stream
     (merge_lora, the same bits the MLX backend computes at load), then optionally quantized (`bits` per weight, affine,
@@ -536,7 +559,8 @@ def export_mlx(ck, out, bits=None, group_size=64, embeddings=True, per_layer_bit
     exactly as it stores them (ct_base_weights, 4 bits in groups of 32), its other tensors as they are, the embeddings
     quantized as `embeddings` says; only with `unmerged`, since merging the adapter would leave the grid. `embedding_bits`
     gives embed_tokens and the per-layer embeddings their own width (per_layer_bits still wins for the per-layer ones):
-    with ct_base, which the QAT checkpoint did not quantize. -> the d1a_config dict."""
+    with ct_base, which the QAT checkpoint did not quantize; `embedding_group_size` their own group size (QAT fixes the
+    Linears' groups of 32, not the embeddings'). -> the d1a_config dict."""
     import shutil
 
     import mlx.nn as nn
@@ -567,11 +591,7 @@ def export_mlx(ck, out, bits=None, group_size=64, embeddings=True, per_layer_bit
             raise ValueError("q4_0_grid is 4 bits in groups of 32, with one width for every quantized weight")
         bits, group_size = 4, 32
     if bits:
-        def widths(path, module):
-            if isinstance(module, nn.Embedding) and not embeddings: return False
-            if per_layer_bits and path.endswith("embed_tokens_per_layer"): return {"group_size": group_size, "bits": per_layer_bits, "mode": "affine"}
-            if embedding_bits and isinstance(module, nn.Embedding): return {"group_size": group_size, "bits": embedding_bits, "mode": "affine"}
-            return True
+        widths = quant_widths(bits, group_size, embeddings, per_layer_bits, embedding_bits, embedding_group_size)
         exact = {}
         if q4_0_grid:   # computed before mlx-lm replaces the weights, one tensor at a time in fp32
             for path, m in lm.named_modules():
@@ -595,6 +615,7 @@ def export_mlx(ck, out, bits=None, group_size=64, embeddings=True, per_layer_bit
     out.mkdir(parents=True, exist_ok=True)
     save_model(out, lm, donate_model=True)
     save_config(config, out / "config.json")
+    keep_vision_config(out / "config.json", Path(base_dir(meta)) / "config.json")
     save_file({k: v.float().contiguous() for k, v in meta.head.items()}, str(out / EXPORT_HEAD))
     for name in TOKENIZER_FILES:
         if ck.file(name).exists(): shutil.copyfile(ck.file(name), out / name)

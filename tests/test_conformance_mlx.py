@@ -467,3 +467,22 @@ def test_a_chat_past_the_models_context_is_refused_before_any_prefill(checkpoint
     with pytest.raises(ContextTooLong) as e:
         generate_chat(model, tok, long, run)
     assert e.value.context == 64 and e.value.prompt + e.value.completion > 64
+
+
+@needs_mlx
+def test_an_export_keeps_vision_config_and_the_embeddings_own_group_size(tmp_path):
+    """mlx-lm's save_config deletes vision_config; keep_vision_config puts the base's back, so a vision-language loader finds
+    it (the media/ encoders need it). quant_widths gives the embeddings their own group size, the Linears keep theirs
+    (QAT fixes the Linears' groups of 32, not the embeddings')."""
+    import mlx.nn as nn
+    from d1a.backends.mlx import keep_vision_config, quant_widths
+    base, written = tmp_path / "base.json", tmp_path / "config.json"
+    base.write_text(json.dumps({"model_type": "gemma4", "vision_config": {"hidden_size": 8}}), encoding="utf-8")
+    written.write_text(json.dumps({"model_type": "gemma4", "quantization": {"group_size": 32, "bits": 4}}), encoding="utf-8")
+    keep_vision_config(written, base)
+    assert json.loads(written.read_text(encoding="utf-8")) == {"model_type": "gemma4", "quantization": {"group_size": 32, "bits": 4}, "vision_config": {"hidden_size": 8}}
+    widths = quant_widths(4, 32, embedding_group_size=64)
+    assert widths("model.embed_tokens", nn.Embedding(64, 128)) == {"group_size": 64, "bits": 4, "mode": "affine"}
+    assert widths("model.embed_tokens_per_layer", nn.Embedding(64, 128))["group_size"] == 64
+    assert widths("model.layers.0.self_attn.q_proj", nn.Linear(128, 128)) is True   # the export's own grid
+    assert quant_widths(4, 32)("model.embed_tokens", nn.Embedding(64, 128)) is True   # unchanged without the option

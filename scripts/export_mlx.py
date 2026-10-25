@@ -32,6 +32,7 @@ def main():
     ap.add_argument("--q-per-layer-bits", type=int, default=0, help="bits for Gemma 4's per-layer embeddings; 0 = the same as --q-bits")
     ap.add_argument("--no-quantize-embeddings", action="store_true")
     ap.add_argument("--q-embedding-bits", type=int, default=0, help="bits for embed_tokens and the per-layer embeddings; 0 = the same as --q-bits (with --ct-base: 4)")
+    ap.add_argument("--q-embedding-group-size", type=int, default=0, help="group size for embed_tokens and the per-layer embeddings; 0 = the same as the Linears' (with --ct-base: 32)")
     ap.add_argument("--unmerged", action="store_true", help="keep the adapter out of the weights (adapter/, attached at load), so an instruction-tuned base still chats with it off (#274)")
     ap.add_argument("--q4-0", action="store_true", help="4 bits in groups of 32 on llama.cpp's Q4_0 grid, for a base trained for Q4_0 (Gemma 4 12B-it QAT)")
     ap.add_argument("--ct-base", help="a compressed-tensors QAT checkpoint (folder, or Hub id@revision) as the base, its int4 Linears kept exactly; needs --unmerged")
@@ -43,7 +44,7 @@ def main():
     if not a.media_only:
         cfg = export_mlx(Checkpoint(a.run), a.out, bits=a.q_bits or None, group_size=a.q_group_size, embeddings=not a.no_quantize_embeddings,
                          per_layer_bits=a.q_per_layer_bits or None, q4_0_grid=a.q4_0, unmerged=a.unmerged, ct_base=ct_base,
-                         embedding_bits=a.q_embedding_bits or None)
+                         embedding_bits=a.q_embedding_bits or None, embedding_group_size=a.q_embedding_group_size or None)
         print(json.dumps(cfg, indent=2))
     if a.media or a.media_only:
         from d1a.serving.media import export_media
