@@ -32,14 +32,15 @@ Gemma 4's per-layer embeddings are read from the weight files per request instea
 
 ## Apple Neural Engine (Core ML)
 
-D1A also runs on the Apple Neural Engine through Core ML, as a preview for iPhone/iPad; on Macs MLX is faster; text only, ≤ 512 tokens (#224):
+D1A also runs on the Apple Neural Engine through Core ML, as a preview for iPhone/iPad; on Macs MLX is faster. The v0.6 builds
+below are text only, ≤ 512 tokens (#224); D1A-E2B-it QAT's build does all five functions ([below](#d1a-e2b-it-qat-on-core-ml)):
 - The text model is converted in chunks of 6 or 7 layers (5 chunks for E2B, 7 for E4B), with int8 weights (per block of 64).
 - The embedding tables stay on the host as row lookups.
 - Each chunk runs in its own process.
 
 Both Core ML builds give the same answers as the full-precision model on every clear-cut question. On a Mac, MLX on the GPU
 is several times faster, so the serving host keeps MLX; Core ML is for iPhone and iPad, where it keeps the GPU free. The
-photo, voice and video encoders are not converted yet. Each Core ML repository's `reference/run.py` answers a request from
+v0.6 builds have no photo, voice or video encoders. Each Core ML repository's `reference/run.py` answers a request from
 the downloaded files.
 
 Measured on 2026-10-11 on the same 28 real requests (42 questions, all ≤ 512 tokens), on an Apple M1 Max and an Apple M4.
@@ -66,3 +67,23 @@ Measured on 2026-10-11 on the same 28 real requests (42 questions, all ≤ 512 t
 answer leads by more than 0.05; a near-tie can flip either way.
 ² On the M1 Max's Neural Engine, the E2B chunks fall back to the CPU: each chunk takes the same time with or without the
 Neural Engine. The M4 runs the same files on its Neural Engine.
+
+### D1A-E2B-it QAT on Core ML
+
+[JohnP1/d1a-e2b-it-qat-coreml](https://huggingface.co/JohnP1/d1a-e2b-it-qat-coreml) is the Core ML conversion of the
+recommended E2B-it build ([d1a-e2b-it-qat-mlx-q4](https://huggingface.co/JohnP1/d1a-e2b-it-qat-mlx-q4)): decisions, chat,
+photos, voice and video (#341). 4.6 GB.
+- **The text model:** 35 layers in 5 packages, each with two prefill sizes (512 and 1,536 tokens) and a one-token decode over
+  a 2,048-position KV cache, sharing one copy of the weights. Google's QAT int4 weights are held exactly (276 layers, the
+  checkpoint's own integers and scales); the D1A adapter is a separate branch scaled by an input: 1 for decisions, 0 for chat.
+- **The rest:** an int8 output layer for chat; the photo and video encoder (fp16, with the pixel path in fp32); the voice
+  encoder (fp32); the embedding tables (4-bit) as host row lookups.
+- **Runs on the GPU,** not the Neural Engine, and has not been run on an iPhone or iPad yet. Use it through the repository's
+  Python reference runner, `reference/d1a_coreml_qat.py`; `io.json` lists the host side for a port.
+- **Checks on an Apple M1 Max:**
+  - decisions: 0 of 42 answers flipped against the MLX build; largest probability change against fp32 0.0017 (the MLX build
+    itself is 0.035 from fp32);
+  - photos, voice and video (the playground's 14 requests, 28 answers): 0 flipped against the MLX build;
+  - chat (8 photos, 427 answer tokens, teacher-forced) against fp32 PyTorch on the CPU: 1 token different (a near-tie).
+- **Time on the M1 Max:** about 0.4 s per decision with a photo or a voice clip, 8 to 11 s with a 16-frame video, and about
+  85 ms per chat token.
