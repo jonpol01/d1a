@@ -117,6 +117,8 @@ class MediaModel:
         self.checkpoint = ck = Checkpoint(run); meta = ck.meta
         if ck.export is not None:
             raise SystemExit(f"{run}: the media server needs a LoRA checkpoint (torch), not an MLX export")
+        if meta.base_ct:   # it builds the base's own trunk, which this adapter was not trained on
+            raise SystemExit(f"{run}: trained on the QAT checkpoint {meta.base_ct}; the media server runs the base's trunk, so photos and voice are not served for it")
         self.device = device
         self.proc = AutoProcessor.from_pretrained(meta.base, revision=meta.base_revision)
         self.tok = self.proc.tokenizer

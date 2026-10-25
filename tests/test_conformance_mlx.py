@@ -188,6 +188,16 @@ def test_a_ct_base_export_holds_the_checkpoints_own_int4_grid_exactly(checkpoint
     norm = next(k for k in ct if k.endswith("layers.0.input_layernorm.weight"))
     assert mx.array_equal(out["language_model.model." + norm.split("model.language_model.", 1)[1]], ct[norm])
     answers(tmp_path / "q4", golden)   # loads, and checks every record's token ids
+    run = tmp_path / "qat-run"   # a run trained on the QAT checkpoint exports on it without being told, and refuses another
+    shutil.copytree(checkpoint, run)
+    meta = read_meta(run)
+    meta.base_ct = str(tmp_path / "ct")
+    write_meta(run, meta)
+    export_mlx(Checkpoint(run), tmp_path / "q4-own", unmerged=True)
+    assert (tmp_path / "q4-own" / "model.safetensors").read_bytes() == (tmp_path / "q4" / "model.safetensors").read_bytes()
+    shutil.copytree(tmp_path / "ct", tmp_path / "ct-other")
+    with pytest.raises(ValueError, match="was trained on"):
+        export_mlx(Checkpoint(run), tmp_path / "q4-other", unmerged=True, ct_base=tmp_path / "ct-other")
     cfg8 = export_mlx(Checkpoint(checkpoint), tmp_path / "q4e8", unmerged=True, ct_base=tmp_path / "ct", embedding_bits=8)
     widths = {k: v["bits"] for k, v in cfg8["quantization"].items() if isinstance(v, dict) and "bits" in v}
     assert widths and all(b == 8 for k, b in widths.items() if "embed" in k), widths   # the embeddings at 8 bits, the Linears as before

@@ -23,7 +23,7 @@ import torch.nn.functional as F
 
 from d1a.eval import suites
 from d1a.training import resume
-from d1a.backends.checkpoint import Checkpoint, Meta, write_meta
+from d1a.backends.checkpoint import Checkpoint, Meta, ct_dir, ct_spec, load_ct_base, write_meta
 from d1a.backends.device import allocated_bytes, default_device, empty_cache, sync
 from d1a.training.data import EVAL_ONLY, build, augment, load_records, materialize, none_pair, source_seed
 from d1a.eval.suite import ADMISSION_BRANCH_HEADROOM, SYNTHETIC_SOURCES, digest, load_split, read_manifest, validate_training, write_json
@@ -485,6 +485,9 @@ def parse_args(argv=None):
     add("--max_state", type=int, default=MAX_STATE, help=f"state tokens per training record (default {MAX_STATE}); raising it admits long-state --data records, the packed limit grows by the same amount")
     add("--extra_suites", default="", help="comma-separated frozen suite directories whose training partitions are added to this run (each checked against its own manifest), e.g. evals/hard-v1,evals/devtools-v1")
     add("--replay", type=int, default=0, help="with --data and --suite: mix in this many records sampled (by --seed) from the suite's training partition, so a delta fine-tune does not forget the released recipe")
+    add("--base_ct", default="", help="a compressed-tensors QAT checkpoint (folder, or Hub id@revision; Google's gemma-4-*-it-qat-w4a16-ct) whose "
+        "weights replace the base's: quantized Linears as s q exactly, the rest as stored (load_ct_base); with --weights_dtype fp32 the grid "
+        "stays exact. The run records it as base_ct, and loading and export_mlx rebuild that trunk (d1a#341)")
     add("--init_from", default="", help="delta mode: warm-start LoRA and the pointer head from an existing run "
                                         "(local directory or hub id) instead of starting from the base model; keeps the "
                                         "released model's in-domain skill while adapting to a new domain. A fine-tune must "
@@ -586,11 +589,15 @@ def build_model(a, dev, tok, revision, holdout):
     """-> (the model with LoRA, the Meta this run will save, the warm-start provenance or None)."""
     model = DecisionModel(a.base, tok, dev, lora=a.lora, revision=revision, head_dim=a.head_dim, lora_targets=a.lora_targets,
                           dtype=torch.bfloat16 if a.weights_dtype == "bf16" else torch.float32)
+    if a.base_ct:   # the base's weights from a QAT checkpoint, before any warm start reads the adapter
+        nq, nother = load_ct_base(model.lm, ct_dir(a.base_ct))
+        print(f"base weights from {a.base_ct}: {nq} quantized Linears as s q, {nother} other tensors", flush=True)
     if a.checkpointing:
         model.lm.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
     model.lm.config.use_cache = False
     # what this run will save (d1a_config.json, head.safetensors), and the architecture a warm start must match
-    meta = Meta(base=a.base, base_revision=revision, lora=a.lora, head_dim=a.head_dim, weights_dtype=a.weights_dtype, holdout=holdout)
+    meta = Meta(base=a.base, base_revision=revision, lora=a.lora, head_dim=a.head_dim, weights_dtype=a.weights_dtype, holdout=holdout,
+                base_ct=ct_spec(a.base_ct) if a.base_ct else None)
     init_source = None
     if a.init_from:
         # delta mode (PR #9, Radexito): start from a trained adapter and pointer head instead of the base, so a fine-tune

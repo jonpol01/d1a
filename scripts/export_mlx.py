@@ -19,7 +19,7 @@ photos and voice clips with this same model (POST /v1/systemone/media). Run it a
 """
 import argparse, json, time
 
-from d1a.backends.checkpoint import Checkpoint
+from d1a.backends.checkpoint import Checkpoint, ct_dir
 from d1a.backends.mlx import export_mlx
 
 
@@ -38,14 +38,9 @@ def main():
     ap.add_argument("--media", action="store_true", help="also write media/: the base's vision and audio encoders (Gemma 4)")
     ap.add_argument("--media-only", action="store_true", help="only add media/ to an existing export folder --out")
     a = ap.parse_args()
-    if a.ct_base and (a.media or a.media_only):
+    if (a.media or a.media_only) and (a.ct_base or Checkpoint(a.run).meta.base_ct):
         ap.error("--media writes the run's base encoders, not the QAT checkpoint's: export media separately")
-    ct_base = None
-    if a.ct_base:
-        from pathlib import Path
-        from huggingface_hub import snapshot_download
-        repo, _, rev = a.ct_base.partition("@")
-        ct_base = a.ct_base if Path(a.ct_base).is_dir() else snapshot_download(repo, revision=rev or None)
+    ct_base = ct_dir(a.ct_base) if a.ct_base else None   # without it, a run trained on a QAT checkpoint (base_ct) exports on that one
     t = time.time()
     if not a.media_only:
         cfg = export_mlx(Checkpoint(a.run), a.out, bits=a.q_bits or None, group_size=a.q_group_size, embeddings=not a.no_quantize_embeddings,
