@@ -2,6 +2,40 @@
 
 Which D1A builds exist, where they are published, and what each version is for.
 
+## What each build can and cannot do (2026-10-25)
+
+Every published D1A build, checked against its files on the Hub. **Decisions**: the System One API (`POST /v1/systemone`).
+**Chat**: OpenAI-format `POST /v1/chat/completions`, which needs the adapter kept separate (an *unmerged* build): with it
+switched off the model is the instruction-tuned Gemma 4 itself. **Photo, voice, video**: `POST /v1/systemone/media`,
+zero-shot on every build (no media in training).
+
+| Build | Format | Decisions | Chat | Photo | Voice | Video | Limits |
+|---|---|---|---|---|---|---|---|
+| [d1a-e4b](https://huggingface.co/JohnP1/d1a-e4b) `v0.6.1` | PyTorch (adapter) | ✅ | ❌ base trunk | ✅¹ | ✅¹ | ✅¹ | |
+| [d1a-e4b-mlx-q8](https://huggingface.co/JohnP1/d1a-e4b-mlx-q8) `v0.6.1` | MLX 8-bit, merged | ✅ | ❌ base trunk | ✅ | ✅ | ✅ | 7.5 GB |
+| [d1a-e4b-coreml](https://huggingface.co/JohnP1/d1a-e4b-coreml) `v0.6` | Core ML int8 | ✅ | ❌ | ❌ | ❌ | ❌ | preview: text only, inputs ≤ 512 tokens |
+| [d1a-e2b](https://huggingface.co/JohnP1/d1a-e2b) `v0.6.1` | PyTorch (adapter) | ✅ | ❌ base trunk | ✅¹ | ✅¹ | ✅¹ | |
+| [d1a-e2b-mlx-q8](https://huggingface.co/JohnP1/d1a-e2b-mlx-q8) `v0.6.1` | MLX 8-bit, merged | ✅ | ❌ base trunk | ✅ | ✅ | ✅ | 4.8 GB |
+| [d1a-e2b-coreml](https://huggingface.co/JohnP1/d1a-e2b-coreml) `v0.6` | Core ML int8 | ✅ | ❌ | ❌ | ❌ | ❌ | preview: text only, inputs ≤ 512 tokens |
+| [d1a-e4b-it](https://huggingface.co/JohnP1/d1a-e4b-it) `v0.6` | PyTorch (adapter) | ✅ | ❌² | ✅¹ | ✅¹ | ✅¹ | |
+| [d1a-e4b-it-mlx-q8](https://huggingface.co/JohnP1/d1a-e4b-it-mlx-q8) `v0.6` | MLX 8-bit, merged | ✅ | ❌ merged³ | ✅ | ✅ | ✅ | 7.5 GB |
+| [d1a-e4b-it-mlx-q4](https://huggingface.co/JohnP1/d1a-e4b-it-mlx-q4) `v0.6` | MLX 4-bit, merged | ✅ | ❌ merged³ | ✅ | ✅ | ✅ | 5.2 GB |
+| [d1a-e4b-it-coreml-4bit](https://huggingface.co/JohnP1/d1a-e4b-it-coreml-4bit) `v0.6` | Core ML 4-bit | ✅ | ❌ | ❌ | ❌ | ❌ | preview: text only, ≤ 512 tokens; 3 of 42 test answers move |
+| [d1a-e2b-it](https://huggingface.co/JohnP1/d1a-e2b-it) `v0.6` | PyTorch (adapter) | ✅ | ❌² | ✅¹ | ✅¹ | ✅¹ | |
+| [d1a-e2b-it-mlx-q8](https://huggingface.co/JohnP1/d1a-e2b-it-mlx-q8) `v0.6` | MLX 8-bit, merged | ✅ | ❌ merged³ | ✅ | ✅ | ✅ | 4.8 GB |
+| [d1a-e2b-it-mlx-q4](https://huggingface.co/JohnP1/d1a-e2b-it-mlx-q4) `v0.6` | MLX 4-bit, merged | ✅ | ❌ merged³ | ✅ | ✅ | ✅ | 3.6 GB; not scored on the suites |
+| [d1a-e2b-it-coreml](https://huggingface.co/JohnP1/d1a-e2b-it-coreml) `v0.6` | Core ML int8 | ✅ | ❌ | ❌ | ❌ | ❌ | preview: text only, ≤ 512 tokens |
+| [d1a-e2b-it-coreml-4bit](https://huggingface.co/JohnP1/d1a-e2b-it-coreml-4bit) `v0.6` | Core ML 4-bit | ✅ | ❌ | ❌ | ❌ | ❌ | preview: text only, ≤ 512 tokens |
+| [d1a-e2b-it-qat-mlx-q4](https://huggingface.co/JohnP1/d1a-e2b-it-qat-mlx-q4) | MLX 4-bit (Google's QAT int4, exact), **unmerged** | ✅ | ✅ | ✅ | ✅ | ✅ | experimental: not a replacement for D1A-E2B-it v0.6 (transfer-v4 −5.2 points); 4.0 GB |
+
+¹ Through the separate PyTorch media server, `python -m d1a.serving.media --run <repo>`, which loads the full Gemma 4
+model (bf16, about 10 GB for E2B) ([Photos, voice and video](USAGE.md)).
+² PyTorch builds have no chat in D1A; chat runs on MLX only.
+³ Chat needs an unmerged build: `scripts/export_mlx.py --run JohnP1/d1a-e2b-it --unmerged --media` makes one
+([Chat with D1A](USAGE.md#chat-with-d1a)).
+
+Not published yet: D1A-E2B-it QAT for PyTorch and for Core ML. No Core ML build has chat, photo, voice or video yet.
+
 ## Capabilities (2026-10-17)
 
 What each D1A model line can do today. "Decisions" means D1A's System One API (`POST /v1/systemone`): yes/no, choice and score questions over a document, answered in one pass with calibrated probabilities. Numbers are from each model's card; "not measured" means the card has no number yet.
