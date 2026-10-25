@@ -21,7 +21,7 @@ import torch.nn.functional as F
 from transformers import AutoModelForCausalLM
 from transformers.cache_utils import LinearAttentionCacheLayerMixin
 from d1a.backends.backbone import Attention, for_config
-from d1a.backends.device import safe_embeddings
+from d1a.backends.embeddings import safe_embeddings
 # Encoding and the head are the backend-independent core (#60); their names stay importable from here.
 from d1a.core.encoding import (DELIMITERS, GEMMA_SPECIAL, MAX_BRANCH, MAX_PACKED, MAX_STATE, MAX_TRAIN_STATE, MAX_TRAIN_STATE_8K,  # noqa: F401
                                ROW_PASS_TOKENS, SERVE_MAX_BRANCH, SERVE_MAX_BRANCH_8K, SERVE_MAX_PACKED, SERVE_MAX_STATE,

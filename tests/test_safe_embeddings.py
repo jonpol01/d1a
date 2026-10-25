@@ -7,8 +7,8 @@ import pytest
 import torch
 from torch import nn
 
-import d1a.backends.device as device
-from d1a.backends.device import index_rows, safe_embeddings
+import d1a.backends.embeddings as embeddings
+from d1a.backends.embeddings import index_rows, safe_embeddings
 
 BASE = str(Path(__file__).resolve().parent / "golden" / "tiny-gemma4" / "base")
 
@@ -32,7 +32,7 @@ def test_index_rows_equals_the_forward():
 
 
 def test_covers_only_tables_past_the_limit(monkeypatch):
-    monkeypatch.setattr(device, "EMBED_LIMIT", 100)          # 50 x 4 = 200 elements: over; 2 x 4: under
+    monkeypatch.setattr(embeddings, "EMBED_LIMIT", 100)          # 50 x 4 = 200 elements: over; 2 x 4: under
     t = tables()
     ids = torch.tensor([1, 49])
     before = {k: t[k](ids) for k in ("plain", "scaled")}
@@ -45,7 +45,7 @@ def test_covers_only_tables_past_the_limit(monkeypatch):
 
 @pytest.mark.skipif(not torch.backends.mps.is_available(), reason="needs MPS")
 def test_mps_reads_by_indexing(monkeypatch):
-    monkeypatch.setattr(device, "EMBED_LIMIT", 100)
+    monkeypatch.setattr(embeddings, "EMBED_LIMIT", 100)
     t = tables()
     safe_embeddings(t)
     ids = torch.tensor([0, 7, 49])
@@ -55,7 +55,7 @@ def test_mps_reads_by_indexing(monkeypatch):
 
 
 def test_the_torch_model_is_covered(monkeypatch):
-    monkeypatch.setattr(device, "EMBED_LIMIT", 0)            # the tiny fixture's tables are small: cover every one
+    monkeypatch.setattr(embeddings, "EMBED_LIMIT", 0)            # the tiny fixture's tables are small: cover every one
     from d1a.backends.torch import DecisionModel, load_tokenizer
     m = DecisionModel(BASE, load_tokenizer(BASE), "cpu")
     assert getattr(m.lm.embed_tokens_per_layer, "indexed_lookup", False) and getattr(m.lm.embed_tokens, "indexed_lookup", False)

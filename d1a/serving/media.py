@@ -28,7 +28,8 @@ from typing import Literal
 from d1a.core.settings import get as setting
 from d1a.core.api import SystemOneRequest, answer_in_passes, conditional, in_request_order, output_tokens, to_answers, to_record
 from d1a.backends.checkpoint import Checkpoint, ct_dir, load_ct_base, weight_shards
-from d1a.backends.device import default_device, empty_cache, safe_embeddings
+from d1a.backends.device import default_device, empty_cache
+from d1a.backends.embeddings import safe_embeddings
 from d1a.backends.torch import attn_to_load
 from d1a.core.encoding import encode, layout, rows_of
 from d1a.core.head import PointerHead
