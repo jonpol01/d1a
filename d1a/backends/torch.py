@@ -13,6 +13,7 @@ layers cannot honour the mask, always use them); and, when serving, the state ru
 continue from (probs_and_prefix, probs_with_prefix).
 """
 import copy
+from contextlib import contextmanager
 from d1a.core.settings import get as setting
 import torch
 import torch.nn as nn
@@ -146,6 +147,31 @@ class DecisionModel(nn.Module):
     @property
     def dtype(self):
         return str(next(self.lm.parameters()).dtype).removeprefix("torch.")
+
+    @property
+    def loras(self):
+        """The adapter's LoRA layers while it is attached unmerged (LoadOptions.merge False), else none: what chat needs,
+        as MLXDecisionModel.loras is on MLX (#274)."""
+        from peft.tuners.tuners_utils import BaseTunerLayer
+        return [m for m in self.lm.modules() if isinstance(m, BaseTunerLayer) and not m.merged]
+
+    @contextmanager
+    def adapter(self, on=True):
+        """Run the block with the unmerged adapter switched on or off: off, the model is its base exactly (the chat path).
+        The switch is back where it was when the block exits, so adapter(True) inside adapter(False) answers decisions in
+        the middle of a chat, as MLXDecisionModel.adapter does (#289). A merged model has no switch: adapter(False)
+        refuses it."""
+        layers = self.loras
+        if not on and not layers:
+            raise ValueError("this model's adapter is merged into its weights; adapter(False) needs D1A_MERGE=0")
+        was = [not layer.disable_adapters for layer in layers]
+        for layer in layers:
+            layer.enable_adapters(on)
+        try:
+            yield
+        finally:
+            for layer, state in zip(layers, was):
+                layer.enable_adapters(state)
 
     def encode(self, tok, rec, **kw):
         """encode(), as part of the scoring interface (MLXDecisionModel has its own)."""

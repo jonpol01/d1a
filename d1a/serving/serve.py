@@ -44,7 +44,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from d1a.core.api import SystemOneRequest, answer_in_passes, conditional, in_request_order, render, to_record, to_answers, output_tokens, with_date_facts
-from d1a.backends.checkpoint import EXPORT_CONFIG, Checkpoint, LoadOptions, fused_available, is_hub_id
+from d1a.backends.checkpoint import EXPORT_CONFIG, Checkpoint, LoadOptions, base_dir, fused_available, is_hub_id
 from d1a.backends.device import allocated_bytes, default_device, empty_cache, out_of_memory, sync
 from d1a.learning.feedback import FeedbackLog, OutcomeCalibrator
 from d1a.learning import flags, rules
@@ -542,10 +542,16 @@ async def systemone_media(req: MediaRequest, request: Request):
         return await s.answer_media_async(req, logged(request), audited(request))
 
 
+def chat_model_dir(s):
+    """Where chat reads the model's context and end-of-turn ids: an MLX export or run folder, or for a PyTorch run the base's
+    own snapshot (config.json, generation_config.json), which a LoRA run folder does not carry."""
+    return base_dir(s.checkpoint.meta) if getattr(s.model, "backend", None) == "torch" else s.checkpoint.path
+
+
 def chat_server_check(s):
     """A chat needs an unmerged adapter on an instruction-tuned base (export_mlx --unmerged): adapter(False) is that base."""
     if not getattr(s.model, "loras", None):
-        raise HTTPException(501, "this model has no chat: serve an export made with `scripts/export_mlx.py --unmerged` on an instruction-tuned base (#274)")
+        raise HTTPException(501, "this model has no chat: serve an export made with `scripts/export_mlx.py --unmerged` on an instruction-tuned base, or on PyTorch a LoRA run of one with D1A_MERGE=0 (#274)")
 
 
 def log_chats(stream=None):
@@ -561,7 +567,10 @@ def log_chats(stream=None):
 
 
 def chat_cache(s):
-    """The server's chat prompt cache, made on the model thread by the first chat; None when D1A_CHAT_CACHE_MB is 0."""
+    """The server's chat prompt cache, made on the model thread by the first chat; None when D1A_CHAT_CACHE_MB is 0, and on
+    PyTorch (the cache is mlx-lm's)."""
+    if getattr(s.model, "backend", None) == "torch":
+        return None
     if s.chat_prompts is None and CHAT_CACHE_MB > 0:
         s.chat_prompts = openai_compat.PromptCache(CHAT_CACHE_MB << 20)
     return s.chat_prompts
@@ -575,7 +584,7 @@ async def chat_completions(req: openai_compat.ChatRequest):
     token by token; with tools it is sent whole, once the tool calls can be parsed."""
     async with server_async() as s:   # a prompt past the context is refused at once, on this thread: not after the chats queued on the model, and before any stream byte
         chat_server_check(s)
-        context = openai_compat.context_length(s.checkpoint.path, CHAT_CONTEXT)
+        context = openai_compat.context_length(chat_model_dir(s), CHAT_CONTEXT)
         if context is not None:
             try: await asyncio.to_thread(openai_compat.check_context, s.tok, req, context)
             except openai_compat.ContextTooLong as e: return JSONResponse(e.body(), 400)
@@ -583,7 +592,7 @@ async def chat_completions(req: openai_compat.ChatRequest):
         return StreamingResponse(chat_stream(req), media_type="text/event-stream")
     async with server_async() as s:
         chat_server_check(s)
-        model_dir = s.checkpoint.path
+        model_dir = chat_model_dir(s)
         try: body = await asyncio.wrap_future(s.run_task(lambda model, tok: openai_compat.generate_chat(model, tok, req, model_dir, CHAT_NAME, between=s.between_tokens, cache=chat_cache(s), context=context)))
         except openai_compat.ContextTooLong as e: return JSONResponse(e.body(), 400)
     return StreamingResponse(openai_compat.stream_chunks(body), media_type="text/event-stream") if req.stream else body
@@ -595,7 +604,7 @@ async def chat_stream(req):
     async with server_async() as s:
         chat_server_check(s)
         pieces, done = queue.Queue(), object()
-        model_dir = s.checkpoint.path
+        model_dir = chat_model_dir(s)
         context = openai_compat.context_length(model_dir, CHAT_CONTEXT)
         future = s.run_task(lambda model, tok: openai_compat.generate_chat(model, tok, req, model_dir, CHAT_NAME, on_text=pieces.put, between=s.between_tokens, cache=chat_cache(s), context=context))
         future.add_done_callback(lambda _: pieces.put(done))

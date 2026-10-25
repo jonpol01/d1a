@@ -18,14 +18,16 @@ Two ways to serve it:
 """
 import argparse, base64, copy, functools, gc, io, sys, threading, time
 from contextlib import contextmanager
+from pathlib import Path
 import torch
+from safetensors import safe_open
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import Literal
 from d1a.core.settings import get as setting
 from d1a.core.api import SystemOneRequest, answer_in_passes, conditional, in_request_order, output_tokens, to_answers, to_record
-from d1a.backends.checkpoint import Checkpoint
+from d1a.backends.checkpoint import Checkpoint, ct_dir, load_ct_base, weight_shards
 from d1a.backends.device import default_device, empty_cache
 from d1a.backends.torch import attn_to_load
 from d1a.core.encoding import encode, layout, rows_of
@@ -117,8 +119,6 @@ class MediaModel:
         self.checkpoint = ck = Checkpoint(run); meta = ck.meta
         if ck.export is not None:
             raise SystemExit(f"{run}: the media server needs a LoRA checkpoint (torch), not an MLX export")
-        if meta.base_ct:   # it builds the base's own trunk, which this adapter was not trained on
-            raise SystemExit(f"{run}: trained on the QAT checkpoint {meta.base_ct}; the media server runs the base's trunk, so photos and voice are not served for it")
         self.device = device
         self.proc = AutoProcessor.from_pretrained(meta.base, revision=meta.base_revision)
         self.tok = self.proc.tokenizer
@@ -127,6 +127,8 @@ class MediaModel:
         inner = full.model
         if not (hasattr(inner, "vision_tower") and hasattr(inner, "audio_tower")):
             raise SystemExit(f"{meta.base} has no vision and audio encoders; the media server is for Gemma 4 bases")
+        if meta.base_ct:   # the trunk the adapter trained on, and the encoders that go with it (d1a#341)
+            qat_weights(inner, ct_dir(meta.base_ct))
         inner.language_model = PeftModel.from_pretrained(inner.language_model, ck.path).merge_and_unload()
         self.model = inner.eval()
         self.head = PointerHead(full.config.get_text_config().hidden_size, dp=meta.head_dim).to(device).eval()
@@ -181,6 +183,29 @@ class MediaModel:
 
 
 TOWERS = ("vision_tower", "audio_tower", "embed_vision", "embed_audio")   # Gemma 4's encoders and their projections into the text model
+
+
+def qat_weights(inner, path):
+    """Put a compressed-tensors QAT checkpoint (d1a#341) on a loaded Gemma 4 (`inner`, the model under its generation head):
+    its text model through load_ct_base, and its vision and audio encoders with their projections as stored. They are bf16
+    like the base's, but QAT retrained the vision projection for its int4 text model. Buffers count: the audio encoder keeps
+    its clipping ranges (input_min, output_max, ...) as persistent buffers; the ones transformers computes at load are not
+    stored, so not required. Refuses an encoder tensor the model lacks, or a stored one the checkpoint leaves unset.
+    -> the number of encoder tensors written."""
+    load_ct_base(inner.language_model, path)
+    params = {n: p for n, p in [*inner.named_parameters(), *inner.named_buffers()] if n.startswith(TOWERS)}
+    stored = {n for n in inner.state_dict() if n.startswith(TOWERS)}   # parameters and persistent buffers
+    done = set()
+    with torch.no_grad():
+        for shard in weight_shards(Path(path)):
+            with safe_open(str(shard), "pt") as f:
+                for k in f.keys():
+                    name = k.removeprefix("model.")
+                    if not name.startswith(TOWERS): continue
+                    if name not in params: raise ValueError(f"{path}: {k} maps to no encoder parameter of the model")
+                    params[name].copy_(f.get_tensor(k).to(params[name].dtype)); done.add(name)
+    if unset := sorted(stored - done): raise ValueError(f"{path}: {len(unset)} encoder parameters not in the checkpoint (e.g. {unset[:3]})")
+    return len(done)
 MEDIA_DIR = "media"   # the encoders inside an MLX export folder (export_media)
 
 

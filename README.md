@@ -76,7 +76,7 @@ What every published build can and cannot do. Limits and footnotes: [docs/MODELS
 | Build | Format | Decisions | Chat | Photo | Voice | Video | Size, notes |
 |---|---|---|---|---|---|---|---|
 | **D1A-E2B-it QAT** ([mlx-q4](https://huggingface.co/JohnP1/d1a-e2b-it-qat-mlx-q4)) | MLX 4-bit, unmerged | ✅ | ✅ | ✅ | ✅ | ✅ | 4.0 GB; **recommended E2B-it** |
-| D1A-E2B-it v0.6 ([d1a-e2b-it](https://huggingface.co/JohnP1/d1a-e2b-it)) | PyTorch | ✅ | ❌ | ✅¹ | ✅¹ | ✅¹ | |
+| D1A-E2B-it v0.6 ([d1a-e2b-it](https://huggingface.co/JohnP1/d1a-e2b-it)) | PyTorch | ✅ | ✅⁴ | ✅¹ | ✅¹ | ✅¹ | |
 | D1A-E2B-it v0.6 ([mlx-q8](https://huggingface.co/JohnP1/d1a-e2b-it-mlx-q8), [mlx-q4](https://huggingface.co/JohnP1/d1a-e2b-it-mlx-q4)) | MLX, merged | ✅ | ❌³ | ✅ | ✅ | ✅ | 4.8 / 3.6 GB |
 | D1A-E2B-it v0.6 ([coreml](https://huggingface.co/JohnP1/d1a-e2b-it-coreml), [coreml-4bit](https://huggingface.co/JohnP1/d1a-e2b-it-coreml-4bit)) | Core ML | ✅² | ❌ | ❌ | ❌ | ❌ | 3.8 / 2.9 GB, preview |
 | D1A-E2B ([d1a-e2b](https://huggingface.co/JohnP1/d1a-e2b)) | PyTorch | ✅ | ❌ | ✅¹ | ✅¹ | ✅¹ | |
@@ -90,7 +90,7 @@ What every published build can and cannot do. Limits and footnotes: [docs/MODELS
 
 | Build | Format | Decisions | Chat | Photo | Voice | Video | Size, notes |
 |---|---|---|---|---|---|---|---|
-| D1A-E4B-it ([d1a-e4b-it](https://huggingface.co/JohnP1/d1a-e4b-it)) | PyTorch | ✅ | ❌ | ✅¹ | ✅¹ | ✅¹ | |
+| D1A-E4B-it ([d1a-e4b-it](https://huggingface.co/JohnP1/d1a-e4b-it)) | PyTorch | ✅ | ✅⁴ | ✅¹ | ✅¹ | ✅¹ | |
 | D1A-E4B-it ([mlx-q8](https://huggingface.co/JohnP1/d1a-e4b-it-mlx-q8), [mlx-q4](https://huggingface.co/JohnP1/d1a-e4b-it-mlx-q4)) | MLX, merged | ✅ | ❌³ | ✅ | ✅ | ✅ | 7.5 / 5.2 GB |
 | D1A-E4B-it ([coreml-4bit](https://huggingface.co/JohnP1/d1a-e4b-it-coreml-4bit)) | Core ML 4-bit | ✅² | ❌ | ❌ | ❌ | ❌ | 4.6 GB, preview |
 | D1A-E4B ([d1a-e4b](https://huggingface.co/JohnP1/d1a-e4b)) | PyTorch | ✅ | ❌ | ✅¹ | ✅¹ | ✅¹ | default for servers |
@@ -100,8 +100,9 @@ What every published build can and cannot do. Limits and footnotes: [docs/MODELS
 ¹ Through the separate PyTorch media server (`python -m d1a.serving.media`), which loads the full model (about 10 GB for E2B).
 ² Text only, inputs up to 512 tokens.
 ³ Merged as published; export it `--unmerged` for chat ([Chat with D1A](docs/USAGE.md#chat-with-d1a)).
+⁴ Served with `D1A_MERGE=0`, which keeps the adapter unmerged so chat can switch it off.
 
-No PyTorch or Core ML build of any D1A model has chat today.
+No Core ML build of any D1A model has chat today.
 
 E4B is the more accurate size; E2B is smaller and faster, for phones and small machines. The `-it` models are trained the same way on the instruction-tuned Gemma 4 trunks, so one model also chats: with its D1A adapter off it is Gemma 4 E4B-it / E2B-it. Chat needs an unmerged build (`scripts/export_mlx.py --unmerged`, [Chat with D1A](docs/USAGE.md#chat-with-d1a)); the published `-mlx-q8` / `-mlx-q4` repos have the adapter merged and answer decisions only. D1A-E4B-it is about 2.9× slower per decision than D1A-E2B-it and more accurate on 21 of 22 suites. The PyTorch and MLX builds of D1A-E4B and D1A-E2B are at `v0.6.1` (v0.6 plus a routing temperature); the `-it` and Core ML builds are at `v0.6`. Core ML is a preview for iPhone/iPad: text only, inputs up to 512 tokens, and MLX is faster on Macs ([docs/APPLE.md](docs/APPLE.md)); the 4-bit E4B-it build moves 3 of 42 test answers, so use MLX 8-bit where answers must not move. Sizes, exceptions and older versions: [docs/MODELS.md](docs/MODELS.md).
 

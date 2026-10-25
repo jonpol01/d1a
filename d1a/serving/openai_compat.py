@@ -184,7 +184,7 @@ def tool_calls_of(text):
     """Gemma 4's <|tool_call>call:name{args}<tool_call|> blocks -> (the text before the first one, OpenAI tool_calls). A block
     cut off unfinished (max_tokens ran out inside it) is dropped, never returned as text: the markup means nothing to an
     OpenAI client, and finish_reason "length" already tells it to retry with more tokens (#278)."""
-    from mlx_lm.tool_parsers import gemma4
+    from d1a.serving import gemma4_tools as gemma4   # mlx-lm's parser, importable without mlx-lm (PyTorch chat)
     if gemma4.tool_call_start not in text:
         return text, []
     head = text.split(gemma4.tool_call_start, 1)[0]
@@ -271,6 +271,63 @@ def pieces(lm, tokenizer, prompt, limit, sampler, between=None, cache=None, stat
     yield detok.last_segment, n + 1, "length"
 
 
+def sample(logits, temperature, top_p):
+    """One token from a logit vector: greedy at temperature 0, else softmax at the temperature, kept to the top_p mass."""
+    import torch
+    if temperature <= 0:
+        return int(logits.argmax())
+    probs = torch.softmax(logits / temperature, -1)
+    if 0 < top_p < 1:
+        p, order = probs.sort(descending=True)
+        p = p * (p.cumsum(0) - p < top_p)   # the smallest set reaching top_p, its last token included
+        probs = torch.zeros_like(probs).scatter(0, order, p)
+    return int(torch.multinomial(probs / probs.sum(), 1))
+
+
+def next_logits(lm, hidden):
+    """A PyTorch text model's next-token logits from its last hidden state: the tied embeddings (DecisionModel keeps the text
+    model, not its generation head) with the final soft-cap, as Gemma 4's generation head computes them. An untied
+    base would need a head DecisionModel does not load, so it is refused."""
+    import torch
+    if not getattr(lm.config, "tie_word_embeddings", False):
+        raise ValueError("chat on PyTorch needs a base whose generation head is its tied embeddings (Gemma 4)")
+    logits = (hidden @ lm.get_input_embeddings().weight.T).float()
+    cap = getattr(lm.config, "final_logit_softcapping", None)
+    return torch.tanh(logits / cap) * cap if cap else logits
+
+
+def pieces_torch(model, tok, prompt, limit, temperature, top_p, eos, between=None):
+    """pieces for a PyTorch DecisionModel with its adapter unmerged: the prompt in PREFILL_STEP chunks with between() after
+    each (a decision waits one chunk, not the whole prompt, #290), then one token per step on the model's own KV cache.
+    -> the same steps as pieces."""
+    import torch
+    if model.hybrid:
+        raise ValueError("chat on PyTorch runs attention-only bases (Gemma 4); a hybrid base chats on MLX")
+    lm, between = model.lm, between or (lambda: None)
+    device = lm.get_input_embeddings().weight.device
+    add_special = tok.bos_token is None or not prompt.startswith(tok.bos_token)
+    ids = tok.encode(prompt, add_special_tokens=add_special)
+    past, out, text = None, [], ""
+    with torch.no_grad():
+        for a in range(0, len(ids), PREFILL_STEP):
+            res = lm(input_ids=torch.tensor([ids[a:a + PREFILL_STEP]], device=device), past_key_values=past, use_cache=True)
+            past = res.past_key_values
+            between()
+        for n in range(limit):
+            token = sample(next_logits(lm, res.last_hidden_state[0, -1]), temperature, top_p)
+            if token in eos:
+                yield "", n, "stop"; return
+            out.append(token)
+            decoded = tok.decode(out)
+            piece = "" if decoded.endswith("\ufffd") else decoded[len(text):]   # a character still incomplete waits for its next token
+            text = text if decoded.endswith("\ufffd") else decoded
+            if n + 1 == limit:
+                yield piece, n + 1, "length"; return
+            yield piece, n + 1, None
+            res = lm(input_ids=torch.tensor([[token]], device=device), past_key_values=past, use_cache=True)
+            past = res.past_key_values
+
+
 def generate_chat(model, tok, req, model_dir=None, model_name="d1a", on_text=None, between=None, cache=None, context=None):
     """One chat completion with the adapter off. Run on the model thread (Server.run_task). on_text, if given, receives
     each new piece of the answer as it is generated (streaming), never text past a stop string. between, if given, is
@@ -278,8 +335,6 @@ def generate_chat(model, tok, req, model_dir=None, model_name="d1a", on_text=Non
     (Server.between_tokens: the decisions waiting meanwhile, #289, #290). cache, a PromptCache, holds adapter-off caches
     only: never pass it one a decision wrote. context: the longest prompt plus completion allowed (context_length), the
     model's own when not given; a longer request raises ContextTooLong before any prefill. -> the OpenAI response body."""
-    from mlx_lm.sample_utils import make_sampler
-    from mlx_lm.tokenizer_utils import TokenizerWrapper
     messages = chat_messages(req)
     prompt = tok.apply_chat_template(messages, tools=req.tools or None, tokenize=False, add_generation_prompt=True)
     prompt_tokens = check_context(tok, req, context or context_length(model_dir), prompt)   # before any prefill
@@ -287,12 +342,18 @@ def generate_chat(model, tok, req, model_dir=None, model_name="d1a", on_text=Non
     system = tok.apply_chat_template(messages[:n_system], tools=req.tools or None, tokenize=False) if 0 < n_system < len(messages) else None
     system = system if system and prompt.startswith(system) else None   # a template that renders it differently alone: no mark
     limit = completion_limit(req)
-    sampler = make_sampler(temp=req.temperature, top_p=req.top_p if req.top_p < 1.0 else 0.0)
-    wrapper = TokenizerWrapper(tok, eos_token_ids=eos_ids(tok, model_dir))
+    if getattr(model, "backend", None) == "torch":   # PyTorch: no mlx-lm, no prompt cache
+        steps = lambda stats: pieces_torch(model, tok, prompt, limit, req.temperature, req.top_p, eos_ids(tok, model_dir), between)
+    else:
+        from mlx_lm.sample_utils import make_sampler
+        from mlx_lm.tokenizer_utils import TokenizerWrapper
+        sampler = make_sampler(temp=req.temperature, top_p=req.top_p if req.top_p < 1.0 else 0.0)
+        wrapper = TokenizerWrapper(tok, eos_token_ids=eos_ids(tok, model_dir))
+        steps = lambda stats: pieces(model.lm, wrapper, prompt, limit, sampler, between, cache, stats, system)
     stops = [s for s in ([req.stop] if isinstance(req.stop, str) else req.stop or []) if s]
     t, text, sent, finish, completion_tokens, stats = time.time(), "", 0, "length", 0, {"cached": 0}
     with model.adapter(False):
-        for piece, completion_tokens, ended in pieces(model.lm, wrapper, prompt, limit, sampler, between, cache, stats, system):
+        for piece, completion_tokens, ended in steps(stats):
             text += piece
             if ended: finish = ended
             cut = min((text.index(s) for s in stops if s in text), default=None)
