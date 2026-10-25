@@ -13,6 +13,7 @@ import d1a.eval.suite as new
 import huggingface_hub
 args = arguments(__doc__.split("\n")[0], "34113f45", 3000)
 old = module_at(args.ref, "d1a/eval/suite.py")
+new.SUITES_DATASET, new.SUITES_REVISION = old.SUITES_DATASET, old.SUITES_REVISION   # moved to D1A's own copy on purpose (#344)
 rng = random.Random(args.seed); n = 0
 def run(f):
     buf = io.StringIO()

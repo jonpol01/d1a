@@ -35,11 +35,14 @@ ADMISSION_BRANCH_HEADROOM = 64
 
 # The Hub mirrors. A manifest and the development and test partitions are in git; a large training partition downloads
 # from SUITES_DATASET at SUITES_REVISION and is checked against the manifest, so suite hashes and provenance never change.
+# SUITES_DATASET is D1A's private copy, byte for byte, of Kev's public UPSTREAM_SUITES (#344): an account that cannot read
+# it falls back to the upstream copy, which the same pins check.
 # A suite whose partitions must stay private (a held-out test set) names its own mirror in the manifest,
 # {"mirror": {"dataset": ..., "revision": ...}}, usually PRIVATE_DATASET: git then holds its hashes but not its text.
-SUITES_DATASET = "jaredpalmer/kev-suites"
+SUITES_DATASET = "JohnP1/d1a-suites"
 PRIVATE_DATASET = "jaredpalmer/kev-private-evals"
-SUITES_REVISION = "cc4bac803e73112689ec327ffa481c519cbc7a05"
+SUITES_REVISION = "db418e8d72dd112f6324c0ebf28e75e694b468c5"
+UPSTREAM_SUITES = ("jaredpalmer/kev-suites", "cc4bac803e73112689ec327ffa481c519cbc7a05")
 GIT_LIMIT = 10 * 1024 * 1024   # a partition larger than this stays out of git (gitignored; the manifest still pins it)
 # the pinned tokenizer that the suites built for the Qwen3.5 family were admitted and counted under (hard-v1, devtools-v1, long states)
 ADMISSION_TOKENIZER = ("Qwen/Qwen3.5-4B-Base", "1001bb4d826a52d1f399e183466143f4da7b741b")
@@ -215,7 +218,8 @@ def load_split(directory, split, allow_test=False):
 
 def fetch_partition(directory, filename):
     """Download one partition into the suite directory from its mirror: the manifest's own "mirror" when it names one
-    (which pins its own revision), else SUITES_DATASET at SUITES_REVISION. The caller checks the sha256."""
+    (which pins its own revision), else SUITES_DATASET at SUITES_REVISION, or UPSTREAM_SUITES for an account that cannot
+    read it. The caller checks the sha256."""
     from huggingface_hub import hf_hub_download
     from huggingface_hub.errors import GatedRepoError, RepositoryNotFoundError
     directory = Path(directory).resolve()
@@ -228,7 +232,11 @@ def fetch_partition(directory, filename):
     try:
         cached = hf_hub_download(repo, str(relative), repo_type="dataset", revision=revision)
     except (RepositoryNotFoundError, GatedRepoError) as error:   # a private mirror answers "not found" to anyone without access
-        raise PermissionError(f"{relative} is only in {repo}, which is missing or private to this account; `hf auth login` "
-                              "(or HF_TOKEN) with access to it, or ask for it") from error
+        if mirror:
+            raise PermissionError(f"{relative} is only in {repo}, which is missing or private to this account; `hf auth login` "
+                                  "(or HF_TOKEN) with access to it, or ask for it") from error
+        repo, revision = UPSTREAM_SUITES   # said out loud, so a run of ours that lost its token does not quietly depend on it
+        print(f"no access to {SUITES_DATASET}: fell back to the upstream copy {repo}", flush=True)
+        cached = hf_hub_download(repo, str(relative), repo_type="dataset", revision=revision)
     shutil.copyfile(cached, directory / filename)
     print(f"fetched {relative} from {repo}@{revision[:10]}", flush=True)

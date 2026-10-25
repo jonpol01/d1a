@@ -78,6 +78,27 @@ def test_a_missing_partition_is_fetched_and_verified(tmp_path, monkeypatch):
         S.load_split(outside, "train")
 
 
+def test_without_access_to_d1a_s_copy_a_partition_comes_from_the_upstream_one(tmp_path, monkeypatch, capsys):
+    import httpx
+    from huggingface_hub.errors import RepositoryNotFoundError
+    payload = json.dumps(RECORD, ensure_ascii=False).encode() + b"\n"
+    suite = tmp_path / "evals" / "x" / "decision-x"
+    suite.mkdir(parents=True)
+    S.write_json(suite / "manifest.json", {"files": {"train.jsonl": {"sha256": hashlib.sha256(payload).hexdigest(), "records": 1}}})
+    served, calls = tmp_path / "served.jsonl", []
+    served.write_bytes(payload)
+
+    def download(repo, path, repo_type, revision):   # D1A's copy is private: without access, the Hub answers "not found"
+        calls.append((repo, revision))
+        if repo == S.SUITES_DATASET:
+            raise RepositoryNotFoundError("404 Client Error", response=httpx.Response(404, request=httpx.Request("GET", "https://huggingface.co")))
+        return str(served)
+    monkeypatch.setattr("huggingface_hub.hf_hub_download", download)
+    assert S.load_split(suite, "train") == [RECORD]
+    assert calls == [(S.SUITES_DATASET, S.SUITES_REVISION), S.UPSTREAM_SUITES]
+    assert f"no access to {S.SUITES_DATASET}: fell back to the upstream copy {S.UPSTREAM_SUITES[0]}" in capsys.readouterr().out
+
+
 def test_a_private_suite_fetches_from_its_own_mirror(tmp_path, monkeypatch):
     import httpx
     from huggingface_hub.errors import RepositoryNotFoundError
