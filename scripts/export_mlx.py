@@ -35,11 +35,9 @@ def main():
     ap.add_argument("--unmerged", action="store_true", help="keep the adapter out of the weights (adapter/, attached at load), so an instruction-tuned base still chats with it off (#274)")
     ap.add_argument("--q4-0", action="store_true", help="4 bits in groups of 32 on llama.cpp's Q4_0 grid, for a base trained for Q4_0 (Gemma 4 12B-it QAT)")
     ap.add_argument("--ct-base", help="a compressed-tensors QAT checkpoint (folder, or Hub id@revision) as the base, its int4 Linears kept exactly; needs --unmerged")
-    ap.add_argument("--media", action="store_true", help="also write media/: the base's vision and audio encoders (Gemma 4)")
+    ap.add_argument("--media", action="store_true", help="also write media/: the base's vision and audio encoders (Gemma 4), or the QAT checkpoint's with --ct-base or a run trained on one")
     ap.add_argument("--media-only", action="store_true", help="only add media/ to an existing export folder --out")
     a = ap.parse_args()
-    if (a.media or a.media_only) and (a.ct_base or Checkpoint(a.run).meta.base_ct):
-        ap.error("--media writes the run's base encoders, not the QAT checkpoint's: export media separately")
     ct_base = ct_dir(a.ct_base) if a.ct_base else None   # without it, a run trained on a QAT checkpoint (base_ct) exports on that one
     t = time.time()
     if not a.media_only:
@@ -50,7 +48,8 @@ def main():
     if a.media or a.media_only:
         from d1a.serving.media import export_media
         meta = Checkpoint(a.run).meta
-        print("wrote", export_media(meta.base, meta.base_revision, a.out))
+        qat = ct_base or (ct_dir(meta.base_ct) if meta.base_ct else None)   # its encoders go with its text model (d1a#341)
+        print("wrote", export_media(meta.base, meta.base_revision, a.out, weights=qat))
     print(f"exported {a.run} to {a.out} in {time.time() - t:.0f} s")
 
 

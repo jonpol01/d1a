@@ -22,7 +22,7 @@ uv run python -m d1a.training.recipe run recipes/d1a-e2b.yaml --out runs/d1a-e2b
   - The run records the checkpoint as `base_ct` in `d1a_config.json` (a cache snapshot as `org/name@revision`), and everything that loads the run rebuilds that trunk:
     - the PyTorch path writes s·q over the base, which is exact in fp32 (`D1A_DTYPE=fp32`) and rounded in bf16;
     - on Apple Silicon such a run loads on PyTorch; on MLX it runs as its export, which `scripts/export_mlx.py --run <it> --unmerged` builds on the same checkpoint without `--ct-base` (docs/APPLE.md);
-    - the photo and voice server (`/v1/systemone/media`) refuses it, since it runs the base's own trunk.
+    - the PyTorch photo and voice server refuses it, since it runs the base's own trunk; its MLX export answers photos, voice and video through `media/` from the QAT checkpoint (`--media`).
   - A warm start may move between the base's trunk and a QAT one; it refuses two different QAT checkpoints.
 - A fine-tune must train on or replay every D1A training source (`d1a.eval.suites.train_sources()` and decision-v7), read from the mix's sidecar `mine.jsonl.json` as `recipes/skills/mix.py` and `recipes/pr-labeler/mix.py` write it, or it is refused before any weights load; to leave sources out on purpose, add `--allow_missing_sources all --reason "<why>"` (or name the sources), which `training_config.json` records (#211, `recipes/README.md`).
 - `--data` (in `d1a.eval.benchmark` too) also takes a D1A suite partition, `evals/d1a/<suite>:<partition>`: a dataset pinned to one Hub commit, fetched and checked against its sha256 before use, and refused for training when it is an eval partition (`python -m d1a.eval.suites --help`).
