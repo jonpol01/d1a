@@ -26,7 +26,8 @@ zero-shot on every build (no media in training).
 | [d1a-e2b-it-mlx-q4](https://huggingface.co/JohnP1/d1a-e2b-it-mlx-q4) `v0.6` | MLX 4-bit, merged | ✅ | ❌ merged³ | ✅ | ✅ | ✅ | 3.6 GB; not scored on the suites |
 | [d1a-e2b-it-coreml](https://huggingface.co/JohnP1/d1a-e2b-it-coreml) `v0.6` | Core ML int8 | ✅ | ❌ | ❌ | ❌ | ❌ | preview: text only, ≤ 512 tokens |
 | [d1a-e2b-it-coreml-4bit](https://huggingface.co/JohnP1/d1a-e2b-it-coreml-4bit) `v0.6` | Core ML 4-bit | ✅ | ❌ | ❌ | ❌ | ❌ | preview: text only, ≤ 512 tokens |
-| [d1a-e2b-it-qat-mlx-q4](https://huggingface.co/JohnP1/d1a-e2b-it-qat-mlx-q4) | MLX 4-bit (Google's QAT int4, exact), **unmerged** | ✅ | ✅ | ✅ | ✅ | ✅ | the recommended E2B-it build, replacing D1A-E2B-it v0.6 by the owner's decision of 2026-10-25 despite transfer-v4 −5.2 points; 4.0 GB |
+| [d1a-e2b-it-qat-mlx-q4](https://huggingface.co/JohnP1/d1a-e2b-it-qat-mlx-q4) | MLX 4-bit (Google's QAT int4, exact), **unmerged** | ✅ | ✅ | ✅ | ✅ | ✅ | the recommended E2B-it build, replacing D1A-E2B-it v0.6 by the owner's decision of 2026-10-25 despite transfer-v4 −5.2 points; 3.7 GB |
+| [d1a-e2b-it-qat](https://huggingface.co/JohnP1/d1a-e2b-it-qat) | PyTorch (adapter; `base_ct`: Google's QAT int4 trunk, rebuilt on load) | ✅ | ✅² | ✅¹ | ✅¹ | ✅¹ | the recommended E2B-it on PyTorch; loads Gemma 4 E2B-it and the QAT checkpoint |
 
 ¹ Through the separate PyTorch media server, `python -m d1a.serving.media --run <repo>`, which loads the full Gemma 4
 model (bf16, about 10 GB for E2B) ([Photos, voice and video](USAGE.md)).
@@ -34,7 +35,7 @@ model (bf16, about 10 GB for E2B) ([Photos, voice and video](USAGE.md)).
 ³ Chat needs an unmerged build: `scripts/export_mlx.py --run JohnP1/d1a-e2b-it --unmerged --media` makes one
 ([Chat with D1A](USAGE.md#chat-with-d1a)).
 
-Not published yet: D1A-E2B-it QAT for PyTorch and for Core ML. No Core ML build has chat, photo, voice or video yet.
+Not published yet: D1A-E2B-it QAT for Core ML. No Core ML build has chat, photo, voice or video yet.
 
 ## Capabilities (2026-10-17)
 

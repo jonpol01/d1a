@@ -75,7 +75,8 @@ What every published build can and cannot do. Limits and footnotes: [docs/MODELS
 
 | Build | Format | Decisions | Chat | Photo | Voice | Video | Size, notes |
 |---|---|---|---|---|---|---|---|
-| **D1A-E2B-it QAT** ([mlx-q4](https://huggingface.co/JohnP1/d1a-e2b-it-qat-mlx-q4)) | MLX 4-bit, unmerged | ✅ | ✅ | ✅ | ✅ | ✅ | 4.0 GB; **recommended E2B-it** |
+| **D1A-E2B-it QAT** ([mlx-q4](https://huggingface.co/JohnP1/d1a-e2b-it-qat-mlx-q4)) | MLX 4-bit, unmerged | ✅ | ✅ | ✅ | ✅ | ✅ | 3.7 GB; **recommended E2B-it** |
+| **D1A-E2B-it QAT** ([d1a-e2b-it-qat](https://huggingface.co/JohnP1/d1a-e2b-it-qat)) | PyTorch | ✅ | ✅⁴ | ✅¹ | ✅¹ | ✅¹ | 126 MB adapter on Gemma 4 E2B-it + Google's QAT checkpoint |
 | D1A-E2B-it v0.6 ([d1a-e2b-it](https://huggingface.co/JohnP1/d1a-e2b-it)) | PyTorch | ✅ | ✅⁴ | ✅¹ | ✅¹ | ✅¹ | |
 | D1A-E2B-it v0.6 ([mlx-q8](https://huggingface.co/JohnP1/d1a-e2b-it-mlx-q8), [mlx-q4](https://huggingface.co/JohnP1/d1a-e2b-it-mlx-q4)) | MLX, merged | ✅ | ❌³ | ✅ | ✅ | ✅ | 4.8 / 3.6 GB |
 | D1A-E2B-it v0.6 ([coreml](https://huggingface.co/JohnP1/d1a-e2b-it-coreml), [coreml-4bit](https://huggingface.co/JohnP1/d1a-e2b-it-coreml-4bit)) | Core ML | ✅² | ❌ | ❌ | ❌ | ❌ | 3.8 / 2.9 GB, preview |
@@ -83,7 +84,7 @@ What every published build can and cannot do. Limits and footnotes: [docs/MODELS
 | D1A-E2B ([mlx-q8](https://huggingface.co/JohnP1/d1a-e2b-mlx-q8)) | MLX 8-bit | ✅ | ❌ | ✅ | ✅ | ✅ | 4.8 GB |
 | D1A-E2B ([coreml](https://huggingface.co/JohnP1/d1a-e2b-coreml)) | Core ML int8 | ✅² | ❌ | ❌ | ❌ | ❌ | 3.8 GB, preview |
 
-**Not built yet:** D1A-E2B-it QAT for PyTorch and Core ML. The QAT build trades 5.2 points on unfamiliar task types
+**Not built yet:** D1A-E2B-it QAT for Core ML. The QAT build trades 5.2 points on unfamiliar task types
 (transfer-v4) for D1A's own jobs, speed and all five functions ([scorecard](docs/reports/2026-10-25-e2b-it-qat-scorecard.md)).
 
 ### D1A-E4B (more accurate: servers and Macs)
