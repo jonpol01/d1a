@@ -29,7 +29,7 @@ dependencies = [
     "pydantic>=2.9",
     "pyyaml>=6",   # d1a.training.recipe
     "scikit-learn>=1.9.1",
-    "torch>=2.6,<2.14",
+    "torch>=2.6,<2.15",
     "transformers>=5.17,<6",
 ]
 
