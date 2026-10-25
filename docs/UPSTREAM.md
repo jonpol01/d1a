@@ -12,7 +12,7 @@ the Apache License 2.0. This file records where D1A's code came from and what D1
 
 ## What D1A Changed
 
-- **Ported from later upstream Kev**: the suites mirror pin (`d1a/eval/suite.py` `SUITES_REVISION` = kev-suites `cc4bac8`) from Kev commit `6b1da9d` (#198), which publishes the `hard-v1` and `documents-v1` training partitions. Every other partition is unchanged at that revision. `PrefixCache.make_room` in `d1a/serving/serve.py` from Kev commit `1d77363` (#201): before a batch runs, the cache drops the states that batch's store would evict anyway, so an old long state no longer stays resident through the pass of the new one (#189).
+- **Ported from later upstream Kev**: the suites mirror pin (kev-suites `cc4bac8`, now `d1a/eval/suite.py` `UPSTREAM_SUITES`) from Kev commit `6b1da9d` (#198), which publishes the `hard-v1` and `documents-v1` training partitions. Every other partition is unchanged at that revision. `PrefixCache.make_room` in `d1a/serving/serve.py` from Kev commit `1d77363` (#201): before a batch runs, the cache drops the states that batch's store would evict anyway, so an old long state no longer stays resident through the pass of the new one (#189).
   `d1a/training/temperature_gate.py`, which `d1a.training.calibrate --judge/--guard/--confirm/--locked` runs, ports Kev's
   validation of a refitted temperature: `kev/rounds.py` `pooled_temperature_ci` (Kev commit `e52f812`, #168) as every fit's
   90% bootstrap interval of its temperature; `kev/rounds.py` `paired()`, the registered paired read over
@@ -115,8 +115,9 @@ the Apache License 2.0. This file records where D1A's code came from and what D1
   - `tests/test_api.py`: the same HTTP API checks and more (tighter sums, the confidence and expected-score formulas, 422s
     at both option limits, isolation for every question in any order); it now serves the tiny checkpoint in process.
 - **Rewritten**: `README.md`, `AGENTS.md`, `NOTICE`, `.gitignore`.
-- **Kept as is**: the frozen suites in `evals/` (large partitions still download from Kev's Hub dataset
-  `jaredpalmer/kev-suites`), the suite builders in `scripts/`.
+- **Kept as is**: the frozen suites in `evals/` (their large partitions download from D1A's copy of Kev's Hub dataset
+  `jaredpalmer/kev-suites` at `cc4bac8`, or from Kev's dataset for an account without access to the copy; #344), the
+  suite builders in `scripts/`.
 
 ## How much is still Kev
 

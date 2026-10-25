@@ -16,8 +16,8 @@ runs/
 # os
 .DS_Store
 
-# frozen-suite partitions that are not in git: large public ones live on the Hub mirror (jaredpalmer/kev-suites, pinned in
-# d1a/suite.py), private ones only in their manifest's own mirror; manifests (with sha256) stay in git and load_split
+# frozen-suite partitions that are not in git: large ones live on the Hub mirror (SUITES_DATASET, pinned in
+# d1a/eval/suite.py), private ones only in their manifest's own mirror; manifests (with sha256) stay in git and load_split
 # fetches + verifies the rest on first use
 evals/v5/decision-v5/train.jsonl
 evals/v6/decision-v6/train.jsonl
