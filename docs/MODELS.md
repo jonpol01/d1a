@@ -17,11 +17,11 @@ zero-shot on every build (no media in training).
 | [d1a-e2b](https://huggingface.co/JohnP1/d1a-e2b) `v0.6.1` | PyTorch (adapter) | ✅ | ❌ base trunk | ✅¹ | ✅¹ | ✅¹ | |
 | [d1a-e2b-mlx-q8](https://huggingface.co/JohnP1/d1a-e2b-mlx-q8) `v0.6.1` | MLX 8-bit, merged | ✅ | ❌ base trunk | ✅ | ✅ | ✅ | 4.8 GB |
 | [d1a-e2b-coreml](https://huggingface.co/JohnP1/d1a-e2b-coreml) `v0.6` | Core ML int8 | ✅ | ❌ | ❌ | ❌ | ❌ | preview: text only, inputs ≤ 512 tokens |
-| [d1a-e4b-it](https://huggingface.co/JohnP1/d1a-e4b-it) `v0.6` | PyTorch (adapter) | ✅ | ❌² | ✅¹ | ✅¹ | ✅¹ | |
+| [d1a-e4b-it](https://huggingface.co/JohnP1/d1a-e4b-it) `v0.6` | PyTorch (adapter) | ✅ | ✅² | ✅¹ | ✅¹ | ✅¹ | |
 | [d1a-e4b-it-mlx-q8](https://huggingface.co/JohnP1/d1a-e4b-it-mlx-q8) `v0.6` | MLX 8-bit, merged | ✅ | ❌ merged³ | ✅ | ✅ | ✅ | 7.5 GB |
 | [d1a-e4b-it-mlx-q4](https://huggingface.co/JohnP1/d1a-e4b-it-mlx-q4) `v0.6` | MLX 4-bit, merged | ✅ | ❌ merged³ | ✅ | ✅ | ✅ | 5.2 GB |
 | [d1a-e4b-it-coreml-4bit](https://huggingface.co/JohnP1/d1a-e4b-it-coreml-4bit) `v0.6` | Core ML 4-bit | ✅ | ❌ | ❌ | ❌ | ❌ | preview: text only, ≤ 512 tokens; 3 of 42 test answers move |
-| [d1a-e2b-it](https://huggingface.co/JohnP1/d1a-e2b-it) `v0.6` | PyTorch (adapter) | ✅ | ❌² | ✅¹ | ✅¹ | ✅¹ | |
+| [d1a-e2b-it](https://huggingface.co/JohnP1/d1a-e2b-it) `v0.6` | PyTorch (adapter) | ✅ | ✅² | ✅¹ | ✅¹ | ✅¹ | |
 | [d1a-e2b-it-mlx-q8](https://huggingface.co/JohnP1/d1a-e2b-it-mlx-q8) `v0.6` | MLX 8-bit, merged | ✅ | ❌ merged³ | ✅ | ✅ | ✅ | 4.8 GB |
 | [d1a-e2b-it-mlx-q4](https://huggingface.co/JohnP1/d1a-e2b-it-mlx-q4) `v0.6` | MLX 4-bit, merged | ✅ | ❌ merged³ | ✅ | ✅ | ✅ | 3.6 GB; not scored on the suites |
 | [d1a-e2b-it-coreml](https://huggingface.co/JohnP1/d1a-e2b-it-coreml) `v0.6` | Core ML int8 | ✅ | ❌ | ❌ | ❌ | ❌ | preview: text only, ≤ 512 tokens |
@@ -30,7 +30,7 @@ zero-shot on every build (no media in training).
 
 ¹ Through the separate PyTorch media server, `python -m d1a.serving.media --run <repo>`, which loads the full Gemma 4
 model (bf16, about 10 GB for E2B) ([Photos, voice and video](USAGE.md)).
-² PyTorch builds have no chat in D1A; chat runs on MLX only.
+² Served with `D1A_MERGE=0`, which keeps the adapter unmerged so chat can switch it off ([Chat with D1A](USAGE.md#chat-with-d1a)).
 ³ Chat needs an unmerged build: `scripts/export_mlx.py --run JohnP1/d1a-e2b-it --unmerged --media` makes one
 ([Chat with D1A](USAGE.md#chat-with-d1a)).
 
