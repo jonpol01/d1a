@@ -11,7 +11,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def chat_models(models=ROOT / "docs" / "MODELS.md"):
     """The models whose capabilities column says chat **yes**: (D1A-E4B-it, ...)."""
-    rows = [line for line in models.read_text(encoding="utf-8").splitlines() if line.startswith("| ")]
+    text = models.read_text(encoding="utf-8")
+    rows = [line for line in text[text.index("## Capabilities"):].splitlines() if line.startswith("| ")]   # not the build checklist above it
     cells = lambda line: [c.strip() for c in line.strip().strip("|").split("|")]
     names = [re.sub(r"\s+v[\d.]+$", "", c.replace("*", "").strip()) for c in cells(rows[0])[1:]]
     chat = next(cells(r)[1:] for r in rows if "Chat / text generation" in r)
