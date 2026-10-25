@@ -21,7 +21,8 @@ import torch.nn.functional as F
 from transformers import AutoModelForCausalLM
 from transformers.cache_utils import LinearAttentionCacheLayerMixin
 from d1a.backends.backbone import Attention, for_config
-from d1a.backends.embeddings import safe_embeddings
+from d1a.backends.device import empty_cache
+from d1a.backends.embeddings import keep_tables, safe_embeddings
 # Encoding and the head are the backend-independent core (#60); their names stay importable from here.
 from d1a.core.encoding import (DELIMITERS, GEMMA_SPECIAL, MAX_BRANCH, MAX_PACKED, MAX_STATE, MAX_TRAIN_STATE, MAX_TRAIN_STATE_8K,  # noqa: F401
                                ROW_PASS_TOKENS, SERVE_MAX_BRANCH, SERVE_MAX_BRANCH_8K, SERVE_MAX_PACKED, SERVE_MAX_STATE,
@@ -108,17 +109,23 @@ def attn_to_load(attn):
 
 
 class DecisionModel(nn.Module):
-    def __init__(self, name, tok, device, lora=None, revision=None, attn=None, head_dim=256, lora_targets="all", dtype=torch.float32):
+    def __init__(self, name, tok, device, lora=None, revision=None, attn=None, head_dim=256, lora_targets="all", dtype=torch.float32,
+                 tables_dtype=None):
         super().__init__()
         # The backbone only: no vocabulary head, D1A never generates text. Eager attention on MPS and the CPU (known good
         # with the float 4D mask), SDPA on CUDA (which accepts arbitrary additive masks). fp32 trains and gives the exact
         # numbers; bf16 is a serving option for large backbones.
         attn = attn or ("sdpa" if str(device).startswith("cuda") else "eager")
-        self.lm = AutoModelForCausalLM.from_pretrained(name, revision=revision, dtype=dtype, attn_implementation=attn_to_load(attn)).model
+        # tables_dtype (bf16 under an fp32 trunk): load in it, then everything but the embedding tables goes to dtype
+        self.lm = AutoModelForCausalLM.from_pretrained(name, revision=revision, dtype=tables_dtype or dtype, attn_implementation=attn_to_load(attn)).model
         # a multimodal checkpoint (Gemma 4) loads as a wrapper around its text model: keep the text model only, so the vision
         # and audio towers are neither in memory nor matched by the LoRA target names
         self.lm = Attention.unwrap(self.lm)
         safe_embeddings(self.lm)   # Gemma 4's per-layer table is past what MPS's embedding kernel indexes right (#353)
+        if tables_dtype is not None and tables_dtype != dtype:
+            self.lm.to(device)   # cast on the device, so no CPU copy of the larger trunk sits next to it
+            keep_tables(self.lm, dtype)
+            empty_cache(str(device))   # hand back the bf16 trunk's freed blocks
         self.backbone = for_config(self.lm.config)   # d1a.backends.backbone: what this family needs (form, masks, cache, LoRA names)
         self.pad_id = pad_id(tok)
         # Hybrid backbones (Qwen3.5: recurrent Gated DeltaNet layers) cannot honour the block-causal mask, so each question
@@ -147,8 +154,13 @@ class DecisionModel(nn.Module):
         return self.backbone.prefix_min_tokens
 
     @property
+    def compute_dtype(self):
+        """The backbone's first parameter's dtype past its embedding tables, which keep_tables may hold in another."""
+        return next(p for m in self.lm.modules() if not isinstance(m, nn.Embedding) for p in m.parameters(recurse=False)).dtype
+
+    @property
     def dtype(self):
-        return str(next(self.lm.parameters()).dtype).removeprefix("torch.")
+        return str(self.compute_dtype).removeprefix("torch.")
 
     @property
     def loras(self):
@@ -216,7 +228,7 @@ class DecisionModel(nn.Module):
         return h if picks is None else h.gather(1, picks[..., None].expand(-1, -1, h.shape[-1]))
 
     def _packed_mask(self, encs, length=None, q_start=0):
-        return branch_masks(encs, self.device, next(self.lm.parameters()).dtype, self.sliding_window, length=length, q_start=q_start)
+        return branch_masks(encs, self.device, self.compute_dtype, self.sliding_window, length=length, q_start=q_start)
 
     def _new_cache(self):
         """An empty cache for a state prefix. Hybrid backbones need the layer types (each DeltaNet layer's recurrent and
