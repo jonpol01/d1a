@@ -66,9 +66,12 @@ the shell. The resource guard enforces the rules below; this machine's numbers a
 - fp32 models of 4B or more need `--allow-fp32-big`: more free disk, no other D1A job, and the overnight window only.
 - The guard pauses D1A jobs (SIGSTOP) when free disk runs low or swap grows fast while one runs, stops them (SIGTERM)
   when the disk is nearly full, and resumes them once both have recovered for a while.
-- Delete Hugging Face cache entries only with `scan_cache_dir().delete_revisions(...).execute()`, never `rm` on a repo folder:
-  the cache shares blobs (`hub/blobs/<xx>/<hash>` + `.refs`), so a hand delete frees nothing and leaves stale `.refs` behind.
-  Where the tool no longer lists a repo, delete one store file only after its `.refs` names nothing else, and log it.
+- **House cleaning after every piece of work** (the maintainer, 2026-10-26): merged worktrees and branches, superseded build
+  and run folders, and Hugging Face cache entries the planned work no longer needs go to the Trash. Check the code for a
+  cache entry first, keep what upcoming work needs, and say what a model test would re-download. Other projects' files and
+  the user's data are listed for the maintainer, never removed.
+- Hugging Face cache entries go to the Trash, never `rm` on a repo folder: the cache shares blobs (`hub/blobs/<xx>/<hash>` +
+  `.refs`), so move a blob only when its `.refs` names no other repo, drop the repo from the others' `.refs`, and log it.
 
 ## Quality bar (mandatory)
 The maintainer, 2026-10-06: every PR and every deploy is checked against the test suite, with numbers; nothing is downgraded or
