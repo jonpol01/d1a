@@ -1,3 +1,5 @@
+<p>English · <a href="ja/DEMOS.md">日本語</a> · <a href="ko/DEMOS.md">한국어</a></p>
+
 # Demos
 
 Thirteen use cases that D1A answers in one forward pass, twelve of them recorded from the playground, and what the photo, voice and video demos do and do not show.

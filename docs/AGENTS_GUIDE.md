@@ -1,3 +1,5 @@
+<p>English · <a href="ja/AGENTS_GUIDE.md">日本語</a> · <a href="ko/AGENTS_GUIDE.md">한국어</a></p>
+
 # D1A for agents
 
 An agent makes many small decisions between its real work: who should take a request, how large a model it needs,
