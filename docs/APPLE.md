@@ -1,3 +1,5 @@
+<p>English · <a href="ja/APPLE.md">日本語</a> · <a href="ko/APPLE.md">한국어</a></p>
+
 # Apple Silicon
 
 D1A on Apple hardware: MLX on the GPU and a Core ML preview on the Neural Engine.

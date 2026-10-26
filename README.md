@@ -1,3 +1,5 @@
+<p align="center">English · <a href="README.ja.md">日本語</a> · <a href="README.ko.md">한국어</a></p>
+
 <p align="center">
   <img src="docs/d1a-avatar.png" width="220" alt="D1A: an anime girl with silver-white and dark purple hair, round glasses and headphones on a round enamel badge reading #D1A">
 </p>

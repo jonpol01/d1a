@@ -1,3 +1,5 @@
+<p>English · <a href="ja/MODELS.md">日本語</a> · <a href="ko/MODELS.md">한국어</a></p>
+
 # Models
 
 Which D1A builds exist, where they are published, and what each version is for.
