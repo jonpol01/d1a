@@ -26,6 +26,9 @@ SAMPLES = "https://raw.githubusercontent.com/jonpol01/d1a-playground/3fc4715ebd7
 # ZeroGPU: models go on "cuda" at import time (emulated until a @spaces.GPU call holds a real GPU)
 DEVICE = "cuda" if os.environ.get("SPACE_ID") else "mps" if torch.backends.mps.is_available() else "cpu"
 
+import peft.peft_model  # noqa: E402
+# ZeroGPU makes CUDA look available at import, so PEFT would load the adapter onto a GPU no call holds yet
+peft.peft_model.infer_device = lambda: "cpu"
 MODEL = MediaModel(RUN, "cpu")   # loaded and merged on the CPU, then moved once
 MODEL.model.to(DEVICE); MODEL.head.to(DEVICE); MODEL.device = DEVICE
 
