@@ -10,8 +10,9 @@ app_file: app.py
 license: apache-2.0
 short_description: Multiple-choice decisions with probabilities, in one pass
 models:
-  - JohnP1/d1a-e4b
-  - google/gemma-4-E4B
+  - JohnP1/d1a-e4b-it-qat
+  - google/gemma-4-E4B-it
+  - google/gemma-4-E4B-it-qat-w4a16-ct
 tags:
   - decision-model
   - classification
@@ -21,11 +22,11 @@ tags:
 # D1A
 
 D1A answers typed questions about a document (choice, yes/no, score) with a probability for every option, in one
-forward pass. This Space runs D1A-E4B v0.6.1 on ZeroGPU: model routing, guardrails, tool-call gating, the PR labeler,
+forward pass. This Space runs D1A-E4B-it QAT on ZeroGPU: model routing, guardrails, tool-call gating, the PR labeler,
 and zero-shot photo and voice checks through Gemma 4's own encoders.
 
 - Code: [jonpol01/d1a](https://github.com/jonpol01/d1a) (this Space is `space/` there)
-- Model: [JohnP1/d1a-e4b](https://huggingface.co/JohnP1/d1a-e4b)
+- Model: [JohnP1/d1a-e4b-it-qat](https://huggingface.co/JohnP1/d1a-e4b-it-qat)
 - All 13 demos: [jonpol01/d1a-playground](https://github.com/jonpol01/d1a-playground)
 
 Built on [Kev](https://github.com/jaredpalmer/kev) by Jared Palmer (Apache-2.0). D1A is an independent project, not

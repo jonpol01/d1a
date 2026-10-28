@@ -468,6 +468,9 @@ def parse_args(argv=None):
     add("--dtype", choices=["fp32", "bf16"], default="fp32", help="bf16 = autocast forward with fp32 master weights (CUDA only)")
     add("--weights_dtype", choices=["fp32", "bf16"], default="fp32", help="dtype of the frozen backbone weights. bf16 halves memory and is required by the fused MoE experts "
                                                                         "(torch._grouped_mm wants bf16); LoRA and head stay fp32 (peft upcasts adapters). The checkpoint records it and is loaded the same way.")
+    add("--embedding_dtype", choices=["", "bf16"], default="", help="with --weights_dtype fp32: bf16 loads the base in bf16 and casts everything "
+        "but the embedding tables to fp32, the same forward as the fp32 model for a base stored in bf16 (Gemma 4) with half the "
+        "tables' memory (E4B: 3.5B of its 7.5B text parameters); with --base_ct the int4 grid stays exact")
     add("--checkpointing", type=int, choices=[0, 1], default=0)
     add("--head_dim", type=int, default=256, help="pointer head dimension")
     add("--lora_targets", choices=["all", "dense", "attn", "qv"], default="all", help="LoRA module set; fewer modules = less drift from the base; dense = all minus the DeltaNet projections on hybrid bases")
@@ -587,11 +590,16 @@ class Progress:
 
 def build_model(a, dev, tok, revision, holdout):
     """-> (the model with LoRA, the Meta this run will save, the warm-start provenance or None)."""
+    if a.embedding_dtype and a.weights_dtype != "fp32":
+        raise SystemExit("d1a.training.train: --embedding_dtype bf16 needs --weights_dtype fp32")
     model = DecisionModel(a.base, tok, dev, lora=a.lora, revision=revision, head_dim=a.head_dim, lora_targets=a.lora_targets,
-                          dtype=torch.bfloat16 if a.weights_dtype == "bf16" else torch.float32)
+                          dtype=torch.bfloat16 if a.weights_dtype == "bf16" else torch.float32,
+                          tables_dtype=torch.bfloat16 if a.embedding_dtype == "bf16" else None)
     if a.base_ct:   # the base's weights from a QAT checkpoint, before any warm start reads the adapter
         nq, nother = load_ct_base(model.lm, ct_dir(a.base_ct))
-        print(f"base weights from {a.base_ct}: {nq} quantized Linears as s q, {nother} other tensors", flush=True)
+        empty_cache(dev)
+        print(f"base weights from {a.base_ct}: {nq} quantized Linears as s q, {nother} other tensors; "
+              f"{allocated_bytes(dev) / 2**30:.1f} GB allocated on {dev}", flush=True)
     if a.checkpointing:
         model.lm.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
     model.lm.config.use_cache = False
