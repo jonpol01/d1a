@@ -1,8 +1,8 @@
-"""D1A on a Hugging Face ZeroGPU Space: a few of the playground's demos (jonpol01/d1a-playground) on D1A-E4B.
+"""D1A on a Hugging Face ZeroGPU Space: a few of the playground's demos (jonpol01/d1a-playground) on D1A-E4B-it QAT.
 
-One model answers every card: d1a.serving.media.MediaModel holds Gemma 4 E4B with D1A's LoRA merged in and the base's own vision
-and audio encoders, so text, photo and voice requests share one copy of the weights. The questions and presets are the
-playground's, so the answers match what it shows.
+One model answers every card: d1a.serving.media.MediaModel holds Gemma 4 E4B-it on Google's int4 QAT trunk with D1A's LoRA
+merged in and that checkpoint's own vision and audio encoders, so text, photo and voice requests share one copy of the
+weights. The questions and presets are the playground's, so the answers match what it shows.
 """
 import base64
 import json
@@ -19,9 +19,8 @@ import torch
 
 from d1a.core.api import SystemOneRequest, to_answers, to_record
 from d1a.serving.media import Media, MediaModel
-from d1a.core.versions import latest
 
-RUN = os.environ.get("D1A_RUN") or latest("JohnP1/d1a-e4b")
+RUN = os.environ.get("D1A_RUN") or "JohnP1/d1a-e4b-it-qat@b69aa8f86c6fd5a488a1dafe41bdf4961b03014c"   # pinned by commit: the QAT repo has no release tags
 SAMPLES = "https://raw.githubusercontent.com/jonpol01/d1a-playground/3fc4715ebd74675821c37f74a25dbde4bfbb2dad/public/samples"
 # ZeroGPU: models go on "cuda" at import time (emulated until a @spaces.GPU call holds a real GPU)
 DEVICE = "cuda" if os.environ.get("SPACE_ID") else "mps" if torch.backends.mps.is_available() else "cpu"
@@ -216,8 +215,8 @@ def voice(path):
 INTRO = """# D1A: a small model that answers multiple-choice questions, with probabilities
 
 Give it a document and typed questions (choice, yes/no, score); it returns a calibrated probability for every option in one
-forward pass. No text generation, no JSON parsing. This Space runs **D1A-E4B v0.4** (Gemma 4 E4B + LoRA + a pointer head).
-[Code](https://github.com/jonpol01/d1a) · [Model](https://huggingface.co/JohnP1/d1a-e4b) · [All 13 demos](https://github.com/jonpol01/d1a-playground) ·
+forward pass. No text generation, no JSON parsing. This Space runs **D1A-E4B-it QAT** (Gemma 4 E4B-it on Google's int4 QAT trunk + LoRA + a pointer head).
+[Code](https://github.com/jonpol01/d1a) · [Model](https://huggingface.co/JohnP1/d1a-e4b-it-qat) · [All 13 demos](https://github.com/jonpol01/d1a-playground) ·
 Built on [Kev](https://github.com/jaredpalmer/kev) by Jared Palmer (Apache-2.0)."""
 LATENCY_NOTE = "Times are the model's own; the first request after the Space wakes also waits for a GPU."
 
