@@ -23,6 +23,11 @@ Inside those checks:
   The same path check runs before `d1a.training.study publish` and `scripts/golden_vectors.py --upload` send files to
   the Hugging Face Hub.
 
+Translations: `README.ja.md`, `README.ko.md`, `docs/ja/` and `docs/ko/` are Japanese and Korean versions of the
+getting-started pages (README, USAGE, MODELS, APPLE, AGENTS_GUIDE, DEMOS). Each names the English commit it was translated
+from, and the English page is authoritative. A pull request that changes one of those English pages may update its
+translations too, or leave them for a later refresh, which moves the commit in each translation's note.
+
 ## License and provenance
 
 D1A is built on [Kev](https://github.com/jaredpalmer/kev) by Jared Palmer (Apache-2.0), and Apache-2.0 §4 requires that
