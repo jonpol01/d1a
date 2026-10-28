@@ -104,12 +104,16 @@ QAT 빌드는 낯선 작업 유형(transfer-v4)에서 5.2점을 내주는 대신
 
 | 빌드 | 형식 | 의사결정 | 채팅 | 사진 | 음성 | 영상 | 크기, 비고 |
 |---|---|---|---|---|---|---|---|
+| **D1A-E4B-it QAT** ([mlx-q4](https://huggingface.co/JohnP1/d1a-e4b-it-qat-mlx-q4)) | MLX 4-bit, 병합 안 됨 | ✅ | ✅ | ✅ | ✅ | ✅ | 5.3 GB; v0.6과 동등, typesafe −7.8 |
+| **D1A-E4B-it QAT** ([d1a-e4b-it-qat](https://huggingface.co/JohnP1/d1a-e4b-it-qat)) | PyTorch | ✅ | ✅⁴ | ✅¹ | ✅¹ | ✅¹ | Gemma 4 E4B-it와 Google의 QAT 체크포인트 위에 얹는 133 MB 어댑터 |
 | D1A-E4B-it ([d1a-e4b-it](https://huggingface.co/JohnP1/d1a-e4b-it)) | PyTorch | ✅ | ✅⁴ | ✅¹ | ✅¹ | ✅¹ | |
 | D1A-E4B-it ([mlx-q8](https://huggingface.co/JohnP1/d1a-e4b-it-mlx-q8), [mlx-q4](https://huggingface.co/JohnP1/d1a-e4b-it-mlx-q4)) | MLX, 병합됨 | ✅ | ❌³ | ✅ | ✅ | ✅ | 7.5 / 5.2 GB |
 | D1A-E4B-it ([coreml-4bit](https://huggingface.co/JohnP1/d1a-e4b-it-coreml-4bit)) | Core ML 4-bit | ✅² | ❌ | ❌ | ❌ | ❌ | 4.6 GB, 프리뷰 |
 | D1A-E4B ([d1a-e4b](https://huggingface.co/JohnP1/d1a-e4b)) | PyTorch | ✅ | ❌ | ✅¹ | ✅¹ | ✅¹ | 서버 기본값 |
 | D1A-E4B ([mlx-q8](https://huggingface.co/JohnP1/d1a-e4b-mlx-q8)) | MLX 8-bit | ✅ | ❌ | ✅ | ✅ | ✅ | 7.5 GB |
 | D1A-E4B ([coreml](https://huggingface.co/JohnP1/d1a-e4b-coreml)) | Core ML int8 | ✅² | ❌ | ❌ | ❌ | ❌ | 6.5 GB, 프리뷰 |
+
+D1A-E4B-it QAT는 Google의 QAT int4 트렁크에서 D1A-E4B-it v0.6을 다시 학습시킨 것입니다. v0.6 대비 전체적으로 동등하며(통합 −0.2점 [−0.9, +0.5]), PR 라벨 +1.6, PR 심각도 +6.0, 라우팅 +1.7과 +1.5이지만 외부 typesafe 스위트는 −7.8입니다. 같은 트렁크로 옮긴 v0.6 어댑터 대비로는 통합 +1.2이며 유의한 손실은 없습니다([스코어카드](docs/reports/2026-10-28-e4b-it-qat-scorecard.md)).
 
 ¹ 별도의 PyTorch 미디어 서버(`python -m d1a.serving.media`)를 통해 사용하며, 이 서버는 전체 모델을 로드합니다(E2B 기준 약 10 GB).
 ² 텍스트 전용이며 입력은 최대 512 토큰입니다.

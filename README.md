@@ -94,7 +94,7 @@ The QAT build trades 5.2 points on unfamiliar task types
 
 | Build | Format | Decisions | Chat | Photo | Voice | Video | Size, notes |
 |---|---|---|---|---|---|---|---|
-| **D1A-E4B-it QAT** ([mlx-q4](https://huggingface.co/JohnP1/d1a-e4b-it-qat-mlx-q4)) | MLX 4-bit, unmerged | ✅ | ✅ | ✅ | ✅ | ✅ | 5.3 GB; scorecard pending |
+| **D1A-E4B-it QAT** ([mlx-q4](https://huggingface.co/JohnP1/d1a-e4b-it-qat-mlx-q4)) | MLX 4-bit, unmerged | ✅ | ✅ | ✅ | ✅ | ✅ | 5.3 GB; level with v0.6, typesafe −7.8 |
 | **D1A-E4B-it QAT** ([d1a-e4b-it-qat](https://huggingface.co/JohnP1/d1a-e4b-it-qat)) | PyTorch | ✅ | ✅⁴ | ✅¹ | ✅¹ | ✅¹ | 133 MB adapter on Gemma 4 E4B-it + Google's QAT checkpoint |
 | D1A-E4B-it ([d1a-e4b-it](https://huggingface.co/JohnP1/d1a-e4b-it)) | PyTorch | ✅ | ✅⁴ | ✅¹ | ✅¹ | ✅¹ | |
 | D1A-E4B-it ([mlx-q8](https://huggingface.co/JohnP1/d1a-e4b-it-mlx-q8), [mlx-q4](https://huggingface.co/JohnP1/d1a-e4b-it-mlx-q4)) | MLX, merged | ✅ | ❌³ | ✅ | ✅ | ✅ | 7.5 / 5.2 GB |
@@ -103,8 +103,9 @@ The QAT build trades 5.2 points on unfamiliar task types
 | D1A-E4B ([mlx-q8](https://huggingface.co/JohnP1/d1a-e4b-mlx-q8)) | MLX 8-bit | ✅ | ❌ | ✅ | ✅ | ✅ | 7.5 GB |
 | D1A-E4B ([coreml](https://huggingface.co/JohnP1/d1a-e4b-coreml)) | Core ML int8 | ✅² | ❌ | ❌ | ❌ | ❌ | 6.5 GB, preview |
 
-D1A-E4B-it QAT is D1A-E4B-it v0.6 retrained on Google's QAT int4 trunk, released by the owner's decision of 2026-10-27
-ahead of its scorecard; its gates, against v0.6 and against the v0.6 adapter on the same trunk, will be added here.
+D1A-E4B-it QAT is D1A-E4B-it v0.6 retrained on Google's QAT int4 trunk. Against v0.6 it is level overall (pooled −0.2
+points [−0.9, +0.5]): PR labels +1.6, PR severity +6.0 and routing +1.7 and +1.5, but the external typesafe suite −7.8. Against
+v0.6's adapter moved onto the same trunk it is +1.2 pooled, with no significant loss ([scorecard](docs/reports/2026-10-28-e4b-it-qat-scorecard.md)).
 
 ¹ Through the separate PyTorch media server (`python -m d1a.serving.media`), which loads the full model (about 10 GB for E2B).
 ² Text only, inputs up to 512 tokens.

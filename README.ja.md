@@ -107,12 +107,16 @@ QAT ビルドは、見慣れないタスク種別（transfer-v4）での 5.2 ポ
 
 | ビルド | 形式 | 意思決定 | チャット | 写真 | 音声 | 動画 | サイズ、備考 |
 |---|---|---|---|---|---|---|---|
+| **D1A-E4B-it QAT**（[mlx-q4](https://huggingface.co/JohnP1/d1a-e4b-it-qat-mlx-q4)） | MLX 4-bit、未マージ | ✅ | ✅ | ✅ | ✅ | ✅ | 5.3 GB、v0.6 と同等、typesafe −7.8 |
+| **D1A-E4B-it QAT**（[d1a-e4b-it-qat](https://huggingface.co/JohnP1/d1a-e4b-it-qat)） | PyTorch | ✅ | ✅⁴ | ✅¹ | ✅¹ | ✅¹ | Gemma 4 E4B-it と Google の QAT チェックポイントに対する 133 MB のアダプター |
 | D1A-E4B-it（[d1a-e4b-it](https://huggingface.co/JohnP1/d1a-e4b-it)） | PyTorch | ✅ | ✅⁴ | ✅¹ | ✅¹ | ✅¹ | |
 | D1A-E4B-it（[mlx-q8](https://huggingface.co/JohnP1/d1a-e4b-it-mlx-q8)、[mlx-q4](https://huggingface.co/JohnP1/d1a-e4b-it-mlx-q4)） | MLX、マージ済み | ✅ | ❌³ | ✅ | ✅ | ✅ | 7.5 / 5.2 GB |
 | D1A-E4B-it（[coreml-4bit](https://huggingface.co/JohnP1/d1a-e4b-it-coreml-4bit)） | Core ML 4-bit | ✅² | ❌ | ❌ | ❌ | ❌ | 4.6 GB、プレビュー |
 | D1A-E4B（[d1a-e4b](https://huggingface.co/JohnP1/d1a-e4b)） | PyTorch | ✅ | ❌ | ✅¹ | ✅¹ | ✅¹ | サーバーのデフォルト |
 | D1A-E4B（[mlx-q8](https://huggingface.co/JohnP1/d1a-e4b-mlx-q8)） | MLX 8-bit | ✅ | ❌ | ✅ | ✅ | ✅ | 7.5 GB |
 | D1A-E4B（[coreml](https://huggingface.co/JohnP1/d1a-e4b-coreml)） | Core ML int8 | ✅² | ❌ | ❌ | ❌ | ❌ | 6.5 GB、プレビュー |
+
+D1A-E4B-it QAT は、Google の QAT int4 トランク上で D1A-E4B-it v0.6 を再学習したものです。v0.6 と比べて全体では同等（プールで −0.2 ポイント [−0.9, +0.5]）で、PR ラベル +1.6、PR の重大度 +6.0、ルーティング +1.7 と +1.5 ですが、外部の typesafe スイートは −7.8 です。同じトランクに移した v0.6 のアダプターと比べると、プールで +1.2、有意な低下はありません（[スコアカード](docs/reports/2026-10-28-e4b-it-qat-scorecard.md)）。
 
 ¹ 別プロセスの PyTorch メディアサーバー（`python -m d1a.serving.media`）経由です。完全なモデル（E2B で約 10 GB）を読み込みます。
 ² テキストのみ、入力は 512 トークンまで。
