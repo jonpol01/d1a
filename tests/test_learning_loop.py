@@ -170,8 +170,8 @@ def test_the_gate_runs_again_only_once_the_outcomes_grew_by_the_growth_share():
 
 def test_a_changed_hold_reaches_the_served_calibrator_without_a_promotion(tmp_path, monkeypatch):
     """The served calibrator carries serve_choice and hold, and was written only when a question was promoted, so a hold set
-    on the Learning page did nothing until the next promotion, possibly never. The tick writes the change at once and
-    leaves the fitted parameters alone."""
+    with `config set` did nothing until the next promotion, possibly never. The tick writes the change at once and leaves
+    the fitted parameters alone; with promotion.auto off it writes nothing, as the setting says."""
     from d1a.learning.feedback import OutcomeCalibrator
     log = FeedbackLog(tmp_path / "log.jsonl"); decide(log, "PR 0", NEW, "o/r#0")
     path = tmp_path / "learning.json"; monkeypatch.setenv(S.ENV, str(path)); S.init(path)
@@ -183,6 +183,8 @@ def test_a_changed_hold_reaches_the_served_calibrator_without_a_promotion(tmp_pa
     served = OutcomeCalibrator.load(cal)
     assert served.serve == line["serve_applied"] and served.params == {"type": {"s": 0.8, "n": 100}}
     assert "serve_applied" not in loop.tick(log.path, cal, run=NEW)   # already in place: nothing written
+    S.set_values(path, {"promotion.auto": False, "promotion.hold": {}})
+    assert "serve_applied" not in loop.tick(log.path, cal, run=NEW) and OutcomeCalibrator.load(cal).serve == {"choice": True, "hold": {"type": ["docs"]}}
 
 
 def test_tick_replays_on_a_model_change_reports_power_and_with_auto_off_never_writes(tmp_path, server, monkeypatch):

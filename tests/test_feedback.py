@@ -524,3 +524,5 @@ def test_the_gate_promotes_only_on_enough_held_out_groups():
     assert not few["q@1.5"]["promote"] and "18 held-out groups, fewer than 30" in few["q@1.5"]["reasons"][-1]
     assert promote(sure[:60], form="vector", split_by="time", min_held_out=10)[1]["q@1.5"]["promote"]
     assert promote(sure, form="vector", split_by="time")[1]["q@1.5"]["promote"]
+    grouped = [{**d, "group": f"g{i // 3}"} for i, d in enumerate(sure[:90])]   # 30 groups of 3: 9 held out, 27 rows
+    assert "9 held-out groups, fewer than 20" in promote(grouped, form="vector", split_by="time", min_held_out=20)[1]["q@1.5"]["reasons"][-1]
