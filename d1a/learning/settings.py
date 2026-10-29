@@ -25,9 +25,9 @@ DEFAULTS = {
     "version": VERSION,
     "outcomes": {"enabled": True, "sources": None},           # sources: the outcome sources that count (None: all of them)
     "promotion": {"auto": True, "questions": None,             # questions: the ones that learn (None: all of them)
-                  "min_outcomes": 20, "held_out": 0.3, "ci_level": 0.95, "tolerance": 0.01, "bootstrap": 2000,
+                  "min_outcomes": 20, "held_out": 0.3, "min_held_out": 30, "ci_level": 0.95, "tolerance": 0.01, "bootstrap": 2000,
                   "form": "temperature", "split": "random", "serve_choice": False, "hold": {}},   # see d1a.learning.feedback.OutcomeCalibrator
-    "schedule": {"daily_at": "04:00", "after_new_outcomes": 10},   # local time HH:MM, or None; >= N new outcomes, or None
+    "schedule": {"daily_at": "04:00", "after_new_outcomes": 10, "growth": 0.5},   # local time HH:MM, or None; >= N new outcomes, or None; see loop.due
     "replay": {"enabled": True, "on_model_change": True, "exclude_no_pr_id": True, "per_tick_cap": 50, "pause_s": 1.0},
     "reports": {"webhook_file": None, "notify": ["promotion", "min_reached"]},
     "flags": {},   # learned decision thresholds (#237), by name; none by default, so a no-op. Read only by d1a.learning.flags
@@ -65,6 +65,7 @@ RULES = {   # key -> (check, what it must be)
     "promotion.questions": (_str_list, "null (every question) or a non-empty list of distinct question ids"),
     "promotion.min_outcomes": (lambda v: _is_int(v) and v >= 10, "an integer >= 10"),
     "promotion.held_out": (lambda v: _is_num(v) and 0.1 <= v <= 0.5, "a number from 0.1 to 0.5"),
+    "promotion.min_held_out": (lambda v: _is_int(v) and v >= 10, "an integer >= 10 (held-out groups the gate needs before it may promote)"),
     "promotion.ci_level": (lambda v: _is_num(v) and any(abs(v - c) < 1e-9 for c in CI_LEVELS), "0.9, 0.95 or 0.99"),
     "promotion.tolerance": (lambda v: _is_num(v) and 0 <= v <= 0.1, "a number from 0 to 0.1"),
     "promotion.bootstrap": (lambda v: _is_int(v) and 200 <= v <= 20000, "an integer from 200 to 20000"),
@@ -75,6 +76,7 @@ RULES = {   # key -> (check, what it must be)
                        "{question: [options]}: the model's own choice is kept when it is one of these, e.g. {\"sev\": [\"P0\", \"P1\"]}"),
     "schedule.daily_at": (lambda v: v is None or (isinstance(v, str) and bool(HHMM.match(v))), "null or HH:MM in this machine's local time"),
     "schedule.after_new_outcomes": (lambda v: v is None or (_is_int(v) and v >= 1), "null or an integer >= 1"),
+    "schedule.growth": (lambda v: _is_num(v) and 0 <= v <= 4, "a number from 0 to 4 (0: every trigger runs the gate)"),
     "replay.enabled": (lambda v: isinstance(v, bool), "true or false"),
     "replay.on_model_change": (lambda v: isinstance(v, bool), "true or false"),
     "replay.exclude_no_pr_id": (lambda v: isinstance(v, bool), "true or false (true: a decision with no pull-request id is never replayed)"),

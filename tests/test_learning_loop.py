@@ -156,6 +156,37 @@ def test_the_gate_triggers_after_n_new_outcomes_or_at_the_daily_time():
     assert loop.due(daily, {"last_gate": at(4, 1)}, 0, at(23, 0)) is None
 
 
+def test_the_gate_runs_again_only_once_the_outcomes_grew_by_the_growth_share():
+    """#364: every gate run can promote, so runs every 10 outcomes on a slowly growing log promote noise in about half of
+    the replays by 1,000 outcomes. With growth 0.5, a run after one at 200 outcomes waits for 300, whichever trigger fires."""
+    st = S.validate({"schedule": {"daily_at": "04:00", "after_new_outcomes": 10}})
+    at = lambda h, m: time.mktime(time.strptime(f"2026-10-11 {h:02d}:{m:02d}", "%Y-%m-%d %H:%M"))
+    last = {"outcomes_at_last_gate": 200, "last_gate": at(3, 0)}
+    assert loop.due(st, last, 299, at(4, 1)) is None   # 99 new and past the daily time: not grown by half
+    assert "100 new outcomes" in loop.due(st, last, 300, at(3, 30))
+    every = S.validate({"schedule": {"daily_at": None, "after_new_outcomes": 10, "growth": 0}})
+    assert "10 new outcomes" in loop.due(every, last, 210, at(3, 30))
+
+
+def test_a_changed_hold_reaches_the_served_calibrator_without_a_promotion(tmp_path, monkeypatch):
+    """The served calibrator carries serve_choice and hold, and was written only when a question was promoted, so a hold set
+    with `config set` did nothing until the next promotion, possibly never. The tick writes the change at once and leaves
+    the fitted parameters alone; with promotion.auto off it writes nothing, as the setting says."""
+    from d1a.learning.feedback import OutcomeCalibrator
+    log = FeedbackLog(tmp_path / "log.jsonl"); decide(log, "PR 0", NEW, "o/r#0")
+    path = tmp_path / "learning.json"; monkeypatch.setenv(S.ENV, str(path)); S.init(path)
+    S.set_values(path, {"schedule.daily_at": None, "schedule.after_new_outcomes": None, "promotion.serve_choice": True,
+                        "promotion.hold": {"type": ["docs"]}})
+    cal = tmp_path / "calibrator.json"; OutcomeCalibrator({"type": {"s": 0.8, "n": 100}}).save(cal)
+    line = loop.tick(log.path, cal, run=NEW)
+    assert "gate" not in line and line["serve_applied"] == {"choice": True, "hold": {"type": ["docs"]}}
+    served = OutcomeCalibrator.load(cal)
+    assert served.serve == line["serve_applied"] and served.params == {"type": {"s": 0.8, "n": 100}}
+    assert "serve_applied" not in loop.tick(log.path, cal, run=NEW)   # already in place: nothing written
+    S.set_values(path, {"promotion.auto": False, "promotion.hold": {}})
+    assert "serve_applied" not in loop.tick(log.path, cal, run=NEW) and OutcomeCalibrator.load(cal).serve == {"choice": True, "hold": {"type": ["docs"]}}
+
+
 def test_tick_replays_on_a_model_change_reports_power_and_with_auto_off_never_writes(tmp_path, server, monkeypatch):
     log, fake = server
     path = tmp_path / "learning.json"; monkeypatch.setenv(S.ENV, str(path)); S.init(path)

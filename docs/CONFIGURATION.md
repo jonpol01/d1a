@@ -175,14 +175,16 @@ The settings file (`D1A_LEARNING`; `config show` prints it). Unset, or a key lef
 | `promotion.questions` | `null` (all) | a list of question ids | The questions that learn. |
 | `promotion.min_outcomes` | `20` | ≥ 10 | Fit outcomes a question needs before it is fitted at all. |
 | `promotion.held_out` | `0.3` | 0.1 to 0.5 | The share of groups the gate holds out. |
+| `promotion.min_held_out` | `30` | ≥ 10 | Held-out groups the gate needs before it may promote. With fewer, a candidate fitted on a few dozen outcomes passes the bootstrap by chance far more often than its interval says (#364). |
 | `promotion.ci_level` | `0.95` | 0.9, 0.95, 0.99 | The gate's bootstrap interval. |
 | `promotion.tolerance`, `promotion.bootstrap` | `0.01`, `2000` | 0 to 0.1; 200 to 20,000 | Frozen-suite tolerance; bootstrap resamples. |
 | `promotion.form` | `"temperature"` | `"temperature"`, `"vector"` | How a choice question is recalibrated: one inverse temperature, or that plus a per-option bias, which also corrects a label mix the served traffic does not share with training. |
 | `promotion.split` | `"random"` | `"random"`, `"time"` | How the gate holds out groups: by hash, or the newest ones (it then asks whether what older outcomes taught helps on newer ones, as a promoted calibrator is used). |
 | `promotion.serve_choice` | `false` | true, false | `false`: a recalibrated choice keeps the model's chosen option and only its probabilities move. `true`: the recalibrated top option is served. |
 | `promotion.hold` | `{}` | `{question: [options]}` | With `serve_choice`, the model's own choice is kept when it is one of these, e.g. `{"sev": ["P0", "P1"]}`, so a correction toward common classes never demotes a rare, costly one. |
-| `schedule.daily_at` | `"04:00"` | `HH:MM` local time, or `null` | `tick` runs the gate once a day after this time. |
-| `schedule.after_new_outcomes` | `10` | ≥ 1, or `null` | `tick` also runs the gate after this many new outcomes. |
+| `schedule.daily_at` | `"04:00"` | `HH:MM` local time, or `null` | `tick` runs the gate once a day after this time, once `schedule.growth` allows it. |
+| `schedule.after_new_outcomes` | `10` | ≥ 1, or `null` | `tick` also runs the gate after this many new outcomes, once `schedule.growth` allows it. |
+| `schedule.growth` | `0.5` | 0 to 4 | Either trigger runs the gate only once the outcomes have grown by this share since its last run: after a run at 200, the next waits for 300. Every run can promote, so a run every 10 outcomes promoted noise in 36.5% and 56.5% of 200 null replays by 1,000 outcomes; at 0.5, with `promotion.min_held_out` 30, in 7% and 9.5% (#364). A changed `promotion` setting (form, split, questions) also waits for that growth; run `promote` to apply it sooner, or set `0`: every trigger runs the gate. |
 | `replay.enabled`, `replay.on_model_change` | `true`, `true` | true, false | Replay earlier outcomes when the served model changes. |
 | `replay.exclude_no_pr_id` | `true` | true, false | Skip decisions with no PR id (they cannot be checked against training). |
 | `replay.per_tick_cap`, `replay.pause_s` | `50`, `1.0` | 1 to 500; 0 to 60 s | Replays per tick, and the pause between them. |
