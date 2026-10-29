@@ -256,7 +256,8 @@ def _tick(log_path, calibrator_path, server, run, trained_dir, settings_path, ap
         status["reports"] = (status.get("reports", []) + [line])[-100:]; save_status(log_path, status); return line
     if status.get("run") != served:   # a new model: its own counts, schedule and first-reach events start over
         line["model_change"] = {"from": status.get("run"), "to": served}
-        status.update({"run": served, "outcomes_at_last_gate": 0, "last_gate": None, "reached_min": {}, "replay_complete": False})
+        status.update({"run": served, "outcomes_at_last_gate": 0, "last_gate": None, "reached_min": {}, "replay_complete": False,
+                       "replay_reported": False})
     log = FeedbackLog(log_path)
     first_replay = False
     r = settings["replay"]

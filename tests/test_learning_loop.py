@@ -207,6 +207,22 @@ def test_tick_replays_on_a_model_change_reports_power_and_with_auto_off_never_wr
     assert "gate" not in again and "replay" not in again   # nothing new: no replay, no gate
 
 
+def test_every_model_change_gets_its_own_first_replay_gate_run(tmp_path, server, monkeypatch):
+    """#366: the first replay after a model change runs the gate once. The flag that says it ran was never reset at the next
+    change, so only the first model the log served ever got that run."""
+    log, fake = server
+    path = tmp_path / "learning.json"; monkeypatch.setenv(S.ENV, str(path)); S.init(path)
+    S.set_values(path, {"promotion.auto": False, "promotion.min_outcomes": 10, "schedule.daily_at": None,
+                        "schedule.after_new_outcomes": None, "replay.pause_s": 0})   # no trigger: only a first replay gates
+    for i in range(40): decide(log, f"owner PR {i}", OLD, f"jonpol01/d1a#{i}", label="bug" if i % 2 else "docs", p=0.9)
+    trained = tmp_path / "trained"; trained.mkdir(); cal = tmp_path / "calibrator.json"
+    for run in (NEW, "JohnP1/d1a-e4b-mlx-q8@v0.7"):
+        fake.run = run; manifest(tmp_path, run).rename(loop.manifest_path(trained, run))
+        line = loop.tick(log.path, cal, server="http://s", trained_dir=trained)
+        assert line["model_change"]["to"] == run and line["replay"]["replayed"] == 40
+        assert line["gate"]["reason"] == "the first replay after a model change"
+
+
 def test_the_promote_command_takes_its_defaults_from_the_settings_file(tmp_path, capsys, monkeypatch):
     log = FeedbackLog(tmp_path / "log.jsonl")
     for i in range(30): decide(log, f"PR {i}", NEW, f"o/r#{i}", label="bug" if i % 3 else "docs", p=0.95)
