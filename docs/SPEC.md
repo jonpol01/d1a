@@ -20,6 +20,9 @@ A question is one of:
 | `choice` | `instructions`, `criteria`: key → description (1 to 255) | one per criteria key, in the object's order | the criteria keys |
 | `score` | `instructions`, `criteria`: a list of levels (1 to 255) | one per level, in order | `"0"`, `"1"`, ... |
 
+A field that a request or a question does not define (a misspelt `instr`, say) is refused with a 422 naming it, never
+dropped (#340).
+
 Any question may also carry D1A's optional `ask_if` (#36; docs/USAGE.md). It is never model input: the question is
 answered in a later pass, only when the answers it names meet their conditions, and is otherwise reported as skipped.
 

@@ -768,8 +768,8 @@ def usable(device):
 
 
 SELF_CHECK = SystemOneRequest(model="d1a-latest", state="Startup self-check: the order shipped late.",
-                              questions={"c": {"type": "choice", "instr": "Was the order late?", "criteria": {"yes": "Yes", "no": "No"}},
-                                         "n": {"type": "noul", "instr": "Did the order ship late?"}})
+                              questions={"c": {"type": "choice", "instructions": "Was the order late?", "criteria": {"yes": "Yes", "no": "No"}},
+                                         "n": {"type": "noul", "instructions": "Did the order ship late?"}})
 
 
 def self_check(probs):
