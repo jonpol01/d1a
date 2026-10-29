@@ -6,7 +6,7 @@ import pytest
 from d1a.training.data import materialize
 from d1a.learning.feedback import FeedbackLog, OutcomeCalibrator, choice_log_loss, choice_pairs, gate, gate_choice, log_loss, main, pairs, promote, records, split, split_time
 
-Q = {"resolved": {"type": "noul", "instr": "Does the patch fix the issue?", "criteria": {"true": "fixes it", "false": "does not"}}}
+Q = {"resolved": {"type": "noul", "instructions": "Does the patch fix the issue?", "criteria": {"true": "fixes it", "false": "does not"}}}
 
 
 def test_log_joins_outcomes_exports_trainable_records_and_recalibrates_a_shifted_base_rate(tmp_path):

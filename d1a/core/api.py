@@ -16,7 +16,7 @@ models' contract: a change to them changes every answer.
 import json
 import re
 from datetime import datetime
-from typing import Any, Literal, Union
+from typing import Annotated, Any, Literal, Union
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -39,6 +39,7 @@ AskIf = dict[str, Union[bool, list[str], ScoreRange]] | None
 
 
 class Noul(BaseModel):
+    model_config = {"extra": "forbid"}   # refused, not dropped: a misspelt "instr" was answered as an empty question (#340)
     type: Literal["noul"]
     instructions: JSONContent = None
     criteria: dict[str, JSONContent] | None = None   # optional descriptions of "true" and "false"
@@ -53,6 +54,7 @@ class Noul(BaseModel):
 
 
 class Choice(BaseModel):
+    model_config = {"extra": "forbid"}
     type: Literal["choice"]
     instructions: JSONContent = None
     criteria: dict[str, JSONContent]                  # option key -> description (None: the key alone)
@@ -66,17 +68,19 @@ class Choice(BaseModel):
 
 
 class Score(BaseModel):
+    model_config = {"extra": "forbid"}
     type: Literal["score"]
     instructions: JSONContent = None
     criteria: list[JSONContent] = Field(min_length=1, max_length=MAX_OPTIONS)   # the levels, lowest first
     ask_if: AskIf = None
 
 
-Question = Union[Noul, Choice, Score]
+Question = Annotated[Union[Noul, Choice, Score], Field(discriminator="type")]   # one error, naming the field, not one per type
 USE_CASE_MAX_LENGTH = 64   # SystemOneRequest.use_case, and a name in a checkpoint's use_case_temperatures
 
 
 class SystemOneRequest(BaseModel):
+    model_config = {"extra": "forbid"}
     state: JSONContent
     model: str = "d1a-latest"
     questions: dict[str, Question] = Field(min_length=1)

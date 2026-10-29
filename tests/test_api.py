@@ -199,6 +199,15 @@ def test_a_malformed_request_is_refused_with_422(api, questions):
     ask(api, "Anything.", questions, status=422)
 
 
+def test_an_unknown_question_or_request_field_is_refused_with_422_naming_it(api):
+    """#340: a misspelt "instr" validated and was dropped, so the question was answered with no text at all (the README's
+    first example did it, and so did the server's own self-check)."""
+    body = ask(api, "Anything.", {"q": {"type": "choice", "instr": "Which team?", "criteria": {"a": None, "b": None}}}, status=422)
+    assert [e["loc"][-1] for e in body["detail"]] == ["instr"]   # one error, naming the field, not one per question type
+    r = api.post("/v1/systemone", json={"state": "Anything.", "questions": {"q": {"type": "noul", "instructions": "Is it?"}}, "usecase": "routing"})
+    assert r.status_code == 422 and [e["loc"][-1] for e in r.json()["detail"]] == ["usecase"]
+
+
 def test_noul_criteria_with_keys_other_than_true_and_false_are_refused_not_dropped(api):
     """#265: "yes"/"no" criteria used to validate and be ignored, so the question was answered without them."""
     body = ask(api, "Anything.", {"q": {"type": "noul", "instructions": "Is it vague?", "criteria": {"yes": "says nothing", "no": "names a thing"}}}, status=422)

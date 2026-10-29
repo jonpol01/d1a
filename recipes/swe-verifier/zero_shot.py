@@ -31,7 +31,7 @@ REVISION = "68195a1450865274106246d0d0296a1d6807b88e"   # the dataset commit eve
 ERROR = re.compile(r"Traceback \(most recent call last\)|introduced new syntax error|Error:|error:|FAILED|failed", re.MULTILINE)
 SUCCESS = re.compile(r"completed successfully|All tests passed|\b\d+ passed\b(?![^\n]*failed)|^OK$", re.MULTILINE)
 QUESTION = {"resolved": {"type": "noul",
-                         "instr": "A coding agent produced this patch for the issue. Does the patch correctly fix the issue, so that the repository's tests for it would pass?",
+                         "instructions": "A coding agent produced this patch for the issue. Does the patch correctly fix the issue, so that the repository's tests for it would pass?",
                          "criteria": {"true": "The patch fixes the issue as described", "false": "The patch is wrong, incomplete, or fixes something else"}}}
 
 
@@ -72,7 +72,7 @@ def split_of(repo):
 
 
 ANYTIME = {"resolved": {"type": "noul",
-                        "instr": "A coding agent is part-way through this issue. Will its run end with a patch that correctly fixes the issue, so that the repository's tests for it pass?",
+                        "instructions": "A coding agent is part-way through this issue. Will its run end with a patch that correctly fixes the issue, so that the repository's tests for it pass?",
                         "criteria": {"true": "The run is on track to a correct fix", "false": "The run is stuck, off track, or heading to a wrong or no fix"}}}
 
 

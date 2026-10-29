@@ -40,7 +40,7 @@ def main():
         repo = iid.rsplit("-", 1)[0]
         for r in runs[: a.per_issue]:
             out[split_of(repo)].append({"state": state_of(r, a.issue_chars, a.patch_chars, a.tail_chars),
-                                        "questions": {"resolved": {"type": "noul", "instructions": q["instr"], "criteria": q["criteria"],
+                                        "questions": {"resolved": {"type": "noul", "instructions": q["instructions"], "criteria": q["criteria"],
                                                                    "label": bool(r["target"]), "src": "swe-verifier"}},
                                         "meta": {"instance_id": iid, "repo": repo}})
     rng.shuffle(out["train"]); out["train"] = out["train"][: a.max_train]

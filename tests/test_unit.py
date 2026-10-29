@@ -54,8 +54,8 @@ def test_library_decide_matches_the_server(train_hybrid, tmp_path):
     from d1a.serving.serve import Server
     train_hybrid(tmp_path / "ck", "--lora", "4", "--max_steps", "2")
     m = d1a.D1A.load(str(tmp_path / "ck"), device="cpu")
-    questions = {"team": {"type": "choice", "instr": "which team", "criteria": {"billing": "billing", "shipping": "shipping"}},
-                 "angry": {"type": "noul", "instr": "is the customer angry"}}
+    questions = {"team": {"type": "choice", "instructions": "which team", "criteria": {"billing": "billing", "shipping": "shipping"}},
+                 "angry": {"type": "noul", "instructions": "is the customer angry"}}
     got = m.decide("the customer is charged twice", questions)
     server = Server(m.checkpoint, m.tok, m.model, "cpu")
     try: want = server.answer(SystemOneRequest(model="d1a-latest", state="the customer is charged twice", questions=questions))["answers"]
