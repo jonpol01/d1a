@@ -17,6 +17,7 @@ would look better calibrated than it is, and the gate would promote on that.
 """
 import hashlib
 import json
+import math
 import re
 import time
 import urllib.error
@@ -170,11 +171,13 @@ def save_status(log_path, status):
 
 def due(settings, status, outcomes_now, now):
     """Why the gate should run now (a reason string), or None: after_new_outcomes new outcomes since the last gate run, or
-    the daily time has passed since it (local time)."""
+    the daily time has passed since it (local time); either only once the outcomes have grown by schedule.growth (a share)
+    since that run. Each run can promote, so frequent runs on a slowly growing log add up to promoting noise (#364)."""
     sch = settings["schedule"]
-    last = status.get("last_gate")
-    if sch["after_new_outcomes"] and outcomes_now - status.get("outcomes_at_last_gate", 0) >= sch["after_new_outcomes"]:
-        return f"{outcomes_now - status.get('outcomes_at_last_gate', 0)} new outcomes (trigger: {sch['after_new_outcomes']})"
+    last, at_last = status.get("last_gate"), status.get("outcomes_at_last_gate", 0)
+    if outcomes_now - at_last < math.ceil(sch["growth"] * at_last): return None
+    if sch["after_new_outcomes"] and outcomes_now - at_last >= sch["after_new_outcomes"]:
+        return f"{outcomes_now - at_last} new outcomes (trigger: {sch['after_new_outcomes']})"
     if sch["daily_at"]:
         h, m = map(int, sch["daily_at"].split(":"))
         today = datetime.fromtimestamp(now).replace(hour=h, minute=m, second=0, microsecond=0)
@@ -278,7 +281,7 @@ def _tick(log_path, calibrator_path, server, run, trained_dir, settings_path, ap
     if reason:
         path = Path(calibrator_path); current = OutcomeCalibrator.load(path) if path.exists() else None
         cal, report = promote(resolved, current, p["held_out"], p["min_outcomes"], p["questions"], form=p["form"], split_by=p["split"], serve={"choice": p["serve_choice"], "hold": p["hold"]}, tolerance=p["tolerance"],
-                              n=p["bootstrap"], level=p["ci_level"])
+                              n=p["bootstrap"], level=p["ci_level"], min_held_out=p["min_held_out"])
         promoted = sorted(q for q, x in report.items() if x["promote"])
         wrote = False
         if p["auto"] and any(x["promote"] or x.get("dropped") for x in report.values()):   # whole file, renamed into place
@@ -292,6 +295,13 @@ def _tick(log_path, calibrator_path, server, run, trained_dir, settings_path, ap
             line["notified"] = notify(settings, f"D1A {served}: promoted {', '.join(promoted)} " + ("(written)" if wrote else "(auto-promotion is off: not written)") + f" — {line['gate']['power']}")
         elif "every_gate" in notes:
             line["notified"] = notify(settings, f"D1A {served} gate ({reason}): {line['gate']['power']}")
+    sync = Path(calibrator_path)
+    if p["auto"] and sync.exists():   # a changed serve_choice or hold reaches the server now, not at the next promotion
+        cur = OutcomeCalibrator.load(sync); want = OutcomeCalibrator(serve={"choice": p["serve_choice"], "hold": p["hold"]}).serve
+        if not want["choice"]: want = {"choice": False, "hold": {}}   # hold only acts with serve_choice, and save() keeps neither then
+        if cur.serve != want:
+            cur.serve = want; tmp = sync.with_name(sync.name + ".tmp"); cur.save(tmp); tmp.replace(sync)
+            line["serve_applied"] = want
     newly = [q for q, v in per_q.items() if v["needs"] == 0 and q not in status.get("reached_min", {})]
     if newly:
         status.setdefault("reached_min", {}).update({q: now for q in newly})

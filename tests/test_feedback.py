@@ -512,3 +512,15 @@ def test_x_d1a_audit_on_adds_the_audit_block_and_names_the_calibrated_questions(
     os.utime(cal_path, (os.path.getmtime(cal_path) + 5,) * 2)
     with TestClient(serve.app) as client:
         assert client.post("/v1/systemone", json=req, headers={"x-d1a-audit": "on"}).json()["audit"]["outcome_calibrator"] == []
+
+
+def test_the_gate_promotes_only_on_enough_held_out_groups():
+    """#364: a candidate fitted on a few dozen outcomes and judged on a dozen held-out groups passes the bootstrap by chance
+    far more often than its 95% level says, so the gate needs min_held_out groups (30 by default) before it may promote,
+    even a gain this plain."""
+    sure = [{"id": f"d{i}", "ts": float(i), "group": f"g{i}", "temperature": 1.5, "labels": {"q": "b" if i % 5 else "a"},
+             "answers": {"q": {"type": "choice", "choice": "a", "probabilities": {"a": 0.9, "b": 0.1}}}} for i in range(100)]
+    _, few = promote(sure[:60], form="vector", split_by="time")
+    assert not few["q@1.5"]["promote"] and "18 held-out groups, fewer than 30" in few["q@1.5"]["reasons"][-1]
+    assert promote(sure[:60], form="vector", split_by="time", min_held_out=10)[1]["q@1.5"]["promote"]
+    assert promote(sure, form="vector", split_by="time")[1]["q@1.5"]["promote"]

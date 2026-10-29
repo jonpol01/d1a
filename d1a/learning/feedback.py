@@ -407,12 +407,14 @@ def split_time(resolved, share=0.3):
     return [d for d in resolved if _group(d) not in newer], [d for d in resolved if _group(d) in newer]
 
 
-def promote(resolved, current=None, share=0.3, min_outcomes=20, questions=None, form="temperature", split_by="random", serve=None, **gate_kw):
+def promote(resolved, current=None, share=0.3, min_outcomes=20, questions=None, form="temperature", split_by="random", serve=None,
+            min_held_out=30, **gate_kw):
     """The promotion gate run on a live log, separately for each temperature the decisions were read at (fitted across
     two, a calibrator would correct answers read at one by the errors of answers read at the other). Each decision's group
     (its outcome's meta["group"], else the decision itself) goes to the fit or the held-out side by held_out(); a
     calibrator fitted on the fit side replaces the current one for a question only if it passes gate()/gate_choice() on
-    the held-out side against the current calibrator at that temperature (or the raw answers).
+    the held-out side against the current calibrator at that temperature (or the raw answers), judged on at least
+    `min_held_out` held-out groups.
     -> (the calibrator to serve, {question: report}, a question at a logged temperature T reported as "question@T");
     questions that fail keep the current parameters."""
     current = current or OutcomeCalibrator()
@@ -425,14 +427,14 @@ def promote(resolved, current=None, share=0.3, min_outcomes=20, questions=None, 
     report = {}
     for t, rows in sorted(_by_temperature(resolved).items(), key=lambda kv: (kv[0] is not None, kv[0] or 0)):
         now = current if t is None else current.temperatures.get(t, OutcomeCalibrator())
-        params, rep = _promote(rows, OutcomeCalibrator(now.params), share, min_outcomes, form, split_by, **gate_kw)
+        params, rep = _promote(rows, OutcomeCalibrator(now.params), share, min_outcomes, form, split_by, min_held_out, **gate_kw)
         if t is None: out.params = params
         else: out.temperatures[t] = OutcomeCalibrator(params)
         report.update({qid if t is None else f"{qid}@{t!r}": r for qid, r in rep.items()})
     return out, report
 
 
-def _promote(resolved, current, share, min_outcomes, form="temperature", split_by="random", **gate_kw):
+def _promote(resolved, current, share, min_outcomes, form="temperature", split_by="random", min_held_out=30, **gate_kw):
     """promote() on decisions all read at one temperature. -> (the parameters to serve, {question: report})."""
     fit, test = (split_time if split_by == "time" else split)(resolved, share)
     cand = OutcomeCalibrator()._fit(fit, min_outcomes, form=form)
@@ -451,6 +453,8 @@ def _promote(resolved, current, share, min_outcomes, form="temperature", split_b
             rows = [d for d in test if _p_true(d["answers"].get(qid)) is not None and qid in d["labels"]]
             y = [bool(d["labels"][qid]) for d in rows]; p = [_p_true(d["answers"][qid]) for d in rows]
             g = gate(y, [cand.p(qid, x) for x in p], [current.p(qid, x) for x in p], [_group(d) for d in rows], **gate_kw) if rows else None
+        if g and g["groups"] < min_held_out:   # a candidate overfit on a small fit side passes a bootstrap over a few groups by chance (#364)
+            g = {**g, "promote": False, "reasons": g["reasons"] + [f"{g['groups']} held-out groups, fewer than {min_held_out}: too few to judge"]}
         ok = bool(g and g["promote"])
         if ok: out.params[qid] = params
         replayed = sum(1 for d in rows if d.get("replay_of"))
@@ -557,7 +561,8 @@ def main(argv=None):
         path = Path(a.calibrator); current = OutcomeCalibrator.load(path) if path.exists() else None
         cal, report = promote(res, current, p["held_out"] if a.held_out is None else a.held_out,
                               p["min_outcomes"] if a.min_outcomes is None else a.min_outcomes, p["questions"],
-                              form=p["form"], split_by=p["split"], serve={"choice": p["serve_choice"], "hold": p["hold"]}, tolerance=p["tolerance"], n=p["bootstrap"], level=p["ci_level"])
+                              form=p["form"], split_by=p["split"], serve={"choice": p["serve_choice"], "hold": p["hold"]}, min_held_out=p["min_held_out"],
+                              tolerance=p["tolerance"], n=p["bootstrap"], level=p["ci_level"])
         if not p["auto"]: report = {q: {**r, "not_written": "promotion.auto is false"} for q, r in report.items()}
         if p["auto"] and any(r["promote"] or r.get("dropped") for r in report.values()):   # written whole and renamed into place: the server never reads half a file
             tmp = path.with_name(path.name + ".tmp"); cal.save(tmp); os.replace(tmp, path)
