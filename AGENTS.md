@@ -84,7 +84,8 @@ stripped off, and new features come with their tests.
   - for a change to the model, loading or serving code, and before a playground pin move: **`scripts/quality_gate.py`**
     (required; its table and PASS line go in the PR). It runs base and head on real weights, interleaved: every demo
     example (`--playground <d1a-playground checkout>`) and the labeler replay (`runs/labeler-replay`, private, never
-    committed), with flips, max |dp| and latency against a base/base floor, plus frozen suites with `--suites`. A change
+    committed), with flips, max |dp| and latency against a base/base floor (with `--head-run`, base against a byte copy of
+    base: a new checkpoint is a second set of files, #371), plus frozen suites with `--suites`. A change
     to how a request field is served also runs with the field sent: `--use-case routing` for the use-case temperature
     path (the routing requests carry `"use_case"`, both servers get the same requests). A decode rule (`rules` in the
     `D1A_LEARNING` file) runs with `--head-learning <file> --labeler-use-case pr-labeler --expect-flips <question>`:

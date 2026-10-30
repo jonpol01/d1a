@@ -3,7 +3,8 @@
 Two d1a.serving.serve instances, one per version, answer the same requests: every demo example (regenerated from a
 d1a-playground checkout, or read from a file) and the labeler replay states (private PR text: kept under runs/, never
 committed). Each request goes to both, alternating which goes first. A third run, base against base, measures the
-noise floor of that setup. --suites also scores frozen suites with d1a.eval.benchmark from each version.
+noise floor of that setup; with --head-run (a new checkpoint, so two different sets of files) the floor's second server
+loads a byte copy of base, because serving two different files is itself slower than serving one (#371). --suites also scores frozen suites with d1a.eval.benchmark from each version.
 
 FAIL on any changed choice, any probability moving more than --tol, any request one side answers and the other does
 not, head's latency above the floor (its paired ratio's 95% interval entirely above the floor's), or a suite whose
@@ -293,6 +294,22 @@ def module(path, name):
     return new if (Path(path) / (new.replace(".", "/") + ".py")).exists() else f"d1a.{name}"
 
 
+def byte_copy(run, into):
+    """A full byte copy of the checkpoint `run` (a folder, or a Hub id `repo[@revision]` from the local cache) at `into`:
+    data copied, never an APFS clone, so the copy is a second set of files as a new checkpoint is (#371)."""
+    src = Path(run)
+    if not src.is_dir():
+        from huggingface_hub import snapshot_download
+        repo, _, rev = run.partition("@")
+        src = Path(snapshot_download(repo, revision=rev or None))
+    for f in sorted(src.rglob("*")):
+        if f.is_file():
+            dst = Path(into) / f.relative_to(src); dst.parent.mkdir(parents=True, exist_ok=True)
+            with open(f, "rb") as r, open(dst, "wb") as w:   # read through symlinks (the Hub cache's blobs), write new blocks
+                while chunk := r.read(64 << 20): w.write(chunk)
+    return str(into)
+
+
 @contextmanager
 def server(path, port, run, log, learning=None):
     """d1a.serving.serve from `path` (its own d1a first on sys.path). Load options from this shell (D1A_BACKEND, D1A_DTYPE, ...)
@@ -542,7 +559,13 @@ def main():
                                       capture_output=True, text=True, check=True).stdout
                 if pinned(mini) != head_commit:
                     raise SystemExit(f"--post-status: {target[0]}@{target[1][:8]} pins {pinned(mini)}, not the head {head_commit}")
-        floor = latency(run_pair(base_dir, base_dir, reqs, a.run, ports, out / "floor", sequential=a.sequential))
+        # a new checkpoint is a second set of files, and the floor must serve two as well (base vs a byte copy of base)
+        floor_run = byte_copy(a.run, out / "floor-copy") if a.head_run else None
+        try:
+            floor = latency(run_pair(base_dir, base_dir, reqs, a.run, ports, out / "floor", head_run=floor_run, sequential=a.sequential))
+        finally:
+            if floor_run: shutil.rmtree(floor_run, ignore_errors=True)
+        report["floor_setup"] = "base vs a byte copy of base" if floor_run else "base vs base (the same files)"
         records = run_pair(base_dir, head_dir, reqs, a.run, ports, out / "gate", head_run=a.head_run, head_learning=a.head_learning, sequential=a.sequential)
         changes = [] if a.head_run else None
         groups, failures = compare(records, a.tol, changes, expected)

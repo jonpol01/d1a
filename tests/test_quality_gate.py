@@ -290,3 +290,44 @@ def test_every_request_a_rule_applies_to_must_flip():
     assert gate.missed_flips(records, reqs, {"sev_p2": rule}, "r@v1") == [
         "labeler-replay | missed / sev: rule sev_p2 applies (p 0.2500 >= 0.2) but the head answered P3"]
     assert gate.missed_flips(records, reqs, {"sev_p2": rule}, "other@v1") == [] and gate.missed_flips(records, reqs, {}, "r@v1") == []
+
+
+def test_a_new_checkpoints_floor_serves_a_byte_copy_of_base(tmp_path, monkeypatch):
+    """#371: with --head-run the floor's second server loads a byte copy of --run (new files, the same bytes, as a new
+    checkpoint is), not the same files; without --head-run both sides keep serving the same files."""
+    import os, sys
+    from contextlib import contextmanager
+    import pytest
+    run = tmp_path / "run"; run.mkdir(); (run / "model.safetensors").write_bytes(b"weights" * 1000); (run / "sub").mkdir()
+    (run / "sub/config.json").write_text("{}", encoding="utf-8")
+    seen = []
+
+    class Floor(Exception):
+        pass
+
+    def run_pair(base_dir, head_dir, reqs, base_run, ports, logs, head_run=None, **kw):
+        if head_run:   # inspect the copy while it exists
+            copied = sorted(p.relative_to(head_run) for p in Path(head_run).rglob("*") if p.is_file())
+            same = all((Path(head_run) / f).read_bytes() == (run / f).read_bytes() for f in copied)
+            other = all(os.stat(Path(head_run) / f).st_ino != os.stat(run / f).st_ino for f in copied)
+            seen.append((base_run, head_run, copied, same, other))
+        else:
+            seen.append((base_run, None))
+        raise Floor
+
+    @contextmanager
+    def here(ref):
+        yield ROOT
+
+    demo = [{"demo": "routing", "name": "en: x", "path": "/v1/systemone", "body": {"state": "hi", "questions": {"q": {"type": "noul"}}}}]
+    (tmp_path / "demo.json").write_text(json.dumps(demo), encoding="utf-8")
+    monkeypatch.setattr(gate, "checkout", here); monkeypatch.setattr(gate, "unmet", lambda reqs: [])
+    monkeypatch.setattr(gate, "commit_of", lambda d: ("c" * 40, True)); monkeypatch.setattr(gate, "run_pair", run_pair)
+    for extra in (["--head-run", str(tmp_path / "new")], []):
+        monkeypatch.setattr(sys, "argv", ["quality_gate.py", "--base", "main", "--demo-requests", str(tmp_path / "demo.json"), "--run", str(run),
+                                          "--out", str(tmp_path / "out"), *extra])
+        with pytest.raises(Floor):
+            gate.main()
+    (base_run, head_run, copied, same, other), plain = seen
+    assert base_run == str(run) and head_run != str(run) and copied == [Path("model.safetensors"), Path("sub/config.json")] and same and other
+    assert plain == (str(run), None) and not (tmp_path / "out/floor-copy").exists()   # the copy is removed after the floor
