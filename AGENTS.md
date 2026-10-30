@@ -47,6 +47,9 @@ the question's `<decide>` token. README.md is the front page and docs/ is the us
   first, naming what would be missing. Every card and every report states what the build can and cannot do, at the top.
 - A file taken from Kev and changed keeps its "Modified from Kev" header and stays listed in docs/UPSTREAM.md.
 - Do not brand anything "Kev"; product, package, CLI and model names are D1A.
+- D1A's data never names an organisation, its products or people that are not public subjects: rewrite them in general
+  wording. Set `D1A_DATA_BLOCKLIST` (a private file, never committed) wherever data is pinned or trained on; `freeze`,
+  suite loading and `d1a.training.train` then refuse data that holds a listed name.
 - Every setting is documented in docs/CONFIGURATION.md: each `D1A_*` variable the package reads and each server flag.
   A new setting adds its entry there; tests/test_configuration_doc.py fails until it does.
 - A change adds a fragment, `changes/<PR number>-<slug>.md` (format in `changes/README.md`), instead of editing

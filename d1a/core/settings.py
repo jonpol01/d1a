@@ -51,6 +51,7 @@ SETTINGS = {s.name: s for s in (
     # self-learning, evaluation and agents
     Setting("D1A_LEARNING", None, "d1a.learning.settings"),
     Setting("D1A_REMOTE_API_KEY", "local", "d1a.eval.benchmark", secret=True),
+    Setting("D1A_DATA_BLOCKLIST", None, "d1a.eval.suites, d1a.training.train"),
     Setting("D1A_URL", "http://127.0.0.1:8009", "d1a.agents.mcp_server"),
     Setting("D1A_RUN", None, "d1a.agents.mcp_server"),
     Setting("D1A_GATE_CARD", None, "d1a.agents.claude_code_gate"),

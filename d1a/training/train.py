@@ -657,8 +657,8 @@ def main():
     if a.allow_missing_sources:   # in the run's log, not only in training_config.json
         left_out = ", ".join(sources["allowed_missing"]) if sources and sources["allowed_missing"] else "none"
         print(f"sources left out on purpose (--allow_missing_sources {a.allow_missing_sources}): {left_out}; reason: {a.reason}", flush=True)
-    if a.data:
-        suites.resolve(a.data, purpose="train")   # before the model loads: a refused or mismatched suite partition fails at once
+    if a.data:   # before the model loads: a refused or mismatched suite partition, or a mix holding a blocked name, fails at once
+        suites.refuse_blocked(suites.resolve(a.data, purpose="train"), a.data)
     dev = a.device or default_device()
     out_dir = Path(a.out)
     out_dir.mkdir(parents=True, exist_ok=bool(a.resume))
@@ -675,11 +675,12 @@ def main():
     tok = load_tokenizer(a.base, revision=revision)
     model, meta, init_source = build_model(a, dev, tok, revision, holdout)
     reqs = training_requests(a, tok, manifest, holdout)
+    blocked_entries = suites.refuse_blocked([json.dumps(r, ensure_ascii=False, default=str) for r in reqs], "the training records")   # replay included
     # the none-pair gate (none_pairs) and the ceiling's token shapes (plan_shapes)
     state_tokens = state_token_counts(tok, reqs) if a.none_pair_max_state is not None or a.pass_tokens_max else None
     suite_hash = digest(Path(a.suite) / "manifest.json") if manifest else None
     write_json(out_dir / "training_config.json", {"args": vars(a), "suite_sha256": suite_hash, "base_revision": revision, "init_source": init_source,
-                                                "holdout": holdout, "sources": sources})
+                                                "holdout": holdout, "sources": sources, "data_blocklist_entries": blocked_entries})
     print(f"{len(reqs)} training requests (holdout={holdout}), questions by type "
           f"{dict(Counter(q['qtype'] for r in reqs for q in materialize(r)['questions']))}")
 

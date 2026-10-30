@@ -12,6 +12,10 @@ only its hashes:
 partition is fetched at the pinned revision and checked against its sha256 and record count before use. d1a.training.train
 refuses an `eval` partition, so a held-out set cannot leak into training.
 
+D1A_DATA_BLOCKLIST names a private file of names this data must never hold (an organisation, its products, people). When
+it is set, freeze refuses to pin a partition that holds one, resolve refuses to load one, and d1a.training.train refuses to
+train on one; the names stay in that file, never in the repository.
+
     uv run python -m d1a.eval.suites freeze evals/d1a/pr-labels --dataset JohnP1/d1a-pr-labels \\
         --partition train=train.jsonl:train --partition development=development.jsonl:eval
     uv run python -m d1a.eval.suites verify evals/d1a/pr-labels      # fetch every partition and check it
@@ -19,7 +23,10 @@ refuses an `eval` partition, so a held-out set cannot leak into training.
 import argparse
 import hashlib
 import json
+import re
 from pathlib import Path
+
+from d1a.core.settings import get
 
 FORMAT, VERSION = "d1a-suite", 1
 ROLES = ("train", "eval")
@@ -51,6 +58,38 @@ def manifest(suite):
     return m
 
 
+def blocklist(env=None):
+    """(pattern, entries) for D1A_DATA_BLOCKLIST, or None when it is unset. One entry per line, `#` starts a comment, case
+    ignored. An entry's ASCII letter or digit ends match only at a word edge, so a short name does not hit inside a longer
+    word; other characters (CJK) match anywhere."""
+    path = get("D1A_DATA_BLOCKLIST", env)
+    if not path:
+        return None
+    entries = [e for e in (line.split("#", 1)[0].strip() for line in Path(path).read_text(encoding="utf-8").splitlines()) if e]
+    if not entries:
+        raise ValueError("D1A_DATA_BLOCKLIST names a file with no entries")
+    word = "[A-Za-z0-9_]"
+    parts = [(f"(?<!{word})" if re.match(word, e) else "") + re.escape(e) + (f"(?!{word})" if re.search(f"{word}$", e) else "")
+             for e in entries]
+    return re.compile("|".join(parts), re.IGNORECASE), len(entries)
+
+
+def refuse_blocked(lines, where, env=None):
+    """Raise when any of `lines` (a file's path, or strings) holds a D1A_DATA_BLOCKLIST entry. The message gives the line
+    numbers, never the entry, so a refusal does not repeat the name in a log. -> the number of entries checked (None: unset)."""
+    rule = blocklist(env)
+    if rule is None:
+        return None
+    pattern, n = rule
+    if isinstance(lines, (str, Path)):
+        lines = Path(lines).read_text(encoding="utf-8").splitlines()
+    hits = [i for i, line in enumerate(lines, 1) if pattern.search(line)]
+    if hits:
+        raise ValueError(f"{where}: {len(hits)} line(s) hold a D1A_DATA_BLOCKLIST entry (lines {hits[:5]}); "
+                         "rewrite them in general wording before this data is used")
+    return n
+
+
 def resolve(arg, purpose="eval"):
     """`<suite dir>:<partition>` -> the verified local file of that partition (fetched at the pinned revision into the
     Hugging Face cache); any other argument is returned unchanged. purpose "train" refuses a partition whose role is eval."""
@@ -66,6 +105,7 @@ def resolve(arg, purpose="eval"):
     path = hf_hub_download(m["dataset"], part["path"], repo_type="dataset", revision=m["revision"])
     if sha256(path) != part["sha256"] or records(path) != part["records"]:
         raise ValueError(f"{arg}: {m['dataset']}@{m['revision'][:10]}/{part['path']} does not match the manifest")
+    refuse_blocked(path, arg)
     return path
 
 
@@ -91,6 +131,7 @@ def freeze(suite, dataset, partitions, revision=None, provenance=None):
     for name, (path, role) in partitions.items():
         if role not in ROLES: raise ValueError(f"partition {name}: role must be one of {ROLES}, not {role!r}")
         local = hf_hub_download(dataset, path, repo_type="dataset", revision=revision)
+        refuse_blocked(local, f"{dataset}@{revision[:10]}/{path}")   # a pin never names what the data must not hold
         parts[name] = {"path": path, "role": role, "sha256": sha256(local), "records": records(local)}
     m = {"format": FORMAT, "version": VERSION, "dataset": dataset, "revision": revision, "partitions": parts}
     if provenance: m["provenance"] = provenance
