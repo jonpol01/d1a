@@ -80,6 +80,7 @@ What every published build can and cannot do. Limits and footnotes: [docs/MODELS
 | **D1A-E2B-it QAT** ([mlx-q4](https://huggingface.co/JohnP1/d1a-e2b-it-qat-mlx-q4)) | MLX 4-bit, unmerged | ✅ | ✅ | ✅ | ✅ | ✅ | 3.7 GB; **recommended E2B-it**; v0.7 |
 | **D1A-E2B-it QAT** ([d1a-e2b-it-qat](https://huggingface.co/JohnP1/d1a-e2b-it-qat)) | PyTorch | ✅ | ✅⁴ | ✅¹ | ✅¹ | ✅¹ | 126 MB adapter on Gemma 4 E2B-it + Google's QAT checkpoint; v0.6 |
 | **D1A-E2B-it QAT** ([coreml](https://huggingface.co/JohnP1/d1a-e2b-it-qat-coreml)) | Core ML (Google's QAT int4, exact) | ✅⁵ | ✅⁵ | ✅⁵ | ✅⁵ | ✅⁵ | 4.6 GB; verified on a Mac, not yet on an iPhone; v0.6 |
+| **D1A-E2B-it QAT** ([onnx](https://huggingface.co/JohnP1/d1a-e2b-it-qat-onnx)) | ONNX Runtime (Android / CPU), int4 | ✅ | ✅ | ❌ | ❌ | ❌ | 2.9 GB; v0.7; decisions and chat in one graph; text only |
 | D1A-E2B-it v0.6 ([d1a-e2b-it](https://huggingface.co/JohnP1/d1a-e2b-it)) | PyTorch | ✅ | ✅⁴ | ✅¹ | ✅¹ | ✅¹ | |
 | D1A-E2B-it v0.6 ([mlx-q8](https://huggingface.co/JohnP1/d1a-e2b-it-mlx-q8), [mlx-q4](https://huggingface.co/JohnP1/d1a-e2b-it-mlx-q4)) | MLX, merged | ✅ | ❌³ | ✅ | ✅ | ✅ | 4.8 / 3.6 GB |
 | D1A-E2B-it v0.6 ([coreml](https://huggingface.co/JohnP1/d1a-e2b-it-coreml), [coreml-4bit](https://huggingface.co/JohnP1/d1a-e2b-it-coreml-4bit)) | Core ML | ✅² | ❌ | ❌ | ❌ | ❌ | 3.8 / 2.9 GB, preview |

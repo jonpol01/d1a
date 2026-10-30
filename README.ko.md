@@ -88,6 +88,7 @@ curl -s localhost:8009/v1/systemone -H 'content-type: application/json' -d '{
 | **D1A-E2B-it QAT** ([mlx-q4](https://huggingface.co/JohnP1/d1a-e2b-it-qat-mlx-q4)) | MLX 4-bit, 병합 안 됨 | ✅ | ✅ | ✅ | ✅ | ✅ | 3.7 GB; **권장 E2B-it**; v0.7 |
 | **D1A-E2B-it QAT** ([d1a-e2b-it-qat](https://huggingface.co/JohnP1/d1a-e2b-it-qat)) | PyTorch | ✅ | ✅⁴ | ✅¹ | ✅¹ | ✅¹ | Gemma 4 E2B-it와 Google의 QAT 체크포인트 위에 얹는 126 MB 어댑터; v0.6 |
 | **D1A-E2B-it QAT** ([coreml](https://huggingface.co/JohnP1/d1a-e2b-it-qat-coreml)) | Core ML (Google의 QAT int4, 그대로 유지) | ✅⁵ | ✅⁵ | ✅⁵ | ✅⁵ | ✅⁵ | 4.6 GB; Mac에서 검증했으며 iPhone에서는 아직 검증하지 않음; v0.6 |
+| **D1A-E2B-it QAT** ([onnx](https://huggingface.co/JohnP1/d1a-e2b-it-qat-onnx)) | ONNX Runtime (Android / CPU), int4 | ✅ | ✅ | ❌ | ❌ | ❌ | 2.9 GB; v0.7; 의사결정과 채팅을 하나의 그래프로; 텍스트 전용 |
 | D1A-E2B-it v0.6 ([d1a-e2b-it](https://huggingface.co/JohnP1/d1a-e2b-it)) | PyTorch | ✅ | ✅⁴ | ✅¹ | ✅¹ | ✅¹ | |
 | D1A-E2B-it v0.6 ([mlx-q8](https://huggingface.co/JohnP1/d1a-e2b-it-mlx-q8), [mlx-q4](https://huggingface.co/JohnP1/d1a-e2b-it-mlx-q4)) | MLX, 병합됨 | ✅ | ❌³ | ✅ | ✅ | ✅ | 4.8 / 3.6 GB |
 | D1A-E2B-it v0.6 ([coreml](https://huggingface.co/JohnP1/d1a-e2b-it-coreml), [coreml-4bit](https://huggingface.co/JohnP1/d1a-e2b-it-coreml-4bit)) | Core ML | ✅² | ❌ | ❌ | ❌ | ❌ | 3.8 / 2.9 GB, 프리뷰 |
