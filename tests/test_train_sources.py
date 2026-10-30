@@ -29,7 +29,8 @@ def pr_labeler_mix(drop=()):
     """recipes/pr-labeler/mix.py's sidecar: every input's sha256 and counts by group (the routing partitions are one pool)."""
     refs = [s for s in train_sources() if ":" in s]
     inputs = {ref: "0" * 64 for ref in refs} | {f"{s}:train (manifest sha256)": "0" * 64 for s in SKILLS}
-    counts = {"english": 50, "extra": 20, "ja": 10, "routing": 0 if set(ROUTING) & set(drop) else 10, "skills": {s: 10 for s in SKILLS}}
+    counts = {"english": 50, "extra": 20, "ja": 10, "routing": 0 if set(ROUTING) & set(drop) else 10, "skills": {s: 10 for s in SKILLS},
+              "intents": {r.partition(":")[2]: 10 for r in refs if r.startswith("evals/d1a/intents:") and r not in drop}}
     return {"inputs": inputs, "params": {}, "counts": counts, "records": 120}, DV7
 
 

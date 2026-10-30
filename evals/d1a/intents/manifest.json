@@ -1,0 +1,39 @@
+{
+ "format": "d1a-suite",
+ "version": 1,
+ "dataset": "JohnP1/d1a-intents",
+ "revision": "7f6b23beffe47ebe8e66d11a110d138e6f3b7914",
+ "partitions": {
+  "massive-train": {
+   "path": "massive/train.jsonl",
+   "role": "train",
+   "sha256": "e78a20a650671bd470349ac8fa7abceb78b8ca97881d2728743d9cb2540b1ac0",
+   "records": 2100
+  },
+  "massive-in": {
+   "path": "massive/eval-in.jsonl",
+   "role": "eval",
+   "sha256": "ad32325c9aaf7aa8294d9f4edb1cb087b8d96f26b376d154ed7bf5b1fa1a965f",
+   "records": 600
+  },
+  "massive-heldout": {
+   "path": "massive/eval-heldout.jsonl",
+   "role": "eval",
+   "sha256": "ef806d96dda75e922be70e50f3ca22584d00fab8296192b81ca5f3a8f462d39f",
+   "records": 300
+  },
+  "acts-train": {
+   "path": "acts/train.jsonl",
+   "role": "train",
+   "sha256": "c9f1dc849dddcb1198d0d7b0c1f9b86c637fe894996c548f075eafc69a7d308f",
+   "records": 1248
+  },
+  "acts-eval": {
+   "path": "acts/eval.jsonl",
+   "role": "eval",
+   "sha256": "db75999ca10399f987206ca6a020f77be6de661fcb02b0f4e24ff0fb90b730ea",
+   "records": 498
+  }
+ },
+ "provenance": "MASSIVE 1.1 (Amazon, CC BY 4.0) intents in English and Japanese, and dialogue acts written for D1A; training rows screened against the evaluation sets"
+}

@@ -150,7 +150,7 @@ def test_better_on_the_pooled_lower_bound_even_with_live_losses(tmp_path, kit):
     card = judge(tmp_path, kit, {"v7_decision-v7": (10, 0), "hard-v1": (10, 0), "devtools-v1": (10, 0), "ja-jglue_development": (8, 0)},
                  live={"replay": (0, 6), "human": (0, 4)})
     p = card["pooled"]
-    assert (p["lines"], p["live"]) == (21, 2) and p["lo"] > 0
+    assert (p["lines"], p["live"]) == (24, 2) and p["lo"] > 0   # 24: every D1A evaluation partition, the intents suite (#372) included
     assert "live:replay" in card["losses"]
     assert card["verdict"].startswith("BETTER (pooled") and card["verdict"].endswith("human read of flips pending")
 

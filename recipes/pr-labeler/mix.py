@@ -21,7 +21,8 @@ sys.path.insert(0, str(ROOT_DIR))
 from d1a.eval.suite import digest, load_split  # noqa: E402
 from d1a.eval.suites import resolve, train_sources  # noqa: E402
 
-PR, JA, ROUTING = "evals/d1a/pr-labels", "evals/d1a/ja-jglue", "evals/d1a/routing"
+PR, JA, ROUTING, INTENTS = "evals/d1a/pr-labels", "evals/d1a/ja-jglue", "evals/d1a/routing", "evals/d1a/intents"
+INTENT_PARTS = ("massive-train", "acts-train")   # English/Japanese intents and dialogue acts (v0.7, #372)
 RARE_SEVERITIES = ("P0", "P1", "P4")
 SKILLS = ("evals/hard-v1", "evals/devtools-v1", "evals/documents-v1")   # Kev's frozen skills suites: their train partitions
 
@@ -42,17 +43,18 @@ def skill_lines(suite):
     return [json.dumps(r, ensure_ascii=False) + "\n" for r in load_split(Path(ROOT_DIR / suite), "train")]
 
 
-def uncovered(extra, replay_ja, replay_routing, replay_skills):
+def uncovered(extra, replay_ja, replay_routing, replay_skills, replay_intents=300):
     """The training sources (d1a.eval.suites.train_sources) a mix with these arguments leaves out: a fine-tune forgets
     what it neither trains on nor replays (#167)."""
     covered = {f"{PR}:train", *(f"{PR}:{name}" for name in extra)}
     covered |= {f"{JA}:train"} if replay_ja else set()
     covered |= {f"{ROUTING}:factory-train", f"{ROUTING}:generic-train"} if replay_routing else set()
     covered |= set(SKILLS) if replay_skills else set()
+    covered |= {f"{INTENTS}:{p}" for p in INTENT_PARTS} if replay_intents else set()
     return [s for s in train_sources() if s not in covered]
 
 
-def mix(en=0, en_skip=False, extra=("train-ja",), replay_ja=500, replay_routing=300, seed=0, replay_skills=500):
+def mix(en=0, en_skip=False, extra=("train-ja",), replay_ja=500, replay_routing=300, seed=0, replay_skills=500, replay_intents=300):
     """-> (mixed lines, counts). One RNG, drawn in a fixed order (the English sample, then JGLUE, routing, each skills suite
     when replay_skills > 0, the mix), so the same arguments give the same bytes, and replay_skills=0 gives the mixes made
     before it existed."""
@@ -70,9 +72,14 @@ def mix(en=0, en_skip=False, extra=("train-ja",), replay_ja=500, replay_routing=
     if replay_skills:
         for suite in SKILLS:
             pool = skill_lines(suite); rng.shuffle(pool); skills[suite] = pool[:replay_skills]
-    out = english + more + ja[:replay_ja] + routing[:replay_routing] + [x for s in SKILLS for x in skills.get(s, [])]; rng.shuffle(out)
+    intents = {}
+    if replay_skills and replay_intents:   # drawn after the skills, so replay_skills=0 still gives the v0.3/v0.4 mixes byte for byte
+        for part in INTENT_PARTS:
+            pool = lines(f"{INTENTS}:{part}"); rng.shuffle(pool); intents[part] = pool[:replay_intents]
+    out = english + more + ja[:replay_ja] + routing[:replay_routing] + [x for s in SKILLS for x in skills.get(s, [])] + [x for v in intents.values() for x in v]
+    rng.shuffle(out)
     return out, {"english": len(english), "extra": len(more), "ja": min(replay_ja, len(ja)), "routing": min(replay_routing, len(routing)),
-                 "skills": {s: len(v) for s, v in skills.items()}}
+                 "skills": {s: len(v) for s, v in skills.items()}, "intents": {p: len(v) for p, v in intents.items()}}
 
 
 def main():
@@ -84,14 +91,16 @@ def main():
     ap.add_argument("--replay-ja", type=int, default=500); ap.add_argument("--replay-routing", type=int, default=300)
     ap.add_argument("--replay-skills", type=int, default=500, help=f"train records replayed from each of {', '.join(SKILLS)} (0: none, the "
                     "v0.3/v0.4 mixes; a fine-tune without them loses them, #167)")
+    ap.add_argument("--replay-intents", type=int, default=300, help=f"train records replayed from each of {INTENTS}'s {', '.join(INTENT_PARTS)}")
     ap.add_argument("--seed", type=int, default=0)
     a = ap.parse_args()
-    if a.replay_skills and (missing := uncovered(a.extra, a.replay_ja, a.replay_routing, a.replay_skills)):
+    if a.replay_skills and (missing := uncovered(a.extra, a.replay_ja, a.replay_routing, a.replay_skills, a.replay_intents)):
         ap.error(f"this mix leaves out {', '.join(missing)}: a fine-tune forgets what it neither trains on nor replays (#167)")
-    out, counts = mix(a.en, bool(a.en_skip), a.extra, a.replay_ja, a.replay_routing, a.seed, a.replay_skills)
+    out, counts = mix(a.en, bool(a.en_skip), a.extra, a.replay_ja, a.replay_routing, a.seed, a.replay_skills, a.replay_intents)
     Path(a.out).write_text("".join(out), encoding="utf-8")
-    inputs = [f"{PR}:train", *(f"{PR}:{n}" for n in a.extra), f"{JA}:train", f"{ROUTING}:factory-train", f"{ROUTING}:generic-train"]
-    suites = {s: json.loads((Path(s) / "manifest.json").read_text(encoding="utf-8")) for s in (PR, JA, ROUTING)}
+    inputs = [f"{PR}:train", *(f"{PR}:{n}" for n in a.extra), f"{JA}:train", f"{ROUTING}:factory-train", f"{ROUTING}:generic-train",
+              *(f"{INTENTS}:{p}" for p in counts["intents"])]
+    suites = {s: json.loads((Path(s) / "manifest.json").read_text(encoding="utf-8")) for s in (PR, JA, ROUTING, INTENTS)}
     record = {"inputs": {ref: suites[ref.rpartition(":")[0]]["partitions"][ref.rpartition(":")[2]]["sha256"] for ref in inputs}
               | {f"{s}:train (manifest sha256)": digest(ROOT_DIR / s / "manifest.json") for s in counts["skills"]},
               "params": {k: v for k, v in vars(a).items() if k != "out"}, "counts": counts, "records": len(out),
