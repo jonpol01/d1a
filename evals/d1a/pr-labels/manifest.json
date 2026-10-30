@@ -2,12 +2,12 @@
  "format": "d1a-suite",
  "version": 1,
  "dataset": "JohnP1/d1a-pr-labels",
- "revision": "cb55e5fbff823aa1f89199b935f2eadec9455c92",
+ "revision": "ccc93b21694c7fc0561a5863a72288c780dc946b",
  "partitions": {
   "train": {
    "path": "train.jsonl",
    "role": "train",
-   "sha256": "821067b2d379945f62c7e92835616ec5c3d9adca163182099de91a544a86a34b",
+   "sha256": "34af6912ea4545c58fe3ea45449fc035024492701e1a93ef3819124bf29614f3",
    "records": 7563
   },
   "train-ja": {
@@ -37,7 +37,7 @@
   "test": {
    "path": "test.jsonl",
    "role": "eval",
-   "sha256": "518a7c3a299c237cf78ecaf4e78fbe544289997cc32441e2dd4a855f82620bdf",
+   "sha256": "f5ebb834f2163e7ff7576d0040e1ee64b7b413d51483e2bb12662b04bb72e3bc",
    "records": 953
   },
   "test-ja": {
@@ -49,7 +49,7 @@
   "real17": {
    "path": "real17.jsonl",
    "role": "eval",
-   "sha256": "71194e31ce17dd22dcf3295321752f175882c32e2049d40ae3949686e34cf8bc",
+   "sha256": "06baf755e58ee418a5acaed951466e8446e6e5713f9f9db64b0c0f37e7b7fbd8",
    "records": 17
   }
  }

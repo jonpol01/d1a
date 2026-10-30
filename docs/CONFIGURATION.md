@@ -246,6 +246,12 @@ learned from; `python -m d1a.agents.demo` keeps its decisions out of it.
 |---|---|---|
 | `D1A_REMOTE_API_KEY` | `local` | The bearer key sent to `--remote`; match the server's `D1A_API_KEY`. |
 
+## Training and evaluation data
+
+| Variable | Default | What it does | When to change it |
+|---|---|---|---|
+| `D1A_DATA_BLOCKLIST` | unset (no check) | A private file of names D1A's data must never hold: an organisation, its products, people. One entry per line; `#` starts a comment; case is ignored. An entry's ASCII letter or digit ends match only at a word edge, so a short name does not hit inside a longer word. When set, `python -m d1a.eval.suites freeze` refuses to pin a partition that holds an entry; loading a suite partition (training, scoring, calibration, the mix tools) refuses it; and `d1a.training.train` refuses `--data` or any training record (replay included) that holds one, before training starts. A refusal names the file and line numbers, never the entry. `training_config.json` records how many entries were checked. | Set it on every machine that builds, pins or trains on D1A data, pointing at a file kept out of the repository. Rewrite a refused line in general wording ("the agent kit", "the original author"), never with a made-up name. |
+
 ## The always-on playground deployment
 
 The playground (jonpol01/d1a-playground) runs D1A as launchd services through `mini.sh`, configured by `.demo/mini.env`
