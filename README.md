@@ -77,9 +77,9 @@ What every published build can and cannot do. Limits and footnotes: [docs/MODELS
 
 | Build | Format | Decisions | Chat | Photo | Voice | Video | Size, notes |
 |---|---|---|---|---|---|---|---|
-| **D1A-E2B-it QAT** ([mlx-q4](https://huggingface.co/JohnP1/d1a-e2b-it-qat-mlx-q4)) | MLX 4-bit, unmerged | ✅ | ✅ | ✅ | ✅ | ✅ | 3.7 GB; **recommended E2B-it** |
-| **D1A-E2B-it QAT** ([d1a-e2b-it-qat](https://huggingface.co/JohnP1/d1a-e2b-it-qat)) | PyTorch | ✅ | ✅⁴ | ✅¹ | ✅¹ | ✅¹ | 126 MB adapter on Gemma 4 E2B-it + Google's QAT checkpoint |
-| **D1A-E2B-it QAT** ([coreml](https://huggingface.co/JohnP1/d1a-e2b-it-qat-coreml)) | Core ML (Google's QAT int4, exact) | ✅⁵ | ✅⁵ | ✅⁵ | ✅⁵ | ✅⁵ | 4.6 GB; verified on a Mac, not yet on an iPhone |
+| **D1A-E2B-it QAT** ([mlx-q4](https://huggingface.co/JohnP1/d1a-e2b-it-qat-mlx-q4)) | MLX 4-bit, unmerged | ✅ | ✅ | ✅ | ✅ | ✅ | 3.7 GB; **recommended E2B-it**; v0.7 |
+| **D1A-E2B-it QAT** ([d1a-e2b-it-qat](https://huggingface.co/JohnP1/d1a-e2b-it-qat)) | PyTorch | ✅ | ✅⁴ | ✅¹ | ✅¹ | ✅¹ | 126 MB adapter on Gemma 4 E2B-it + Google's QAT checkpoint; v0.6 |
+| **D1A-E2B-it QAT** ([coreml](https://huggingface.co/JohnP1/d1a-e2b-it-qat-coreml)) | Core ML (Google's QAT int4, exact) | ✅⁵ | ✅⁵ | ✅⁵ | ✅⁵ | ✅⁵ | 4.6 GB; verified on a Mac, not yet on an iPhone; v0.6 |
 | D1A-E2B-it v0.6 ([d1a-e2b-it](https://huggingface.co/JohnP1/d1a-e2b-it)) | PyTorch | ✅ | ✅⁴ | ✅¹ | ✅¹ | ✅¹ | |
 | D1A-E2B-it v0.6 ([mlx-q8](https://huggingface.co/JohnP1/d1a-e2b-it-mlx-q8), [mlx-q4](https://huggingface.co/JohnP1/d1a-e2b-it-mlx-q4)) | MLX, merged | ✅ | ❌³ | ✅ | ✅ | ✅ | 4.8 / 3.6 GB |
 | D1A-E2B-it v0.6 ([coreml](https://huggingface.co/JohnP1/d1a-e2b-it-coreml), [coreml-4bit](https://huggingface.co/JohnP1/d1a-e2b-it-coreml-4bit)) | Core ML | ✅² | ❌ | ❌ | ❌ | ❌ | 3.8 / 2.9 GB, preview |
@@ -89,6 +89,9 @@ What every published build can and cannot do. Limits and footnotes: [docs/MODELS
 
 The QAT build trades 5.2 points on unfamiliar task types
 (transfer-v4) for D1A's own jobs, speed and all five functions ([scorecard](docs/reports/2026-10-25-e2b-it-qat-scorecard.md)).
+Its v0.7 (2026-10-30, MLX so far) is better at English and Japanese dialogue acts: did the user agree, is it only thanks
+or a request, a command or just talk (+15.9 points on held-out questions); intent classification and the other suites are
+unchanged ([model card](https://huggingface.co/JohnP1/d1a-e2b-it-qat-mlx-q4)).
 
 ### D1A-E4B (more accurate: servers and Macs)
 

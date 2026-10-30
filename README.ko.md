@@ -85,9 +85,9 @@ curl -s localhost:8009/v1/systemone -H 'content-type: application/json' -d '{
 
 | 빌드 | 형식 | 의사결정 | 채팅 | 사진 | 음성 | 영상 | 크기, 비고 |
 |---|---|---|---|---|---|---|---|
-| **D1A-E2B-it QAT** ([mlx-q4](https://huggingface.co/JohnP1/d1a-e2b-it-qat-mlx-q4)) | MLX 4-bit, 병합 안 됨 | ✅ | ✅ | ✅ | ✅ | ✅ | 3.7 GB; **권장 E2B-it** |
-| **D1A-E2B-it QAT** ([d1a-e2b-it-qat](https://huggingface.co/JohnP1/d1a-e2b-it-qat)) | PyTorch | ✅ | ✅⁴ | ✅¹ | ✅¹ | ✅¹ | Gemma 4 E2B-it와 Google의 QAT 체크포인트 위에 얹는 126 MB 어댑터 |
-| **D1A-E2B-it QAT** ([coreml](https://huggingface.co/JohnP1/d1a-e2b-it-qat-coreml)) | Core ML (Google의 QAT int4, 그대로 유지) | ✅⁵ | ✅⁵ | ✅⁵ | ✅⁵ | ✅⁵ | 4.6 GB; Mac에서 검증했으며 iPhone에서는 아직 검증하지 않음 |
+| **D1A-E2B-it QAT** ([mlx-q4](https://huggingface.co/JohnP1/d1a-e2b-it-qat-mlx-q4)) | MLX 4-bit, 병합 안 됨 | ✅ | ✅ | ✅ | ✅ | ✅ | 3.7 GB; **권장 E2B-it**; v0.7 |
+| **D1A-E2B-it QAT** ([d1a-e2b-it-qat](https://huggingface.co/JohnP1/d1a-e2b-it-qat)) | PyTorch | ✅ | ✅⁴ | ✅¹ | ✅¹ | ✅¹ | Gemma 4 E2B-it와 Google의 QAT 체크포인트 위에 얹는 126 MB 어댑터; v0.6 |
+| **D1A-E2B-it QAT** ([coreml](https://huggingface.co/JohnP1/d1a-e2b-it-qat-coreml)) | Core ML (Google의 QAT int4, 그대로 유지) | ✅⁵ | ✅⁵ | ✅⁵ | ✅⁵ | ✅⁵ | 4.6 GB; Mac에서 검증했으며 iPhone에서는 아직 검증하지 않음; v0.6 |
 | D1A-E2B-it v0.6 ([d1a-e2b-it](https://huggingface.co/JohnP1/d1a-e2b-it)) | PyTorch | ✅ | ✅⁴ | ✅¹ | ✅¹ | ✅¹ | |
 | D1A-E2B-it v0.6 ([mlx-q8](https://huggingface.co/JohnP1/d1a-e2b-it-mlx-q8), [mlx-q4](https://huggingface.co/JohnP1/d1a-e2b-it-mlx-q4)) | MLX, 병합됨 | ✅ | ❌³ | ✅ | ✅ | ✅ | 4.8 / 3.6 GB |
 | D1A-E2B-it v0.6 ([coreml](https://huggingface.co/JohnP1/d1a-e2b-it-coreml), [coreml-4bit](https://huggingface.co/JohnP1/d1a-e2b-it-coreml-4bit)) | Core ML | ✅² | ❌ | ❌ | ❌ | ❌ | 3.8 / 2.9 GB, 프리뷰 |
@@ -97,6 +97,8 @@ curl -s localhost:8009/v1/systemone -H 'content-type: application/json' -d '{
 
 QAT 빌드는 낯선 작업 유형(transfer-v4)에서 5.2점을 내주는 대신, D1A 고유의 작업, 속도, 그리고 다섯 가지 기능 모두를 얻습니다
 ([스코어카드](docs/reports/2026-10-25-e2b-it-qat-scorecard.md)).
+그 v0.7(2026-10-30, 현재 MLX 전용)은 영어와 일본어 대화 행위 판단이 향상되었습니다. 사용자가 동의했는지, 감사 인사뿐인지 요청인지,
+명령인지 잡담인지(보류된 문항에서 +15.9점). 인텐트 분류와 나머지 스위트는 그대로입니다([모델 카드](https://huggingface.co/JohnP1/d1a-e2b-it-qat-mlx-q4)).
 
 <a id="d1a-e4b-more-accurate-servers-and-macs"></a>
 
