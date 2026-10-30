@@ -48,7 +48,7 @@ def pr_key(pr_id):
     return f"{m['repo'].lower()}#{int(m['number'])}" if m else None
 
 
-def build_manifest(mixes, run, log=None):
+def build_manifest(mixes, run, log=None, rewrite=None):
     """{run, pr_ids, state_sha256, mixes} from training mixes (JSONL records with a state and, for PRs, an id). A record
     exported from a feedback log (feedback records: meta.feedback_id) may carry no id; with `log`, its decision's outcome
     group stands in, so a PR re-rendered later (new commits, other truncation) is still excluded by its id."""
@@ -63,7 +63,8 @@ def build_manifest(mixes, run, log=None):
         for line in Path(mix).read_text(encoding="utf-8").splitlines():
             if not line.strip(): continue
             r = json.loads(line); n += 1
-            states.add(state_sha256(r["state"]))
+            from d1a.learning.feedback import reword   # rewrite: hash the states as a reworded log records them
+            states.add(state_sha256(reword(r["state"], rewrite)))
             fid = (r.get("meta") or {}).get("feedback_id")
             for pid in (r.get("id"), groups.get(fid) if fid else None):
                 if (k := pr_key(pid)): prs.add(k)
