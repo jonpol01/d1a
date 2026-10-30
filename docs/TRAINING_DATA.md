@@ -26,6 +26,8 @@ cases with one set of weights, so it drifts away from whatever a fine-tune leave
 | `evals/d1a/routing:factory-train` (`JohnP1/d1a-routing`) | 1,216 | routing requests to the right handler, factory domain | routing |
 | `evals/d1a/routing:generic-train` | 1,529 | routing, general domain | routing |
 | `evals/d1a/ja-jglue:train` (`JohnP1/d1a-ja-jglue`) | 6,000 | Japanese understanding (JGLUE) | every Japanese use case |
+| `evals/d1a/intents:massive-train` (`JohnP1/d1a-intents`) | 2,100 | intent choice over many options, English and Japanese (MASSIVE 1.1 by Amazon, CC BY 4.0) | voice and chat assistants, routing by intent |
+| `evals/d1a/intents:acts-train` | 1,248 | dialogue acts, English and Japanese: command vs talk, yes / no / unclear confirmations, thanks vs request, item references | voice assistants, confirmations, acknowledgements |
 
 **Never trained on** (evaluation only):
 - every development and test partition;

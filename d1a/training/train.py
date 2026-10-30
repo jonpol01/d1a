@@ -161,7 +161,7 @@ def plain(name):
 def sidecar_counts(meta):
     """{source as the mix names it: records} from a mix's sidecar (<data>.json), in each writer's shape:
     recipes/skills/mix.py {"counts": {source: n}}; the D2 builder {"sources": {source: {"records": n}}}, mix-d's {"by_source": {source: n}};
-    recipes/pr-labeler/mix.py {"inputs": {ref: sha256}, "counts": {"english", "extra", "ja", "routing": n, "skills": {suite: n}}},
+    recipes/pr-labeler/mix.py {"inputs": {ref: sha256}, "counts": {"english", "extra", "ja", "routing": n, "skills": {suite: n}, "intents": {partition: n}}},
     where each input has its group's count (the extra PR partitions, JGLUE and routing are each drawn as one pool)."""
     if "inputs" in meta:
         counts, out = meta["counts"], {}
@@ -169,6 +169,8 @@ def sidecar_counts(meta):
             suite, _, part = ref.partition(":")
             if part.endswith("(manifest sha256)"):   # a skills suite it replays: "evals/hard-v1:train (manifest sha256)"
                 out[suite] = counts.get("skills", {}).get(suite, 0)
+            elif suite == "evals/d1a/intents":   # drawn per partition: {"intents": {partition: n}}
+                out[ref] = counts.get("intents", {}).get(part, 0)
             else:
                 out[ref] = counts.get("english" if ref == "evals/d1a/pr-labels:train" else PR_LABELER_GROUPS.get(suite), 0)
         return out

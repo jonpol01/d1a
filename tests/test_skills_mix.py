@@ -46,7 +46,8 @@ def test_train_sources_are_the_skills_suites_and_every_d1a_train_partition():
     replayed by the trainer) and every D1A partition whose role is train, read from the manifests."""
     import json
     from d1a.eval.suites import SKILLS, train_sources
-    assert train_sources() == ["evals/hard-v1", "evals/devtools-v1", "evals/documents-v1", "evals/d1a/ja-jglue:train",
+    assert train_sources() == ["evals/hard-v1", "evals/devtools-v1", "evals/documents-v1", "evals/d1a/intents:massive-train",
+                               "evals/d1a/intents:acts-train", "evals/d1a/ja-jglue:train",
                                "evals/d1a/pr-labels:train", "evals/d1a/pr-labels:train-ja", "evals/d1a/pr-labels:train-blast",
                                "evals/d1a/routing:factory-train", "evals/d1a/routing:generic-train"]
     frozen = {f"evals/{m.parent.relative_to(ROOT / 'evals')}" for m in (ROOT / "evals").glob("**/manifest.json")
@@ -63,7 +64,8 @@ def test_a_new_stage_replays_every_training_source_and_recorded_is_v05s_plan(mon
     plan = mix.with_replay(mix.PLAN, 300)
     assert plan[:len(mix.PLAN)] == mix.PLAN and [s for s, _ in plan] != [s for s, _ in mix.PLAN]
     assert sorted(s for s, _ in plan) == sorted(train_sources())
-    assert dict(plan[len(mix.PLAN):]) == {"evals/d1a/pr-labels:train-ja": 300, "evals/d1a/pr-labels:train-blast": 300,
+    assert dict(plan[len(mix.PLAN):]) == {"evals/d1a/intents:massive-train": 300, "evals/d1a/intents:acts-train": 300,
+                                          "evals/d1a/pr-labels:train-ja": 300, "evals/d1a/pr-labels:train-blast": 300,
                                           "evals/d1a/routing:factory-train": 300, "evals/d1a/routing:generic-train": 300}
     monkeypatch.setattr("sys.argv", ["mix.py", "--out", str(tmp_path / "m.jsonl"), "--replay-rest", "0"])
     with pytest.raises(SystemExit):   # 0 would read as "all" in a plan; a stage that replays none of a source forgets it
