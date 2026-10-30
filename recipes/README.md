@@ -12,7 +12,8 @@ documents-v1, because their mixes replayed none of them.
 
 1. **Replay every skill.** The fine-tune's mix trains on or replays every training source, beside decision-v7 (which
    the trainer replays): the train partitions of `evals/hard-v1`, `evals/devtools-v1` and `evals/documents-v1`, and every
-   D1A train partition: PR labels (train, train-ja, train-blast), routing (factory-train, generic-train) and JGLUE.
+   D1A train partition: PR labels (train, train-ja, train-blast), routing (factory-train, generic-train), JGLUE, and
+   intents (massive-train, acts-train).
    `d1a.eval.suites.train_sources()` lists them, and both mix tools refuse or replay a source a new mix
    leaves out.
    - **The trainer enforces it too (#211).** With `--init_from`, `d1a.training.train` reads the `--data` mix's sidecar

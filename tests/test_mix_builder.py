@@ -243,4 +243,4 @@ def test_a_fixed_plan_gives_a_pinned_mix():
     train, evals = suites()
     p = plan(n=7)
     spec(p, "hard-v1:train").update(n=12, stratify="_meta.family")
-    assert bm.build(p, train, evals)[2]["sha256"] == "39f9dcb3f2f372168393c0d3dc6c17da211d6ad95b2f4b3cf48158f4b5ec457c"
+    assert bm.build(p, train, evals)[2]["sha256"] == "2b345300f8784e7d5e17f4f8923f2f59a66cb3529fd8ddc4bbea453b7f7b663a"   # with the intents train partitions (#372)
