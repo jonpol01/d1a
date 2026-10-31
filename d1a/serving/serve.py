@@ -46,7 +46,7 @@ from pydantic import BaseModel, Field
 from d1a.core.api import SystemOneRequest, answer_in_passes, conditional, in_request_order, render, to_record, to_answers, output_tokens, with_date_facts
 from d1a.backends.checkpoint import EXPORT_CONFIG, Checkpoint, LoadOptions, base_dir, fused_available, is_hub_id
 from d1a.backends.device import allocated_bytes, default_device, empty_cache, out_of_memory, sync
-from d1a.learning.feedback import FeedbackLog, OutcomeCalibrator
+from d1a.learning.feedback import FeedbackLog, OutcomeCalibrator, load_rewrite
 from d1a.learning import flags, rules
 from d1a.serving import openai_compat
 from d1a.serving.media import MEDIA_DIR, MediaEncoder, MediaRequest, OnDemand, with_media
@@ -394,7 +394,7 @@ class Learning:
     `python -m d1a.learning.feedback calibrate <log> --out <file>` takes effect on the next request without a restart."""
 
     def __init__(self, log_path=None, calibrator_path=None):
-        self.log = FeedbackLog(log_path) if log_path else None
+        self.log = FeedbackLog(log_path, rewrite=load_rewrite()) if log_path else None   # D1A_LOG_REWRITE: the log keeps general wording
         self.calibrator_path, self._mtime, self._cal, self._lock = calibrator_path, None, None, threading.Lock()
         self._ids, self._read, self._file = set(), 0, None   # decision ids in the log, the bytes logged() has read, and which file
 

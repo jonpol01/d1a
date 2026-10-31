@@ -66,9 +66,47 @@ def _choice_probs(answer):
     return {k: float(v) for k, v in probs.items()} if isinstance(probs, dict) and probs else None
 
 
+def load_rewrite(env=None):
+    """D1A_LOG_REWRITE: a private JSON list of {"pattern": regex, "replace": text}, applied (case ignored) to the text of
+    every decision the log records, so names the log must not keep are written in general wording. Refused at load: a
+    replacement with a backslash or one the pattern matches again (a reworded state must stay the same when a replay
+    logs it again), and, with D1A_DATA_BLOCKLIST set, an entry no rule rewrites. -> [(compiled, replace)] or None."""
+    import re
+    from d1a.core.settings import get
+    path = get("D1A_LOG_REWRITE", env)
+    if not path:
+        return None
+    rules = []
+    for i, r in enumerate(json.loads(Path(path).read_text(encoding="utf-8"))):
+        pat, rep_ = re.compile(r["pattern"], re.IGNORECASE), r["replace"]
+        if "\\" in rep_ or pat.search(rep_):
+            raise ValueError(f"D1A_LOG_REWRITE rule {i}: its replacement must be plain text the pattern does not match again")
+        rules.append((pat, rep_))
+    from d1a.eval.suites import blocklist
+    if (bl := blocklist(env)) is not None:
+        entries = [e for e in (line.split("#", 1)[0].strip() for line in Path(get("D1A_DATA_BLOCKLIST", env)).read_text(encoding="utf-8").splitlines()) if e]
+        if left := [i for i, e in enumerate(entries) if bl[0].search(reword(e, rules))]:
+            raise ValueError(f"D1A_LOG_REWRITE leaves D1A_DATA_BLOCKLIST entries {left} (by line, never by name) unrewritten")
+    return rules
+
+
+def reword(value, rules):
+    """`value` (a string, or lists and dicts of them, keys included) with every rule applied; None or no rules: as is."""
+    if not rules:
+        return value
+    if isinstance(value, str):
+        for pat, rep_ in rules: value = pat.sub(rep_, value)
+        return value
+    if isinstance(value, list):
+        return [reword(v, rules) for v in value]
+    if isinstance(value, dict):
+        return {reword(k, rules): reword(v, rules) for k, v in value.items()}
+    return value
+
+
 class FeedbackLog:
-    def __init__(self, path):
-        self.path = Path(path)
+    def __init__(self, path, rewrite=None):
+        self.path, self.rewrite = Path(path), rewrite   # rewrite: load_rewrite()'s rules, applied to what decision() records
 
     def _append(self, event):
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -80,6 +118,7 @@ class FeedbackLog:
         them without changing `run`, #209). `replay_of`: the id of an earlier decision this one re-scores with the model
         now served (replay()); it takes that decision's outcomes and never gets its own. -> its id."""
         did = uuid.uuid4().hex
+        state, questions, answers = (reword(x, self.rewrite) for x in (state, questions, answers))   # ids, run and meta as they are
         self._append({"kind": "decision", "id": did, "ts": time.time(), "run": run, "state": state, "questions": questions,
                       "answers": answers, "meta": meta or {}, **({"use_case": use_case} if use_case is not None else {}),
                       **({"temperature": temperature} if temperature is not None else {}),
@@ -506,6 +545,9 @@ def main(argv=None):
     tr.add_argument("--mix", action="append", required=True, help="a training mix (JSONL), once per stage of the model's lineage")
     tr.add_argument("--run", required=True, help="the model these mixes trained, repo@tag as the server reports it"); tr.add_argument("--out", required=True)
     tr.add_argument("--log", help="the decision log a mix's feedback records were exported from (their PR ids come from its outcome groups)")
+    tr.add_argument("--reworded", action="store_true", help="hash the mixes' states as $D1A_LOG_REWRITE rewords them, as a reworded log records them")
+    rw = sub.add_parser("reword", help="a copy of a decision log with $D1A_LOG_REWRITE applied to every decision's text (outcomes and voids as they are)")
+    rw.add_argument("log"); rw.add_argument("--out", required=True)
     rp = sub.add_parser("replay", help="re-score earlier models' decisions that have outcomes with the model the server runs (fail closed)")
     rp.add_argument("log"); rp.add_argument("--server", required=True); rp.add_argument("--trained", help="the served model's trained manifest")
     rp.add_argument("--cap", type=int); rp.add_argument("--pause", type=float)
@@ -521,8 +563,22 @@ def main(argv=None):
     if a.cmd == "void":
         ids = [i for i in a.ids.split(",") if i]; FeedbackLog(a.log).void(ids, a.src, a.reason)
         print(f"voided {a.src} outcomes on {len(set(ids))} decisions: {a.reason}"); return
+    if a.cmd == "reword":
+        rules = load_rewrite()
+        if not rules: raise SystemExit("reword: set D1A_LOG_REWRITE")
+        out, n = [], 0
+        for line in Path(a.log).read_text(encoding="utf-8").splitlines(keepends=True):
+            e = json.loads(line) if line.strip() else None
+            if e and e.get("kind") == "decision":
+                e.update({k: reword(e[k], rules) for k in ("state", "questions", "answers") if k in e}); line = json.dumps(e) + "\n"; n += 1
+            out.append(line)
+        from d1a.eval.suites import refuse_blocked   # with D1A_DATA_BLOCKLIST set: no listed name left in any decision's text
+        refuse_blocked([json.dumps([e.get(k) for k in ("state", "questions", "answers")], ensure_ascii=False)
+                        for e in (json.loads(x) for x in out if x.strip()) if e.get("kind") == "decision"], a.log)
+        Path(a.out).write_text("".join(out), encoding="utf-8")   # ids, groups and outcomes stay as they are: outcomes match by them
+        print(json.dumps({"out": a.out, "lines": len(out), "decisions_reworded": n})); return
     if a.cmd == "trained":
-        try: m = loop.build_manifest(a.mix, a.run, FeedbackLog(a.log) if a.log else None)
+        try: m = loop.build_manifest(a.mix, a.run, FeedbackLog(a.log) if a.log else None, rewrite=load_rewrite() if a.reworded else None)
         except ValueError as e: sys.exit(f"refused: {e}")
         Path(a.out).write_text(json.dumps(m) + "\n", encoding="utf-8")
         print(f"wrote {a.out}: {a.run}, {len(m['pr_ids'])} PR ids and {len(m['state_sha256'])} states from {len(m['mixes'])} mixes"
