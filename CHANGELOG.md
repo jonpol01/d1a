@@ -16,6 +16,239 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-04
+
+D1A runs on Google's QAT int4 trunks, kept exact: D1A-E4B-it QAT and D1A-E2B-it QAT answer decisions, chat, photos,
+voice and video from MLX, PyTorch and Core ML builds, and D1A-E2B-it QAT v0.7 also runs on ONNX Runtime for Android or
+any CPU (decisions and chat). The API is stricter and safer by default, self-learning promotes noise far less often and
+can keep its log in general wording, and answers to valid requests are as in 0.6.0.
+
+### What's new
+
+- **QAT builds, int4 exact.** D1A trains and exports on Google's QAT int4 checkpoints without changing a weight.
+  - D1A-E4B-it QAT (MLX 4-bit, PyTorch) is level with D1A-E4B-it v0.6 overall: pooled −0.2 points, PR severity +6.0,
+    routing +1.7 and +1.5, but the external typesafe suite −7.8.
+  - D1A-E2B-it QAT v0.7 (MLX 4-bit, ONNX) is +15.9 points on held-out English and Japanese dialogue acts, with intents
+    and the other suites unchanged; its PyTorch and Core ML builds are v0.6.
+  - README, "Pick a Build", says for every published build whether it answers decisions, chat, photos, voice and video.
+- **Requests mean what they say.** A field D1A does not define is refused with a 422 that names it. Before, it was
+  dropped: a question sent with `instr` was asked with no text.
+- **Safer by default.**
+  - No cross-origin browser calls unless `D1A_CORS_ORIGINS` names the origin.
+  - `/v1/feedback` refuses a decision id the log does not hold.
+  - Chat refuses a prompt longer than the model's context at once, instead of holding the model for minutes.
+  - Every open advisory on the locked dependencies is closed.
+- **Self-learning you can trust more.**
+  - The gate waits for 30 held-out groups and re-runs only once the outcomes have grown by half: pure noise is
+    promoted in 7–9.5% of replays instead of 36.5–56.5%.
+  - `D1A_LOG_REWRITE` keeps the decision log in general wording.
+  - `D1A_DATA_BLOCKLIST` stops data that holds a listed name from being pinned or trained on.
+- **An audit trail on request.** With `x-d1a-audit: on`, an answer says what produced it: the version, the weights'
+  hash, the temperature and its source, the calibration, rules and flags applied. It holds hashes and settings, never text.
+- **More places to run.**
+  - Chat on PyTorch.
+  - transformers 5.20 (video, SDPA).
+  - Gemma 4's per-layer embeddings read correctly on Apple GPUs in PyTorch: on E4B, every punctuation and digit token
+    read as zeros before.
+- **Docs in Japanese and Korean:** the README and the getting-started pages.
+
+### Added
+
+- `D1A_LOG_REWRITE`: a private rules file the server applies to the state, questions and answers of every decision the
+  self-learning log records, so names the log must not keep are written in general wording (ids, the run and outcome
+  groups stay, so outcomes still match). `python -m d1a.learning.feedback reword` rewrites an existing log the same way,
+  and `trained --reworded` hashes training states as a reworded log records them (#377).
+- D1A-E2B-it QAT v0.7 for ONNX Runtime (`JohnP1/d1a-e2b-it-qat-onnx`, Android or any CPU): decisions and chat from one
+  graph and one copy of Google's QAT int4 trunk, the adapter switched per run (a null adapter for chat). Text only. The
+  README and MODELS pages list it (#376, #28).
+- `evals/d1a/intents` (private dataset `JohnP1/d1a-intents`): English and Japanese intents (MASSIVE 1.1 by Amazon, CC BY
+  4.0) and dialogue acts, the data D1A-E2B-it QAT v0.7 trained on (#372). Two train partitions (massive-train,
+  acts-train) and three evaluation partitions (massive-in, massive-heldout with two scenarios held out, acts-eval).
+  `train_sources()` now lists the train partitions, so every later fine-tune replays them and every gate scores the
+  evaluation partitions; `recipes/pr-labeler/mix.py` replays them (`--replay-intents`, 300 each).
+- `D1A_DATA_BLOCKLIST`: a private file of names D1A's data must never hold. When it is set, `python -m d1a.eval.suites
+  freeze` refuses to pin a partition that holds one, loading a suite partition refuses it, and `d1a.training.train`
+  refuses `--data` or any training record (replay included) that holds one, before training starts. A refusal names the
+  lines, never the entry (#373).
+- D1A-E4B-it QAT (#358, #341): D1A-E4B-it v0.6 retrained on Google's QAT int4 trunk, kept exact, with Gemma 4's per-layer
+  embeddings read correctly in training (#353). [JohnP1/d1a-e4b-it-qat-mlx-q4](https://huggingface.co/JohnP1/d1a-e4b-it-qat-mlx-q4)
+  (MLX 4-bit, unmerged: decisions, chat, photos, voice and video) and [JohnP1/d1a-e4b-it-qat](https://huggingface.co/JohnP1/d1a-e4b-it-qat)
+  (PyTorch), released ahead of their scorecard; README and docs/MODELS.md list them.
+- Japanese and Korean versions of the README and the getting-started pages (USAGE, MODELS, APPLE, AGENTS_GUIDE, DEMOS):
+  `README.ja.md`, `README.ko.md`, `docs/ja/` and `docs/ko/`, linked from the top of each English page (#357). Each names
+  the English commit it was translated from; the English pages stay authoritative.
+- `d1a.training.train --embedding_dtype bf16`, with `--weights_dtype fp32`: the base loads in bf16 and everything but the
+  embedding tables goes to fp32, so the forward is the fp32 model's for a base stored in bf16 (Gemma 4) and a QAT trunk
+  (`--base_ct`) stays exact, while the tables keep half the memory. Gemma 4 E4B's fp32 trunk (16 GB) then trains beside its
+  3.5B-parameter tables in 7 GB instead of 14 (#355).
+- D1A-E2B-it QAT on Core ML, [JohnP1/d1a-e2b-it-qat-coreml](https://huggingface.co/JohnP1/d1a-e2b-it-qat-coreml) (#352,
+  #341): decisions, chat, photos, voice and video, with Google's QAT int4 weights exact and the adapter as a switch; verified
+  on a Mac, not yet on an iPhone. README, docs/MODELS.md and docs/APPLE.md list it.
+- `scripts/export_mlx.py --q-embedding-group-size` sets the embeddings' own group size (#349). QAT fixes the Linears' groups
+  of 32, not the embeddings'; 64 saves 0.17 GB on D1A-E2B-it.
+- Chat on PyTorch (#348): a LoRA run on an instruction-tuned base, served with `D1A_MERGE=0`, answers
+  `/v1/chat/completions` with its adapter switched off, streaming and tool calls included. Its greedy text is transformers'
+  own generation on the base. Decisions that arrive during a chat are answered between its tokens, as on MLX.
+- The PyTorch photo and voice server (`d1a.serving.media`) serves a run trained on a QAT checkpoint (`base_ct`): the
+  checkpoint's own text model and encoders, the vision projection QAT retrained included.
+- A run trained with `--base_ct` records its QAT checkpoint (`base_ct` in `d1a_config.json`), and loading rebuilds that
+  trunk (#346). The PyTorch path writes the checkpoint's int4 weights over the base, exact in fp32. `scripts/export_mlx.py`
+  exports such a run on the same checkpoint without `--ct-base`, and refuses another; `--media` writes the QAT checkpoint's
+  own encoders, so the export answers photos, voice and video. The MLX backend and the PyTorch media server refuse such a run
+  rather than run it on the base's trunk.
+- `scripts/export_mlx.py --ct-base` builds on a compressed-tensors QAT checkpoint (Google's gemma-4-*-it-qat-w4a16-ct),
+  keeping its int4 Linears exactly as MLX 4-bit (#343); `--q-embedding-bits` sets the embeddings' own width.
+- CI: `newest-deps` runs the unit tests daily on the newest dependency versions `pyproject.toml` allows, and lists
+  which differ from `uv.lock`. Report only (#331).
+- `D1A_CHAT_CONTEXT` caps a chat's prompt plus `max_tokens` below the model's context (#319), with the same 400.
+  A prompt near the model's context still holds the model for minutes (~230 tokens/s on an M4). Unset, the model's
+  context is the limit.
+- The request header `x-d1a-audit: on` adds an `audit` block to a `/v1/systemone` or `/v1/systemone/media` answer (#32,
+  #313). It records what produced the answer, for a port or a support ticket:
+  - the d1a version, the run, and the weights' sha256;
+  - the sha256 of the state text the model read;
+  - the temperature and its source;
+  - the questions the outcome calibrator recalibrated, and the decode rules and flags applied;
+  - the prefix cache per model pass, and whether the decision was logged.
+  It holds hashes and settings, never text. Without the header, responses are unchanged.
+
+### Changed
+
+- The routing and PR-label suites are re-pinned to dataset revisions reworded in general terms (#373). Labels, ids (but
+  one), and record counts are unchanged.
+- D1A-E2B-it QAT v0.7 on MLX (`JohnP1/d1a-e2b-it-qat-mlx-q4`, mirror `mlx-community/d1a-e2b-it-qat-4bit`; the previous
+  build is tagged `v0.6`): better at English and Japanese dialogue acts (did the user agree, only thanks or a request, a
+  command or just talk), +15.9 points on held-out questions; intent classification and the other suites unchanged. The
+  README and MODELS pages list it; the PyTorch and Core ML builds stay v0.6 for now (#370).
+- A /v1/systemone request (or `D1A.decide`) that carries a field D1A does not define, on the request or on a question, is
+  refused with a 422 naming that field. It used to be dropped: a question written with `"instr"` instead of
+  `"instructions"` was answered with no question text (#340). A question's `type` now selects its schema, so the error
+  names the one bad field instead of listing every question type.
+- The Hugging Face Space runs D1A-E4B-it QAT (#363), pinned by commit, in place of D1A-E4B v0.6.1, whose answers there were
+  wrong; under ZeroGPU it now loads the adapter on the CPU before moving the model to the GPU.
+- D1A-E4B-it QAT's scorecard is out (#362): level with D1A-E4B-it v0.6 overall (pooled −0.2 points), with PR labels +1.6,
+  PR severity +6.0 and routing +1.7 and +1.5, but the external typesafe suite −7.8 (#361); +1.2 pooled against v0.6's
+  adapter on the same QAT trunk. Every suite: `docs/reports/2026-10-28-e4b-it-qat-scorecard.md`, linked from the README
+  (English, Japanese and Korean) and docs/MODELS.md.
+- Docs: demo image links (#360).
+- Docs: demo images (#359).
+- AGENTS.md: house cleaning after every piece of work, and Hugging Face cache entries go to the Trash with their
+  unshared blobs (#351).
+- README and docs/MODELS.md list the PyTorch D1A-E2B-it QAT build, JohnP1/d1a-e2b-it-qat (#350), and the MLX one at 3.7 GB
+  with its group-64 embeddings.
+- Gemma 4 tool calls parse without mlx-lm installed: its parser is now in `d1a/serving/gemma4_tools.py` (MIT, see NOTICE)
+  (#348).
+- README: "Pick a Build" is a checklist, one table for E2B and one for E4B, saying for every published build whether it
+  answers decisions, chat, photos, voice and video (#347).
+- The frozen suites' large partitions download from D1A's own copy of Kev's `jaredpalmer/kev-suites` (#345), so
+  training mixes no longer depend on that dataset staying up. The copy is byte for byte and every manifest pin is
+  unchanged; an account that cannot read the copy falls back to Kev's dataset and says so.
+- Docs match the current module paths, versions and builds (#339).
+- Docs and a code comment: wording (#338).
+- The chat log line says "cut off by max_tokens before any text" for a reply cut off before any text, and keeps
+  "empty answer after <roles>" for a model that ended its turn with nothing (#333).
+- Docs and comments: wording (#330).
+- `d1a.core.hygiene`: home paths are matched case-insensitively and anywhere in a line (#330).
+- README: D1A reads as the general decision model it is, not a PR labeler (#316). *Proven at* leads with agent
+  decisions (gate 98%, judge 92%, routing 45 of 45; 0 of 33 risky calls allowed with the fail-safe advice), the skill
+  suites (hard decisions, developer tools, long documents, Japanese), decisions and chat in one model, then PR labeling
+  and photos, voice and video. The build table's "Use when" names general uses, and the sizes are compared on all
+  suites. The demo strip shows routing, tool gating and a photo check.
+- The chat log line marks an answer with no text and no tool call: `, empty answer after <roles>`, the roles of the
+  last three messages (for example `user > assistant(tool_calls) > tool`), never their text (#315). An agent got 3 such
+  answers in 23 steps, and the counts alone could not say what came before them.
+
+### Fixed
+
+- `scripts/quality_gate.py --head-run`: the latency floor now serves base against a byte copy of base (two sets of
+  files, as the gate itself serves for a new checkpoint), not the same files twice (#371). Serving two different files
+  measured 3.2% slower than one on its own, so the old floor vetoed new checkpoints for the setup, not the model. The
+  copy needs the checkpoint's size in free disk for the floor's duration; the report names the floor's setup.
+- The server's start-up self-check and `recipes/swe-verifier/zero_shot.py` wrote `"instr"`, so both asked their questions
+  with no text. They now send `"instructions"` (#340).
+- The self-learning loop runs its gate on the first replay after every model change, not only after the first one it ever
+  saw (#366). The flag that records that run is now reset with the other per-model state when the served model changes.
+- The self-learning gate no longer promotes noise as often (#364). Each gate run can promote, and `tick` re-ran the gate
+  after every 10 new outcomes, so on a slowly growing log a calibrator fitted to pure noise got promoted in a third to a
+  half of replays by 1,000 outcomes. The gate now needs at least `promotion.min_held_out` (30) held-out groups before it
+  may promote, and either trigger re-runs it only once the outcomes have grown by `schedule.growth` (0.5) since its last
+  run. With these defaults the same 200 replays promote noise in 7% and 9.5% (they did in 36.5% and 56.5%).
+  `schedule.growth: 0` keeps the old schedule.
+- With `promotion.auto` on, a changed `promotion.serve_choice` or `promotion.hold` now reaches the server at the next
+  `tick`. Before, it was written into the calibrator file only at the next promotion, which may never come.
+- PyTorch on MPS: Gemma 4's per-layer embeddings came back as zeros for every token past row 2^31 / the table's width
+  (torch before 2.14, pytorch/pytorch#188756): from id 239,675 on E2B (tabs, some CJK, emoji, the image tokens) and from
+  199,729 on E4B (every punctuation and digit token). D1A now reads tables that big by indexing on MPS (#354, #353), in
+  training, scoring, PyTorch chat and the PyTorch media server. MLX, CUDA and the CPU were never affected.
+- An MLX export's `config.json` keeps the base's `vision_config` (#349). mlx-lm's save_config deletes it, so a
+  vision-language loader failed on an export even though its `media/` held the encoders.
+- The request examples in the README, docs/USAGE.md and docs/SELF_LEARNING.md use `instructions`; the API ignores
+  `instr`, so they asked empty questions (#339).
+- The torch-only media server (`python -m d1a.serving.media`) answers videos with transformers 5.20, whose
+  `Gemma4Model.forward` drops the frame count `get_video_features` needs (#332).
+- Gemma 4 loads under transformers 5.20 when SDPA is asked for (#324): the CUDA default, `D1A_ATTN=sdpa`, the torch
+  serving default on Apple GPUs and the torch-only media server. 5.20 refuses `attn_implementation="sdpa"` by name for
+  Gemma 4 (its audio tower has none); D1A now leaves the choice to transformers, which gives the text model SDPA on
+  5.17 and 5.20 alike. Answers are bit-identical to before on 5.17.
+- Video decisions work with transformers 5.20 (#322). Its video processor sends a video's frames in one flat batch with
+  `num_frames_per_video`, which its `get_video_features` requires; the media encoder now passes it when the processor
+  gives it. Fresh installs, which resolve to 5.20, answered every video request with a 422. The soft tokens are
+  bit-identical to transformers 5.17's.
+- OpenAI chat refuses a request whose prompt and `max_tokens` (1024 when not sent) exceed the model's context
+  (`max_position_embeddings`; 131,072 for D1A-E4B-it) with an immediate 400, OpenAI's `context_length_exceeded`,
+  before any prefill (#319). A 237,592-token prompt was accepted 5 times on 2026-10-21 and held the model thread 16
+  minutes each, so other chat clients (mem0) timed out. Clients that compress on that error, such as Hermes, now
+  shorten and resend.
+- OpenAI chat: an agent's step after a tool call failed with a 500 (#312). Clients such as Hermes and n8n send the
+  earlier tool call's `arguments` back as a JSON string, as the OpenAI API defines it, and Gemma 4's chat template
+  accepts only an object. The request now decodes them, and refuses arguments that are not a JSON object with a 422.
+  Measured with D1A-E4B-it, an agent loop of 3 tool calls and a summary took 4.1 s cold, then 0.6–1.8 s a step from
+  the prompt cache.
+- The MCP tools, the Claude Code gate hook and `python -m d1a.agents.demo` send `D1A_API_KEY` to the server (#310).
+  A server that requires a key refused every call before, and the gate hook then asked about every command.
+- `python -m d1a.agents.demo` keeps its decisions out of the server's learning log (`x-d1a-decision-log: off`), so it
+  is safe to run against a live server. Agents' own decisions are still logged.
+
+### Security
+
+- filelock 4.2.4 and setuptools 84.2.1 (#342) close the open advisories on the locked dependencies: filelock's
+  ReadWriteLock could be pointed at a planted lock database, and two Windows-only filelock issues and a setuptools
+  Windows path escape in legacy wheel installs.
+- Pillow 13.0.0 (#334), opentelemetry-api 1.45.1 (#335) and certifi 2026.10.23 (#336) close every open advisory on
+  the locked dependencies; certifi no longer trusts the emSign roots whose intermediate CA keys were compromised.
+- The servers allow no cross-origin browser calls unless `D1A_CORS_ORIGINS` names the origin (#320). They allowed every
+  origin, so any site open in a browser on the machine could call them, `POST /v1/feedback` included. Set
+  `D1A_CORS_ORIGINS=*` to keep the old behaviour, or name the web app's origin.
+- `POST /v1/feedback` refuses (422) a `decision_id` the decision log does not hold, and writes nothing (#320).
+
+### Models tested with this release
+
+| Checkpoint | Hugging Face |
+|---|---|
+| D1A-E4B-it QAT (decisions and chat), MLX 4-bit with its adapter unmerged | `JohnP1/d1a-e4b-it-qat-mlx-q4` at `ce28f83e` |
+
+The quality gate on real weights finds no changed answer between 0.6.0 and 0.7.0 on D1A-E4B-it QAT: 237 requests,
+every demo example (photos, voice and video included) and the PR-labeler replay; 0 flips, max |dp| 0, and latency
+level (head/base 0.999 [0.994–1.007] on all text). Pull requests that changed the model, loading or serving code ran
+their own gate on the same build.
+
+### Upgrade notes (from 0.6.0)
+
+- **Requests with a field D1A does not define now get a 422** that names the field, on the request or on a question
+  (#369). Check clients for misspelled or extra fields, such as `instr` for `instructions`.
+- **Browser apps on another origin need `D1A_CORS_ORIGINS`**: the app's origin, or `*` for the old behaviour (#320).
+- `POST /v1/feedback` with a decision id the log does not hold now gets a 422 and writes nothing (#320).
+- **Self-learning promotes less often.** The gate waits for `promotion.min_held_out` (30) held-out groups, and re-runs
+  only once the outcomes have grown by `schedule.growth` (0.5) since its last run (#365). `schedule.growth: 0` keeps the
+  old schedule.
+- New settings, all optional: `D1A_CHAT_CONTEXT`, `D1A_CORS_ORIGINS`, `D1A_DATA_BLOCKLIST` and `D1A_LOG_REWRITE`. With
+  them unset, a server behaves as in 0.6.0, except for cross-origin calls (above).
+- The default checkpoints (`d1a.core.versions`) are unchanged: v0.6.1. 0.6.0 also serves the QAT MLX builds, with the
+  same answers (the gate above); a PyTorch run trained with `--base_ct` needs 0.7.0 to load its QAT trunk (#346).
+- Frozen suites download from D1A's own copy of their data (#345), with every pin unchanged. The routing and PR-label
+  suites are re-pinned to reworded text with the same labels and ids (#373), so a score from before may differ slightly.
+- Gemma 4 tool calls parse without mlx-lm (#348).
+
 ## [0.6.0] - 2026-10-20
 
 D1A also chats. An instruction-tuned D1A build served with its adapter unmerged answers OpenAI chat and embedding
