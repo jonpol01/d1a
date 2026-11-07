@@ -60,17 +60,22 @@ def manifest(suite):
 
 def blocklist(env=None):
     """(pattern, entries) for D1A_DATA_BLOCKLIST, or None when it is unset. One entry per line, `#` starts a comment, case
-    ignored. An entry's ASCII letter or digit ends match only at a word edge, so a short name does not hit inside a longer
-    word; other characters (CJK) match anywhere."""
+    ignored. An entry's ASCII letter or digit ends match only at a word or identifier edge, so a short name does not hit
+    inside a longer word but does inside `<Name>Tests`, `<name>_ios` or `IOS<Name>`; a plural s/es after it still matches.
+    Other characters (CJK) match anywhere."""
     path = get("D1A_DATA_BLOCKLIST", env)
     if not path:
         return None
     entries = [e for e in (line.split("#", 1)[0].strip() for line in Path(path).read_text(encoding="utf-8").splitlines()) if e]
     if not entries:
         raise ValueError("D1A_DATA_BLOCKLIST names a file with no entries")
-    word = "[A-Za-z0-9_]"
-    parts = [(f"(?<!{word})" if re.match(word, e) else "") + re.escape(e) + (f"(?!{word})" if re.search(f"{word}$", e) else "")
-             for e in entries]
+    alnum = "[A-Za-z0-9]"
+    # Case-sensitive (?-i:): an identifier part ends where a letter meets a digit, a lowercase letter an uppercase one, or an
+    # acronym a word (IOSName), so a lowercase or all-caps continuation (PATTERN for "pat") stays one word. A miss leaks the
+    # name while a false hit only blocks a row, hence the plural.
+    part = "(?<=[A-Za-z])(?=[0-9])|(?<=[0-9])(?=[A-Za-z])|(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])"
+    start, end = f"(?-i:(?<!{alnum})|{part})", f"(?:e?s)?(?-i:(?!{alnum})|{part})"
+    parts = [(start if re.match(alnum, e) else "") + re.escape(e) + (end if re.search(f"{alnum}$", e) else "") for e in entries]
     return re.compile("|".join(parts), re.IGNORECASE), len(entries)
 
 
