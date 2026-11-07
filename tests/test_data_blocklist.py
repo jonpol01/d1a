@@ -19,13 +19,25 @@ def test_blocklist_matches_whole_names_and_never_repeats_them(tmp_path):
     env = blocklist_env(tmp_path, "Northwind", "ノースウィンド", "pat.example  # a comment after an entry")
     pattern, entries = suites.blocklist(env)
     assert entries == 3
-    hits = ["Ask NORTHWIND ops", "repos/northwind/wms", "cd ~/northwind-kit", "社内のノースウィンド運用ページ", "mail pat.example today"]
-    misses = ["northwindy", "a northwind_kit id", "pat.examples"]
+    hits = ["Ask NORTHWIND ops", "repos/northwind/wms", "cd ~/northwind-kit", "社内のノースウィンド運用ページ", "mail pat.example today",
+            "a northwind_kit id"]
+    misses = ["northwindy", "pat.examply"]
     assert all(pattern.search(s) for s in hits) and not any(pattern.search(s) for s in misses)
     with pytest.raises(ValueError) as refused:
         suites.refuse_blocked(["clean line", "the Northwind board"], "mix.jsonl", env)
     assert "lines [2]" in str(refused.value) and "northwind" not in str(refused.value).lower()   # the log never repeats the name
     assert suites.refuse_blocked(["the Northwind board"], "mix.jsonl", env={}) is None   # unset: no check
+
+
+def test_blocklist_matches_a_name_inside_an_identifier_or_plural_but_not_inside_a_word(tmp_path):
+    """#378: a listed name that starts or ends part of a code identifier, or takes a plural s/es, is still the name; a word
+    that only contains it (a lowercase or all-caps continuation) is not."""
+    pattern, _ = suites.blocklist(blocklist_env(tmp_path, "Northwind", "pat", "ACME"))
+    hits = ["NorthwindTests", "northwindTests", "northwind_ios", "ios_Northwind", "runNorthwind", "IOSNorthwind", "Northwind2",
+            "v2northwind", "NORTHWIND_IOS", "ACMEKit", "AcmeTests", "acme_ios", "patTests", "the Northwinds", "NORTHWINDS",
+            "two pats", "Acmes", "the NorthwindsTests target"]
+    misses = ["northwindy", "southnorthwind", "northwindsy", "PATTERN", "pattern", "Patterns", "spat", "SPAT", "acmeco", "ACMESO"]
+    assert [s for s in hits if not pattern.search(s)] == [] and [s for s in misses if pattern.search(s)] == []
 
 
 def test_freeze_and_resolve_refuse_data_holding_a_blocked_name(tmp_path, monkeypatch):
