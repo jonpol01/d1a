@@ -55,7 +55,10 @@ Face tags. To release:
 A model release (a new Hugging Face tag) also fits its per-use-case temperatures before it ships: for each use case
 the checkpoint serves with a suite of held-out rows (routing today), run `python -m d1a.training.calibrate --run <checkpoint>
 --use-case <name> --rows <held-out rows> --transfer <another partition's rows>` and ship the `use_case_temperatures` it
-writes in `d1a_config.json`, or record why not. v0.6 shipped without its routing temperature because this step was missing (#264).
+writes in `d1a_config.json`, or record why not. v0.6 shipped without its routing temperature because this step was missing (#264),
+and the E4B-it QAT build did again (#382). So before a release, `python -m d1a.training.calibrate --run <checkpoint> --check`
+lists every use case the checkpoint trained on without a temperature and exits 1; `d1a.training.study publish` refuses the same
+gap. A value kept on purpose is written with `--use-case NAME --temperature T --reason "..."`, which records it.
 
 The release workflow checks that the tag, `pyproject.toml` and `CHANGELOG.md` agree and that no fragment is left in
 `changes/`, runs the unit tests, builds the wheel and sdist, and publishes a GitHub release whose text is that version's

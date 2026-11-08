@@ -119,3 +119,18 @@ def test_transfer_rows_saved_at_a_served_temperature_are_reported_from_their_raw
         calibrate.main(["--run", str(run), "--rows", fit, "--transfer", transfer, "--allow-in-distribution"])
         lines.append(next(l for l in capsys.readouterr().out.splitlines() if l.startswith("transfer")))
     assert lines[0] == lines[1]
+
+
+def test_a_run_trained_on_routing_ships_only_with_its_routing_temperature(tmp_path, capsys):
+    """#382: the E4B-it QAT build trained on the routing suite and shipped without a routing temperature, as v0.6 had (#264).
+    --check names the gap until a fit, or a value written with --reason, records one; a run that never trained on it has none."""
+    run = tmp_path / "run"; run.mkdir(); write_meta(run, Meta(base="b"))
+    (run / "training_config.json").write_text(json.dumps({"args": {"data": "evals/d1a/routing:generic-train"}, "suite_sha256": None}), encoding="utf-8")
+    assert calibrate.use_case_gaps(run) == ["routing"]
+    with pytest.raises(SystemExit) as stopped:
+        calibrate.main(["--run", str(run), "--check"])
+    assert stopped.value.code == 1 and "evals/d1a/routing" in capsys.readouterr().out
+    calibrate.main(["--run", str(run), "--use-case", "routing", "--temperature", "1.6", "--reason", "kept the checkpoint's: fit set uninformative"])
+    assert calibrate.use_case_gaps(run) == [] and calibrate.main(["--run", str(run), "--check"]) == []
+    (tmp_path / "other").mkdir()
+    assert calibrate.use_case_gaps(trained(tmp_path / "other", "data")) == []   # pr-labels only

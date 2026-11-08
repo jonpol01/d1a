@@ -109,6 +109,19 @@ def test_publishing_refuses_an_uncalibrated_checkpoint(machine):
         study.publish(machine.out, "o/r", allow_in_distribution=True, api=Hub())
 
 
+def test_publishing_refuses_a_routing_trained_checkpoint_without_its_routing_temperature(machine):
+    """#382: a checkpoint that trained on the routing suite needs that use case's temperature before it ships."""
+    run(machine)
+    fit = {"n": 1200, "method": "grid"}
+    machine.meta = Meta(base="b", temperature=0.9, extra={"temperature_fit": fit, "args": {"data": "evals/d1a/routing:factory-train"}})
+    with pytest.raises(SystemExit, match="routing suite"):
+        study.publish(machine.out, "o/r:p", api=Hub())
+    machine.meta = Meta(base="b", temperature=0.9, extra={"temperature_fit": fit, "args": {"data": "evals/d1a/routing:factory-train"},
+                                                           "use_case_temperature_fits": {"routing": {"method": "manual", "reason": "r"}}})
+    hub = Hub(); study.publish(machine.out, "o/r:p", api=hub)
+    assert [c[:2] for c in hub.calls][:2] == [("create", "o/r"), ("upload", "p/checkpoint")]
+
+
 def test_in_distribution_is_passed_to_the_fit(machine):
     run(machine, allow_in_distribution=True)
     assert "--allow-in-distribution" in machine.calls[3][1]
