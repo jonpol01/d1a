@@ -189,11 +189,11 @@ def training_of(suite_sha256=None, suite=None, data=None, extra_suites="", cover
     return Training(frozenset(seen), frozenset(found), tuple(unplaced), frozenset(partitions))
 
 
-def checkpoint_training(run):
+def checkpoint_training(run, meta=None):
     """Training of a checkpoint: what d1a.training.train recorded in its training_config.json (else its metadata), with the
     sidecar of its --data mix, else the provenance.json beside it."""
     config = Path(run) / "training_config.json"
-    trained = read_json(config) if config.exists() else read_meta(run).extra
+    trained = read_json(config) if config.exists() else (meta or read_meta(run)).extra
     args = trained.get("args") or {}
     training = training_of(trained.get("suite_sha256"), args.get("suite"), args.get("data"), args.get("extra_suites"),
                            (trained.get("sources") or {}).get("covered") or ())
@@ -202,6 +202,22 @@ def checkpoint_training(run):
         p = read_json(provenance)
         training = training_of(p.get("suite_sha256"), data=p.get("config", {}).get("data"))
     return training
+
+
+# The use cases served at their own temperature, by the D1A suite that teaches them: a checkpoint that trained on one of
+# these suites ships only with that use case's temperature fitted, or a value written with --temperature and --reason
+# (both leave a use_case_temperature_fits entry). v0.6 (#264) and the E4B-it QAT build (#382) shipped without one.
+USE_CASE_SUITES = {"routing": "evals/d1a/routing"}
+
+
+def use_case_gaps(run, meta=None):
+    """The use cases `run` trained on (USE_CASE_SUITES) with no use_case_temperature_fits entry. A run whose training this
+    checkout cannot place has none it can name."""
+    meta = meta or read_meta(run)
+    training = checkpoint_training(run, meta)
+    fits = meta.extra.get("use_case_temperature_fits") or {}
+    trained = training.partitions if training else frozenset()
+    return sorted(u for u, suite in USE_CASE_SUITES.items() if u not in fits and any(p.startswith(f"{suite}:") for p in trained))
 
 
 def rows_origin(path):
@@ -484,9 +500,19 @@ def main(argv=None):
     ap.add_argument("--confirm", action="append", default=[], help="with --judge, scored once the rule passes: rows whose ECE must fall (Kev round 28's tests stage); repeatable")
     ap.add_argument("--locked", action="append", default=[], help="with --judge, scored once the rule passes: locked test rows whose Brier may rise by at most 0.005,"
                     " accuracy unchanged (round 28's locked stage); repeatable")
+    ap.add_argument("--check", action="store_true", help="fit nothing: list the use cases the checkpoint trained on whose temperature"
+                    " was never fitted or written (USE_CASE_SUITES) and exit 1 if there are any; a release runs it before it ships")
     ap.add_argument("--folds", type=int, default=5)
     ap.add_argument("--seed", type=int, default=0, help="the cross-validation's folds and bootstrap; the rule's bootstrap and the interval are always seed 0 (Kev's registered read)")
     a = ap.parse_args(argv)
+    if a.check:
+        gaps = use_case_gaps(a.run)
+        for u in gaps:
+            print(f"{a.run}: trained on {USE_CASE_SUITES[u]} but has no {u!r} temperature: fit it (--use-case {u} --rows ...) or write"
+                  f" the value it should serve with --use-case {u} --temperature T --reason ...")
+        if gaps: raise SystemExit(1)
+        print(f"{a.run}: every use case it trained on has its temperature")
+        return gaps
     if a.use_case is not None:
         if not a.use_case.strip(): ap.error("--use-case needs a name")
         if len(a.use_case.strip()) > USE_CASE_MAX_LENGTH: ap.error(f"--use-case: at most {USE_CASE_MAX_LENGTH} characters, as a request's use_case")

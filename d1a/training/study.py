@@ -138,6 +138,10 @@ def publish(out, to, allow_in_distribution=False, api=None):
     ok, why = calibration(meta)
     if not ok and not (allow_in_distribution and meta.extra.get("temperature_fit")):
         raise SystemExit(f"d1a.training.study: not publishing {ckpt}: {why}")
+    from d1a.training.calibrate import use_case_gaps
+    if gaps := use_case_gaps(ckpt, meta):
+        raise SystemExit(f"d1a.training.study: not publishing {ckpt}: it trained on the {', '.join(gaps)} suite but has no temperature for"
+                         " that use case (python -m d1a.training.calibrate --use-case NAME, or --temperature T --reason ...)")
     repo, _, prefix = to.partition(":")
     if not prefix:
         raise SystemExit("d1a.training.study: --to is owner/repo:prefix (the folder the checkpoint goes to)")
