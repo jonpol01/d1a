@@ -38,8 +38,8 @@
 | [d1a-e2b-it-qat](https://huggingface.co/JohnP1/d1a-e2b-it-qat) | PyTorch (어댑터; `base_ct`: Google의 QAT int4 트렁크, 로드 시 재구성) | ✅ | ✅² | ✅¹ | ✅¹ | ✅¹ | PyTorch용 권장 E2B-it, **v0.7**(2026-11-10): 검사 11개 중 4개를 통과하지 못한 채 소유자의 결정으로 공개함(카드에 명시); 라우팅 온도 1.59(#385); Gemma 4 E2B-it와 QAT 체크포인트를 로드함 |
 | [d1a-e2b-it-qat-coreml](https://huggingface.co/JohnP1/d1a-e2b-it-qat-coreml) | Core ML (Google의 QAT int4, 그대로 유지; 어댑터는 스위치로 제공) | ✅⁴ | ✅⁴ | ✅⁴ | ✅⁴ | ✅⁴ | Core ML용 권장 E2B-it, **v0.7**(2026-11-10): 검사 7개 중 1개(사진, 음성, 영상의 MLX 빌드 대비 비교)를 통과하지 못한 채 공개함(카드에 명시, #386); 라우팅 온도 1.59(태그 `routing-t1.59`부터, #385; 이 빌드에서는 확인하지 않음); 4.6 GB; Mac(M1 Max, GPU)에서 검증했으며 iPhone에서는 아직 검증하지 않음 |
 | [d1a-e2b-it-qat-onnx](https://huggingface.co/JohnP1/d1a-e2b-it-qat-onnx) | ONNX Runtime 1.22 (Android / CPU; Google의 QAT int4, 그대로 유지; 어댑터는 스위치로 제공) | ✅ | ✅ | ❌ | ❌ | ❌ | ONNX Runtime의 D1A-E2B-it QAT v0.7: 의사결정과 채팅을 하나의 그래프와 하나의 트렁크로; 텍스트 전용; Pixel 10 Pro에서 채팅 약 12.9 토큰/초, 의사결정 약 0.4초 |
-| [d1a-e4b-it-qat-mlx-q4](https://huggingface.co/JohnP1/d1a-e4b-it-qat-mlx-q4) | MLX 4-bit (Google의 QAT int4, 그대로 유지), **병합 안 됨** | ✅ | ✅ | ✅ | ✅ | ✅ | QAT 트렁크에서 다시 학습시킨 D1A-E4B-it v0.6; v0.6과 전체적으로 동등, typesafe −7.8([스코어카드](../reports/2026-10-28-e4b-it-qat-scorecard.md)); 5.3 GB |
-| [d1a-e4b-it-qat](https://huggingface.co/JohnP1/d1a-e4b-it-qat) | PyTorch (어댑터; `base_ct`: Google의 QAT int4 트렁크, 로드 시 재구성) | ✅ | ✅² | ✅¹ | ✅¹ | ✅¹ | PyTorch용 같은 어댑터; Gemma 4 E4B-it와 QAT 체크포인트를 로드합니다 |
+| [d1a-e4b-it-qat-mlx-q4](https://huggingface.co/JohnP1/d1a-e4b-it-qat-mlx-q4) | MLX 4-bit (Google의 QAT int4, 그대로 유지), **병합 안 됨** | ✅ | ✅ | ✅ | ✅ | ✅ | QAT 트렁크에서 다시 학습시킨 D1A-E4B-it v0.6; v0.6과 전체적으로 동등, typesafe −7.8([스코어카드](../reports/2026-10-28-e4b-it-qat-scorecard.md)); 라우팅 온도 1.41(태그 `routing-t1.41`부터, #382); 5.3 GB |
+| [d1a-e4b-it-qat](https://huggingface.co/JohnP1/d1a-e4b-it-qat) | PyTorch (어댑터; `base_ct`: Google의 QAT int4 트렁크, 로드 시 재구성) | ✅ | ✅² | ✅¹ | ✅¹ | ✅¹ | PyTorch용 같은 어댑터; Gemma 4 E4B-it와 QAT 체크포인트를 로드합니다; 라우팅 온도 1.41(태그 `routing-t1.41`부터, #382) |
 
 ¹ 별도의 PyTorch 미디어 서버 `python -m d1a.serving.media --run <repo>`를 통해 사용하며, 이 서버는 전체 Gemma 4
 모델(bf16, E2B 기준 약 10 GB)을 로드합니다([사진, 음성, 영상](USAGE.md)).
