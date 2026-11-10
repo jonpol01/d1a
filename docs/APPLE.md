@@ -88,10 +88,14 @@ photos, voice and video (#341). 4.6 GB.
   encoder (fp32); the embedding tables (4-bit) as host row lookups.
 - **Runs on the GPU,** not the Neural Engine, and has not been run on an iPhone or iPad yet. Use it through the repository's
   Python reference runner, `reference/d1a_coreml_qat.py`; `io.json` lists the host side for a port.
-- **Checks on an Apple M1 Max:**
-  - decisions: 0 of 42 answers flipped against the MLX build; largest probability change against fp32 0.0017 (the MLX build
-    itself is 0.035 from fp32);
-  - photos, voice and video (the playground's 14 requests, 28 answers): 0 flipped against the MLX build;
-  - chat (8 photos, 427 answer tokens, teacher-forced) against fp32 PyTorch on the CPU: 1 token different (a near-tie).
+- **v0.7 since 2026-11-10** (tag `v0.6` keeps the first version): the v0.6 packages with only the adapter's weights replaced.
+- **Checks on an Apple M1 Max** (v0.7; fp32 is the PyTorch model on a CUDA GPU):
+  - decisions (28 requests, 42 answers): the same answer as the MLX build on all 42 (largest change 0.028); against fp32,
+    largest change 0.048, mean 0.006 (the MLX build 0.051, 0.008);
+  - photos, voice and video (the playground's 14 requests, 28 answers): against fp32, largest change 0.117 and 1 top answer
+    different (the MLX build 0.140 and 2). The two Mac builds share this gap; its cause is not found yet (#386). Against the
+    MLX build the largest change is 0.051, which missed the 0.05 limit set before the check; the card states it;
+  - chat (8 photos, 427 answer tokens, teacher-forced, v0.6) against fp32 PyTorch on the CPU: 1 token different (a near-tie).
+    v0.7 gives the same chat tokens as v0.6, since chat runs with the adapter off.
 - **Time on the M1 Max:** about 0.4 s per decision with a photo or a voice clip, 8 to 11 s with a 16-frame video, and about
   85 ms per chat token.
