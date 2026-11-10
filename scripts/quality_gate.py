@@ -4,7 +4,9 @@ Two d1a.serving.serve instances, one per version, answer the same requests: ever
 d1a-playground checkout, or read from a file) and the labeler replay states (private PR text: kept under runs/, never
 committed). Each request goes to both, alternating which goes first. A third run, base against base, measures the
 noise floor of that setup; with --head-run (a new checkpoint, so two different sets of files) the floor's second server
-loads a byte copy of base, because serving two different files is itself slower than serving one (#371). --suites also scores frozen suites with d1a.eval.benchmark from each version.
+loads a byte copy of base, because serving two different files is itself slower than serving one (#371). Every server's
+files are read through once before it starts (warm), so no side is measured on a cold page cache. --suites also scores
+frozen suites with d1a.eval.benchmark from each version.
 
 FAIL on any changed choice, any probability moving more than --tol, any request one side answers and the other does
 not, head's latency above the floor (its paired ratio's 95% interval entirely above the floor's), or a suite whose
@@ -294,14 +296,39 @@ def module(path, name):
     return new if (Path(path) / (new.replace(".", "/") + ".py")).exists() else f"d1a.{name}"
 
 
+def checkpoint_dir(run, local_only=False):
+    """The folder of the checkpoint `run`: itself, or for a Hub id `repo[@revision]` its snapshot in the local cache."""
+    src = Path(run)
+    if src.is_dir():
+        return src
+    from huggingface_hub import snapshot_download
+    repo, _, rev = run.partition("@")
+    return Path(snapshot_download(repo, revision=rev or None, local_files_only=local_only))
+
+
+def warm(run):
+    """Reads every file of the checkpoint `run` once, so its server starts with the weights in the page cache. Gemma 4
+    reads its per-layer embedding rows from the weight file on every request, so a file no one read lately answers ~3%
+    slower through the measured pass: the head's new checkpoint was cold while base (read by the floor) and the floor's
+    copy (just written) were warm, and a byte copy of base failed the gate against itself. Steady-state latency is still
+    measured; only a slower first read of the files (a cold start) is no longer charged. A Hub id not in the local cache
+    is left alone, and said so: its server downloads it, which leaves it warm."""
+    try:
+        src = checkpoint_dir(run, local_only=True)
+    except Exception as e:
+        print(f"not warmed: {run} ({type(e).__name__})", flush=True)
+        return
+    for f in sorted(src.rglob("*")):
+        if f.is_file():
+            with open(f, "rb") as r:
+                while r.read(64 << 20):
+                    pass
+
+
 def byte_copy(run, into):
     """A full byte copy of the checkpoint `run` (a folder, or a Hub id `repo[@revision]` from the local cache) at `into`:
     data copied, never an APFS clone, so the copy is a second set of files as a new checkpoint is (#371)."""
-    src = Path(run)
-    if not src.is_dir():
-        from huggingface_hub import snapshot_download
-        repo, _, rev = run.partition("@")
-        src = Path(snapshot_download(repo, revision=rev or None))
+    src = checkpoint_dir(run)
     for f in sorted(src.rglob("*")):
         if f.is_file():
             dst = Path(into) / f.relative_to(src); dst.parent.mkdir(parents=True, exist_ok=True)
@@ -369,12 +396,16 @@ def run_pair(base_dir, head_dir, reqs, run, ports, logs, head_run=None, head_lea
     """Both servers answer every request, interleaved; the head server loads `head_run` when given (a new checkpoint) and
     reads `head_learning` (a settings file) when given. `sequential`: one server at a time, base then head, for a machine
     that cannot hold both models at once (the serving Mac, #285). The floor is measured the same way, so the latency check
-    still compares like with like; the suites already load one model at a time."""
+    still compares like with like; the suites already load one model at a time. Each server's files are read through
+    right before it starts (warm)."""
     if not sequential:
+        warm(run); warm(head_run or run)
         with server(base_dir, ports[0], run, f"{logs}.base.log"), server(head_dir, ports[1], head_run or run, f"{logs}.head.log", head_learning):
             return interleave(reqs, ports[0], ports[1])
+    warm(run)
     with server(base_dir, ports[0], run, f"{logs}.base.log"):
         base = one_side(reqs, ports[0])
+    warm(head_run or run)
     with server(head_dir, ports[1], head_run or run, f"{logs}.head.log", head_learning):
         head = one_side(reqs, ports[1])
     return [{"group": g, "name": n, "base": b[0], "head": h[0], "base_ms": b[1], "head_ms": h[1]} for (g, n, _, _), b, h in zip(reqs, base, head)]
@@ -566,6 +597,7 @@ def main():
         finally:
             if floor_run: shutil.rmtree(floor_run, ignore_errors=True)
         report["floor_setup"] = "base vs a byte copy of base" if floor_run else "base vs base (the same files)"
+        report["warmed"] = True   # every server's files read through before it started (warm), floor and gate alike
         records = run_pair(base_dir, head_dir, reqs, a.run, ports, out / "gate", head_run=a.head_run, head_learning=a.head_learning, sequential=a.sequential)
         changes = [] if a.head_run else None
         groups, failures = compare(records, a.tol, changes, expected)
