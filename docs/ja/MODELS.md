@@ -38,8 +38,8 @@
 | [d1a-e2b-it-qat](https://huggingface.co/JohnP1/d1a-e2b-it-qat) | PyTorch（アダプター。`base_ct`: Google の QAT int4 トランク、ロード時に再構築） | ✅ | ✅² | ✅¹ | ✅¹ | ✅¹ | PyTorch での推奨の E2B-it、**v0.7**（2026-11-10）: 11 項目のチェックのうち 4 項目を満たさないまま、オーナーの判断で公開しました（カードに明記）。ルーティング温度 1.59（#385）。Gemma 4 E2B-it と QAT チェックポイントをロードします |
 | [d1a-e2b-it-qat-coreml](https://huggingface.co/JohnP1/d1a-e2b-it-qat-coreml) | Core ML（Google の QAT int4、厳密に保持。アダプターはスイッチ） | ✅⁴ | ✅⁴ | ✅⁴ | ✅⁴ | ✅⁴ | Core ML での推奨の E2B-it、**v0.7**（2026-11-10）: 7 項目のチェックのうち 1 項目（写真、音声、動画の MLX ビルドとの比較）を満たさないまま公開しました（カードに明記、#386）。4.6 GB。Mac（M1 Max、GPU）で検証済み、iPhone では未検証 |
 | [d1a-e2b-it-qat-onnx](https://huggingface.co/JohnP1/d1a-e2b-it-qat-onnx) | ONNX Runtime 1.22（Android / CPU。Google の QAT int4、厳密に保持。アダプターはスイッチ） | ✅ | ✅ | ❌ | ❌ | ❌ | ONNX Runtime 上の D1A-E2B-it QAT v0.7。意思決定とチャットを1つのグラフ、1つのトランクで。テキストのみ。Pixel 10 Pro でチャット約 12.9 トークン/秒、意思決定約 0.4 秒 |
-| [d1a-e4b-it-qat-mlx-q4](https://huggingface.co/JohnP1/d1a-e4b-it-qat-mlx-q4) | MLX 4-bit（Google の QAT int4、厳密に保持）、**未マージ** | ✅ | ✅ | ✅ | ✅ | ✅ | QAT トランク上で再学習した D1A-E4B-it v0.6。v0.6 と全体では同等、typesafe −7.8（[スコアカード](../reports/2026-10-28-e4b-it-qat-scorecard.md)）。5.3 GB |
-| [d1a-e4b-it-qat](https://huggingface.co/JohnP1/d1a-e4b-it-qat) | PyTorch（アダプター。`base_ct`: Google の QAT int4 トランク、ロード時に再構築） | ✅ | ✅² | ✅¹ | ✅¹ | ✅¹ | PyTorch での同じアダプター。Gemma 4 E4B-it と QAT チェックポイントをロードします |
+| [d1a-e4b-it-qat-mlx-q4](https://huggingface.co/JohnP1/d1a-e4b-it-qat-mlx-q4) | MLX 4-bit（Google の QAT int4、厳密に保持）、**未マージ** | ✅ | ✅ | ✅ | ✅ | ✅ | QAT トランク上で再学習した D1A-E4B-it v0.6。v0.6 と全体では同等、typesafe −7.8（[スコアカード](../reports/2026-10-28-e4b-it-qat-scorecard.md)）。ルーティング温度 1.41（タグ `routing-t1.41` 以降、#382）。5.3 GB |
+| [d1a-e4b-it-qat](https://huggingface.co/JohnP1/d1a-e4b-it-qat) | PyTorch（アダプター。`base_ct`: Google の QAT int4 トランク、ロード時に再構築） | ✅ | ✅² | ✅¹ | ✅¹ | ✅¹ | PyTorch での同じアダプター。Gemma 4 E4B-it と QAT チェックポイントをロードします。ルーティング温度 1.41（タグ `routing-t1.41` 以降、#382） |
 
 ¹ 別プロセスの PyTorch メディアサーバー `python -m d1a.serving.media --run <repo>` 経由です。完全な Gemma 4
 モデル（bf16、E2B で約 10 GB）をロードします（[写真・音声・動画](USAGE.md)）。
