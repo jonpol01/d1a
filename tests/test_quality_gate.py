@@ -206,6 +206,37 @@ def test_sequential_never_holds_two_servers_and_pairs_the_same_records(monkeypat
     assert peak[0] == 2   # without the flag both servers run together, as before
 
 
+def test_every_server_starts_on_files_read_through(tmp_path, monkeypatch, capsys):
+    """A checkpoint no one read lately answers slower through the measured pass (Gemma 4 reads per-layer embedding rows
+    from the weight file per request): read each side's files right before its server starts, floor and gate alike."""
+    from contextlib import contextmanager
+    events = []
+
+    @contextmanager
+    def fake_server(path, port, run, log, learning=None):
+        events.append(("serve", run)); yield port
+
+    monkeypatch.setattr(gate, "server", fake_server)
+    monkeypatch.setattr(gate, "warm", lambda run: events.append(("warm", run)))
+    monkeypatch.setattr(gate, "interleave", lambda reqs, p0, p1: [])
+    monkeypatch.setattr(gate, "one_side", lambda reqs, port: [])
+    gate.run_pair("base", "head", [], "old", [1, 2], "x", head_run="new")
+    assert events == [("warm", "old"), ("warm", "new"), ("serve", "old"), ("serve", "new")]
+    events.clear(); gate.run_pair("base", "head", [], "old", [1, 2], "y", head_run="new", sequential=True)
+    assert events == [("warm", "old"), ("serve", "old"), ("warm", "new"), ("serve", "new")]
+    monkeypatch.undo()
+
+    run = tmp_path / "run"; (run / "sub").mkdir(parents=True)
+    (tmp_path / "blob").write_bytes(b"w" * 10); (run / "model.safetensors").symlink_to(tmp_path / "blob")   # the Hub cache's layout
+    (run / "sub" / "d1a_config.json").write_text("{}", encoding="utf-8")
+    read, real_open = [], open
+    monkeypatch.setattr("builtins.open", lambda f, *a, **k: (read.append(Path(f).name), real_open(f, *a, **k))[1])
+    gate.warm(str(run))
+    assert sorted(read) == ["d1a_config.json", "model.safetensors"]
+    gate.warm("no-such-org/no-such-model@v0")   # not a folder and not in the local cache: left alone, nothing downloaded
+    assert "not warmed: no-such-org/no-such-model@v0" in capsys.readouterr().out   # and said so: a silent skip is this bug again
+
+
 def test_each_checkout_runs_its_own_module_paths(tmp_path):
     """A version from before the package layout (#60), such as the serving Mac's pin, serves as d1a.serve; a newer one as d1a.serving.serve."""
     old, new = tmp_path / "old", tmp_path / "new"
