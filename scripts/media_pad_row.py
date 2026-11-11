@@ -61,10 +61,15 @@ def main():
     pad = cfg["pad_id"]
     bits, row_ref = local_row(a.source, pad) if Path(a.source).is_dir() else hub_row(a.source, pad)
     row = mx.array(bits).view(mx.bfloat16)
-    stored = {part: safetensors_tensor(f, f"language_model.model.{PLE}.{part}") for f in weight_shards(out) for part in ("weight", "scales", "biases")}
-    stored = {k: v for k, v in stored.items() if v is not None}
+    stored = {}   # each part from the shard that holds it: mlx-lm splits an export past 5 GB
+    for f in weight_shards(out):
+        for part in ("weight", "scales", "biases"):
+            if part not in stored and (found := safetensors_tensor(f, f"language_model.model.{PLE}.{part}")) is not None:
+                stored[part] = found
     w, s, b = mx.quantize(row[None], group_size=q["group_size"], bits=q["bits"], mode=q.get("mode", "affine"))
     for part, mine in (("weight", w), ("scales", s), ("biases", b)):
+        if mine is None: continue   # a mode without biases
+        if part not in stored: raise SystemExit(f"{out}: no {PLE}.{part} in {[f.name for f in weight_shards(out)]}")
         table, dtype = stored[part]
         theirs = np.asarray(table[pad])
         ours = np.asarray(mine[0].view(mx.uint16) if dtype == "BF16" else mine[0])

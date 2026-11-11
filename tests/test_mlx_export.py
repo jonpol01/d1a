@@ -231,8 +231,10 @@ def test_the_media_pad_row_script_takes_only_the_row_the_export_was_quantized_fr
     q = {"group_size": 64, "bits": 4, "mode": "affine"}
     write_export(exp, quantization={**q, "embeddings": True, f"language_model.model.{PLE}": q})
     w, s, b = mx.quantize(table, group_size=64, bits=4)
-    mx.save_safetensors(str(exp / "model.safetensors"), {f"language_model.model.{PLE}.{k}": v for k, v in (("weight", w), ("scales", s), ("biases", b))})
-    before = (exp / "model.safetensors").read_bytes()
+    (exp / "model.safetensors").unlink()   # two shards, the table in the first, as mlx-lm splits an export past 5 GB
+    mx.save_safetensors(str(exp / "model-00001-of-00002.safetensors"), {f"language_model.model.{PLE}.{k}": v for k, v in (("weight", w), ("scales", s), ("biases", b))})
+    mx.save_safetensors(str(exp / "model-00002-of-00002.safetensors"), {"language_model.model.norm.weight": mx.ones(8)})
+    before = [(exp / f"model-0000{i}-of-00002.safetensors").read_bytes() for i in (1, 2)]
     run = lambda src: subprocess.run([sys.executable, str(Path(__file__).parents[1] / "scripts" / "media_pad_row.py"), str(exp), "--from", str(src)],
                                      capture_output=True, text=True)
     for name, t in (("other", mx.concatenate([table[:1] * 1.01, table[1:]])), ("own", table)):
@@ -244,7 +246,7 @@ def test_the_media_pad_row_script_takes_only_the_row_the_export_was_quantized_fr
     assert r.returncode == 0, r.stderr
     cfg = json.loads((exp / EXPORT_CONFIG).read_text(encoding="utf-8"))
     assert cfg["media_pad_row"] == MEDIA_PAD_ROW and mx.array_equal(mx.load(str(exp / MEDIA_PAD_ROW))[PLE], table[0])
-    assert (exp / "model.safetensors").read_bytes() == before
+    assert [(exp / f"model-0000{i}-of-00002.safetensors").read_bytes() for i in (1, 2)] == before
     assert run(tmp_path / "own").returncode != 0   # already named
 
 
