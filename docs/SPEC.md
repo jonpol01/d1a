@@ -162,7 +162,10 @@ the head, or loading stops. D1A 0.5 stops writing it; reading it stays.
 `adapter_sha256`, `lora`, `head_dim`, `hidden_size`, `temperature`, `leading_ids`, `bos_id`, `delimiter_ids`, `pad_id`,
 `dtype`, `quantization` (with `"grid": "q4_0"` when the weights are on llama.cpp's Q4_0 grid, `--q4-0`) and `head`, and from D1A 0.6 `temperature_fit`, `use_case_temperatures` and `use_case_temperature_fits`
 (the calibration records of §6; an export without them has no use-case temperatures). The token layout it records is checked
-against its tokenizer at load.
+against its tokenizer at load. After D1A 0.7.0, an export whose per-layer embeddings are quantized may name `media_pad_row`: a
+file in the folder (`media_pad_row.safetensors`, tensor `embed_tokens_per_layer`) holding the pad id's per-layer embedding
+row as stored before quantization. Media positions read that row instead of the table's (#386). A named file that is
+missing stops the load.
 
 ## 8. Conformance
 

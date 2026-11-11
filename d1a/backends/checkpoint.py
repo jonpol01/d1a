@@ -498,7 +498,7 @@ class Checkpoint:
     def _load_mlx(self, tok, opts):
         if not mlx_available():
             raise ValueError("the MLX backend needs mlx-lm on Apple Silicon (the `mlx` extra)")
-        from d1a.backends.mlx import ADAPTER_DIR, MLXDecisionModel, attach_lora, merge_lora   # after the refusal: without mlx-lm this import would hide it
+        from d1a.backends.mlx import ADAPTER_DIR, MLXDecisionModel, attach_lora, merge_lora, read_media_pad_row   # after the refusal: without mlx-lm this import would hide it
         flash = opts.ple_flash is not False
         if self.export is not None:
             unmerged = self.export.get("adapter") == "unmerged"   # export_mlx(unmerged=True): the adapter beside the base (#274)
@@ -507,6 +507,8 @@ class Checkpoint:
             if opts.lora_scale != 1 and not unmerged:
                 raise ValueError(f"an MLX export holds merged weights; lora_scale needs its source checkpoint {self.export['source']}")
             model = MLXDecisionModel(self.path, pad_id(tok), head_dim=self.meta.head_dim, ple_flash=flash)
+            if (row := read_media_pad_row(self.path, self.export)) is not None:
+                model.use_media_pad_row(row)
             if unmerged:
                 model.loras = attach_lora(model.lm, Path(self.path) / ADAPTER_DIR, opts.lora_scale)
             return model

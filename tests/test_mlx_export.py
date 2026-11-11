@@ -157,3 +157,116 @@ def test_gemma4_branch_pass_runs_shared_layers_on_the_read_positions_only():
     assert seen == [(picks, 1)] * len(shared)
     for z, r in zip(got, rows):
         assert torch.allclose(z, r, atol=1e-4), (z - r).abs().max()
+
+
+apple_mlx = pytest.mark.skipif(platform.system() != "Darwin" or platform.machine() != "arm64" or not mlx_available(), reason="MLX runs on Apple Silicon only")
+
+
+@apple_mlx
+def test_media_positions_read_the_pad_row_as_a_table_holding_it_would():
+    """#386: with a media pad row, a media request answers bit for bit as a model whose per-layer table holds that row
+    (the same scale, the same dtype), and a text request answers bit for bit as without one."""
+    import mlx.core as mx
+    from d1a.backends.mlx import MLXDecisionModel
+    mx.random.seed(0)
+    m = MLXDecisionModel.from_lm(tiny_gemma4(), pad_id=0, head_dim=16)
+    rng = np.random.default_rng(3)
+    enc = fake_encoding(rng, 20, [(5, 2), (9, 3)])   # ids 1..63: only the media positions become the pad id
+    at = [4, 5, 6, 7, 8]
+    media = dict(enc, media=(at, rng.standard_normal((len(at), 64)).astype(np.float32)))
+    table = m.text.embed_tokens_per_layer
+    row = mx.array(rng.standard_normal(table.weight.shape[1]).astype(np.float32))
+    plain_media, plain_text = m.forward(media), m.forward(enc)
+    assert m.media_pad_row_source == "table"
+    m.use_media_pad_row(row)
+    assert m.media_pad_row_source == "export"
+    got_media, got_text = m.forward(media), m.forward(enc)
+    m.media_pad_row, saved = None, table.weight
+    table.weight = mx.concatenate([row[None], saved[1:]])
+    want = m.forward(media)
+    table.weight = saved
+    assert all(torch.equal(a, b) for a, b in zip(got_media, want))
+    assert all(torch.equal(a, b) for a, b in zip(got_text, plain_text))
+    assert not all(torch.equal(a, b) for a, b in zip(got_media, plain_media))
+    with pytest.raises(ValueError, match="values"):
+        m.use_media_pad_row(row[:-1])
+
+
+@apple_mlx
+def test_the_export_takes_the_pad_row_before_quantizing():
+    import mlx.core as mx
+    import mlx.nn as nn
+    from d1a.backends.mlx import PLE, media_pad_row_of
+    lm = tiny_gemma4()
+    want = mx.array(getattr(lm.language_model.model, PLE).weight[0])
+    row = media_pad_row_of(lm, 0)
+    nn.quantize(lm, group_size=32, bits=4, class_predicate=lambda path, module: path.endswith(PLE))
+    assert mx.array_equal(row, want) and media_pad_row_of(lm, 0) is None
+
+
+@apple_mlx
+def test_an_export_naming_a_missing_media_pad_row_refuses_to_load(tmp_path):
+    import mlx.core as mx
+    from d1a.backends.mlx import MEDIA_PAD_ROW, read_media_pad_row, write_media_pad_row
+    _, before = write_export(tmp_path)   # an export from before #386 names none: media read the table's row
+    assert read_media_pad_row(tmp_path, before) is None
+    _, cfg = write_export(tmp_path, media_pad_row=MEDIA_PAD_ROW)
+    with pytest.raises(ValueError, match="not in the folder"):
+        read_media_pad_row(tmp_path, cfg)
+    row = mx.arange(8).astype(mx.bfloat16)
+    write_media_pad_row(tmp_path, row)
+    assert mx.array_equal(read_media_pad_row(tmp_path, cfg), row)
+
+
+@apple_mlx
+def test_the_media_pad_row_script_takes_only_the_row_the_export_was_quantized_from(tmp_path):
+    import subprocess
+    import sys
+    from pathlib import Path
+    import mlx.core as mx
+    from d1a.backends.mlx import MEDIA_PAD_ROW, PLE
+    rng = np.random.default_rng(0)
+    table = mx.array(rng.standard_normal((8, 128)).astype(np.float32)).astype(mx.bfloat16)
+    exp = tmp_path / "export"; exp.mkdir()
+    q = {"group_size": 64, "bits": 4, "mode": "affine"}
+    write_export(exp, quantization={**q, "embeddings": True, f"language_model.model.{PLE}": q})
+    w, s, b = mx.quantize(table, group_size=64, bits=4)
+    (exp / "model.safetensors").unlink()   # two shards, the table in the first, as mlx-lm splits an export past 5 GB
+    mx.save_safetensors(str(exp / "model-00001-of-00002.safetensors"), {f"language_model.model.{PLE}.{k}": v for k, v in (("weight", w), ("scales", s), ("biases", b))})
+    mx.save_safetensors(str(exp / "model-00002-of-00002.safetensors"), {"language_model.model.norm.weight": mx.ones(8)})
+    before = [(exp / f"model-0000{i}-of-00002.safetensors").read_bytes() for i in (1, 2)]
+    run = lambda src: subprocess.run([sys.executable, str(Path(__file__).parents[1] / "scripts" / "media_pad_row.py"), str(exp), "--from", str(src)],
+                                     capture_output=True, text=True)
+    for name, t in (("other", mx.concatenate([table[:1] * 1.01, table[1:]])), ("own", table)):
+        (tmp_path / name).mkdir()
+        mx.save_safetensors(str(tmp_path / name / "model.safetensors"), {f"model.language_model.{PLE}.weight": t})
+    r = run(tmp_path / "other")
+    assert r.returncode != 0 and "not the checkpoint" in r.stderr and not (exp / MEDIA_PAD_ROW).exists()
+    r = run(tmp_path / "own")
+    assert r.returncode == 0, r.stderr
+    cfg = json.loads((exp / EXPORT_CONFIG).read_text(encoding="utf-8"))
+    assert cfg["media_pad_row"] == MEDIA_PAD_ROW and mx.array_equal(mx.load(str(exp / MEDIA_PAD_ROW))[PLE], table[0])
+    assert [(exp / f"model-0000{i}-of-00002.safetensors").read_bytes() for i in (1, 2)] == before
+    assert run(tmp_path / "own").returncode != 0   # already named
+
+
+@apple_mlx
+def test_a_loaded_media_pad_row_answers_on_the_servers_model_thread(tmp_path):
+    """d1a.serving.serve runs the model on its own thread, and an array mx.load left lazy belongs to the loading thread's
+    stream ("There is no Stream(cpu, 0) in current thread"), so the row is evaluated when it is taken."""
+    import threading
+    import mlx.core as mx
+    from d1a.backends.mlx import MLXDecisionModel, read_media_pad_row, write_media_pad_row
+    mx.random.seed(0)
+    m = MLXDecisionModel.from_lm(tiny_gemma4(), pad_id=0, head_dim=16)
+    rng = np.random.default_rng(4)
+    enc = fake_encoding(rng, 12, [(5, 2)])
+    media = dict(enc, media=([3, 4, 5], rng.standard_normal((3, 64)).astype(np.float32)))
+    write_media_pad_row(tmp_path, mx.array(rng.standard_normal(m.text.embed_tokens_per_layer.weight.shape[1]).astype(np.float32)))
+    m.use_media_pad_row(read_media_pad_row(tmp_path, {"media_pad_row": "media_pad_row.safetensors"}))
+    out = {}
+    def run():
+        try: out["ok"] = m.forward(media)
+        except Exception as e: out["error"] = e
+    t = threading.Thread(target=run); t.start(); t.join()
+    assert "error" not in out, out.get("error")

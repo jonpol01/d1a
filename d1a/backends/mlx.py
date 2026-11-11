@@ -1,5 +1,5 @@
 # Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); Gemma 4 bases (sliding-window and KV-shared layers) and quantized MLX exports (export_mlx); model-family details from d1a.backends.backbone; Gemma 4's per-layer embeddings read from the weight files per request (FlashEmbedding); photo and voice soft tokens in the state pass (d1a.serving.media); the state pass skips Gemma 4's KV-shared layers; option isolation removed; the branch pass runs Gemma 4's KV-shared layers only at the positions the head reads; each request read at its use case's temperature (#209).
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); Gemma 4 bases (sliding-window and KV-shared layers) and quantized MLX exports (export_mlx); model-family details from d1a.backends.backbone; Gemma 4's per-layer embeddings read from the weight files per request (FlashEmbedding); photo and voice soft tokens in the state pass (d1a.serving.media); the state pass skips Gemma 4's KV-shared layers; option isolation removed; the branch pass runs Gemma 4's KV-shared layers only at the positions the head reads; each request read at its use case's temperature (#209); media positions read an export's per-layer pad row as stored before quantization (#386).
 """Apple Silicon backend for the Qwen3.5 and Gemma 4 checkpoints: mlx-lm's Metal implementation of the backbone under
 D1A's own encoder and pointer head.
 
@@ -41,6 +41,7 @@ from d1a.core.encoding import encode, rows_of, rows_per_pass
 from d1a.core.head import PointerHead
 
 PLE = "embed_tokens_per_layer"   # Gemma 4's per-layer embedding table
+MEDIA_PAD_ROW = "media_pad_row.safetensors"   # an export's per-layer row of the pad id as stored before quantization (#386)
 SAFETENSORS_NP = {"U32": np.uint32, "BF16": np.uint16, "F16": np.float16, "F32": np.float32}   # bf16 is read as its bits
 CACHE_LIMIT = 1 << 30   # MLX's buffer cache keeps a buffer per new request shape; Kev-4B on an M5, 50 requests: 1.0 GB cached vs 3.7 GB unbounded, same latency
 
@@ -245,6 +246,7 @@ class MLXDecisionModel:
     backend, device = "mlx", "mlx"
     ple_flash = False       # set by __init__ when Gemma 4's per-layer embeddings are read from the weight files
     prefix_min_tokens = 0   # d1a.serving.serve caches the state prefix for every request: on Metal the branch-only pass is always the cheaper one
+    media_pad_row = None    # use_media_pad_row: the per-layer row media positions read, instead of the table's (#386)
 
     def __init__(self, base_dir, pad_id, head_dim=256, ple_flash=True):
         """base_dir: an mlx-lm loadable directory: the base snapshot (weights as stored, bf16) or an export_mlx folder
@@ -273,6 +275,25 @@ class MLXDecisionModel:
         self.hybrid = self.backbone.hybrid
         self.pad_id = pad_id
         self.head = PointerHead(self.text.norm.weight.shape[0], dp=head_dim).eval()   # the final norm's width: a quantized embedding's weight is packed
+
+    def use_media_pad_row(self, row):
+        """Read the pad id's per-layer embedding at media positions from `row` (the table's row as stored before
+        quantization, flat, an export's MEDIA_PAD_ROW) instead of from the table (#386). Gemma 4 looks that one row up at
+        every soft-token position, hundreds per photo or video, so a 4-bit table's error in it adds up where an error in
+        other rows does not. Text never reads the pad row at a real position, so its answers do not change."""
+        t = self.text
+        width = t.config.num_hidden_layers * t.hidden_size_per_layer_input if getattr(t, "hidden_size_per_layer_input", 0) else 0
+        if not width: raise ValueError("a media pad row is for Gemma 4's per-layer embeddings, which this model does not have")
+        if tuple(row.shape) != (width,): raise ValueError(f"the media pad row has {tuple(row.shape)} values, the per-layer table's rows {width}")
+        mx.eval(row)   # a lazy array (mx.load's) belongs to this thread's stream; serve answers on its own model thread
+        self.media_pad_row = row
+
+    @property
+    def media_pad_row_source(self):
+        """Where media positions read the pad id's per-layer row: "export" (use_media_pad_row), "table", or None (no
+        per-layer embeddings). /v1/models reports it: the same files answer media differently without #386's code."""
+        if not getattr(self.text, "hidden_size_per_layer_input", 0): return None
+        return "export" if self.media_pad_row is not None else "table"
 
     @property
     def dtype(self):
@@ -376,7 +397,8 @@ class MLXDecisionModel:
         """The state pass with media soft tokens (d1a.serving.media.with_media) in place of its placeholder tokens, as transformers'
         Gemma 4 does it: placeholders become the pad token for the embedding and per-layer-embedding lookups, then their
         rows of the (scaled) embedding take the soft tokens. mlx-lm scales whatever embeddings it is given, so the soft
-        tokens go in divided by that scale."""
+        tokens go in divided by that scale. With a media pad row (use_media_pad_row), the placeholders' per-layer inputs
+        are that row, scaled as mlx-lm scales a looked-up row."""
         ids = list(ids)
         for i in at: ids[i] = self.pad_id
         x = mx.array([ids], dtype=mx.int32)
@@ -384,6 +406,9 @@ class MLXDecisionModel:
         idx = mx.array(at, dtype=mx.int32)
         emb[0, idx] = (mx.array(embeds) / self.text.embed_scale).astype(emb.dtype)
         ple = self.text._get_per_layer_inputs(x) if self.text.hidden_size_per_layer_input else None
+        if ple is not None and self.media_pad_row is not None and at:
+            row = mx.unflatten(self.media_pad_row.astype(ple.dtype) * self.text.embed_tokens_per_layer_scale, -1, tuple(ple.shape[-2:]))
+            ple[0, idx] = mx.broadcast_to(row, (len(at), *row.shape))
         self._state(x, cache, input_embeddings=emb, per_layer_inputs=ple)
 
     def _branch_logits(self, enc, cache):
@@ -585,6 +610,7 @@ def export_mlx(ck, out, bits=None, group_size=64, embeddings=True, per_layer_bit
         bits, group_size = 4, 32
     if not unmerged:
         merge_lora(lm, ck.path)
+    pad_row = media_pad_row_of(lm, pad_id(tok)) if bits else None   # before quantization: media read it as stored (#386)
     quantization = None
     if q4_0_grid:
         if per_layer_bits or bits not in (None, 4) or group_size not in (32, 64):
@@ -613,6 +639,7 @@ def export_mlx(ck, out, bits=None, group_size=64, embeddings=True, per_layer_bit
     norm = lm.language_model.model.norm.weight   # read before save_model donates the weights
     hidden, dtype = norm.shape[0], str(norm.dtype).removeprefix("mlx.core.")
     out.mkdir(parents=True, exist_ok=True)
+    pad_row_file = write_media_pad_row(out, pad_row) if pad_row is not None and media_pad_row_of(lm, pad_id(tok)) is None else None   # only once quantized
     save_model(out, lm, donate_model=True)
     save_config(config, out / "config.json")
     keep_vision_config(out / "config.json", Path(base_dir(meta)) / "config.json")
@@ -630,5 +657,35 @@ def export_mlx(ck, out, bits=None, group_size=64, embeddings=True, per_layer_bit
             shutil.copyfile(ck.file(name), out / ADAPTER_DIR / name)
     cfg = export_config(ck, leading, delimiters, pad_id(tok), hidden, quantization, dtype)
     if unmerged: cfg["adapter"] = "unmerged"
+    if pad_row_file: cfg[MEDIA_PAD_ROW_KEY] = pad_row_file
     (out / EXPORT_CONFIG).write_text(json.dumps(cfg, indent=2) + "\n", encoding="utf-8")
     return cfg
+
+
+MEDIA_PAD_ROW_KEY = "media_pad_row"   # the d1a_config key naming an export's MEDIA_PAD_ROW file
+
+
+def media_pad_row_of(lm, pad):
+    """Row `pad` of `lm`'s per-layer embedding table as stored, evaluated; None when the table is quantized or absent."""
+    import mlx.nn as nn
+    table = getattr(getattr(getattr(lm, "language_model", None), "model", None), PLE, None)
+    if not isinstance(table, nn.Embedding): return None
+    row = mx.array(table.weight[pad]); mx.eval(row)
+    return row
+
+
+def write_media_pad_row(out, row):
+    """Write `row` (the per-layer table's pad row as stored before quantization, flat) as `out`'s MEDIA_PAD_ROW. -> its name"""
+    mx.save_safetensors(str(Path(out) / MEDIA_PAD_ROW), {PLE: row})
+    return MEDIA_PAD_ROW
+
+
+def read_media_pad_row(path, export):
+    """The MEDIA_PAD_ROW an export's d1a_config names, or None when it names none (an export from before #386: media read
+    the pad row from the quantized table). A named file that is missing stops the load, so the same folder never answers
+    media one way here and another way elsewhere."""
+    name = export.get(MEDIA_PAD_ROW_KEY)
+    if name is None: return None
+    f = Path(path) / name
+    if not f.is_file(): raise ValueError(f"{path}: d1a_config.json names the media pad row {name}, which is not in the folder")
+    return mx.load(str(f))[PLE]
