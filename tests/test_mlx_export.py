@@ -246,3 +246,25 @@ def test_the_media_pad_row_script_takes_only_the_row_the_export_was_quantized_fr
     assert cfg["media_pad_row"] == MEDIA_PAD_ROW and mx.array_equal(mx.load(str(exp / MEDIA_PAD_ROW))[PLE], table[0])
     assert (exp / "model.safetensors").read_bytes() == before
     assert run(tmp_path / "own").returncode != 0   # already named
+
+
+@apple_mlx
+def test_a_loaded_media_pad_row_answers_on_the_servers_model_thread(tmp_path):
+    """d1a.serving.serve runs the model on its own thread, and an array mx.load left lazy belongs to the loading thread's
+    stream ("There is no Stream(cpu, 0) in current thread"), so the row is evaluated when it is taken."""
+    import threading
+    import mlx.core as mx
+    from d1a.backends.mlx import MLXDecisionModel, read_media_pad_row, write_media_pad_row
+    mx.random.seed(0)
+    m = MLXDecisionModel.from_lm(tiny_gemma4(), pad_id=0, head_dim=16)
+    rng = np.random.default_rng(4)
+    enc = fake_encoding(rng, 12, [(5, 2)])
+    media = dict(enc, media=([3, 4, 5], rng.standard_normal((3, 64)).astype(np.float32)))
+    write_media_pad_row(tmp_path, mx.array(rng.standard_normal(m.text.embed_tokens_per_layer.weight.shape[1]).astype(np.float32)))
+    m.use_media_pad_row(read_media_pad_row(tmp_path, {"media_pad_row": "media_pad_row.safetensors"}))
+    out = {}
+    def run():
+        try: out["ok"] = m.forward(media)
+        except Exception as e: out["error"] = e
+    t = threading.Thread(target=run); t.start(); t.join()
+    assert "error" not in out, out.get("error")

@@ -285,6 +285,7 @@ class MLXDecisionModel:
         width = t.config.num_hidden_layers * t.hidden_size_per_layer_input if getattr(t, "hidden_size_per_layer_input", 0) else 0
         if not width: raise ValueError("a media pad row is for Gemma 4's per-layer embeddings, which this model does not have")
         if tuple(row.shape) != (width,): raise ValueError(f"the media pad row has {tuple(row.shape)} values, the per-layer table's rows {width}")
+        mx.eval(row)   # a lazy array (mx.load's) belongs to this thread's stream; serve answers on its own model thread
         self.media_pad_row = row
 
     @property
