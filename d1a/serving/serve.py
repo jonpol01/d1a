@@ -687,7 +687,8 @@ def systemone_separate(req: SystemOneRequest, request: Request):
 def models():
     """One TypeSafe model card (name, description, release_date) per accepted model name, plus the D1A serving details
     a client may ignore: the run, the base, the device, the backend and precision, the temperature and the use-case
-    temperatures a request may select (use_case_temperatures, {} for most checkpoints), whether the model is
+    temperatures a request may select (use_case_temperatures, {} for most checkpoints), where media positions read the
+    pad id's per-layer embedding (media_pad_row: "export", "table", or null without per-layer embeddings), whether the model is
     in memory (--idle-unload), and while it is, prefix-cache and batch stats. Answers without loading the model, so a
     client polling it does not keep an idle model in memory."""
     od = app.state.models
@@ -755,7 +756,8 @@ def card(s):
     ck, meta, T = s.checkpoint, s.checkpoint.meta, s.model.head.temperature
     return {"description": f"D1A pointer head on {meta.base}, serving {ck.requested} at temperature {T:.2f}", "release_date": s.release_date,
             "run": ck.requested, "base": meta.base, "lora": meta.lora, "device": s.device, "backend": s.model.backend, "dtype": s.model.dtype,
-            "temperature": T, "calibrated": T != 1.0, "use_case_temperatures": dict(s.model.head.use_case_temperatures)}
+            "temperature": T, "calibrated": T != 1.0, "use_case_temperatures": dict(s.model.head.use_case_temperatures),
+            "media_pad_row": getattr(s.model, "media_pad_row_source", None)}
 
 
 def usable(device):
