@@ -258,9 +258,5 @@ learned from; `python -m d1a.agents.demo` keeps its decisions out of it.
 The playground (jonpol01/d1a-playground) runs D1A as launchd services through `mini.sh`, configured by `.demo/mini.env`
 (`MODEL_RUN`, `FEEDBACK_LOG`, `OUTCOME_CALIBRATOR`, `LABEL_OUTCOMES`, ...). The playground's README documents those keys.
 `./mini.sh update` applies a change.
-Its serving agents run with launchd's `ProcessType` `Interactive`. A launchd job with no `ProcessType` gets throttled CPU,
-and a decision on MLX is about half Python graph building, so the model server answered at half speed (D1A-E2B-it QAT v0.7
-on an Apple M1 Max: 4.7 decisions a second under the default class, 9.5 as `Interactive`, #17). Do the same for any launchd
-job that runs `d1a.serving.serve`.
 Each service logs to `~/Library/Logs/<service>.log`: `d1a-model.log` (the model server, [Logs](#logs)), `d1a-web.log`,
 `d1a-openai.log` (the `:1234` proxy), `d1a-outcomes.log` and `d1a-promote.log` (the learning loop).
