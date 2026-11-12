@@ -141,6 +141,34 @@ def test_every_scoring_path_matches_the_reference(tiny):
         assert gap(scoring_paths(model, tok, rec), reference_logits(model, tok, rec)) < 1e-5
 
 
+def test_a_batch_of_cache_misses_answers_as_each_request_alone(tiny, monkeypatch):
+    # On CUDA, probs_batch runs the uncached requests whose prefix is not kept in packed passes of several (d1a-engine#33).
+    # Forced on here, a mixed batch: three such requests of different lengths, question counts and use cases share one
+    # forward, beside a cache hit, a kept miss and a request too long for a packed pass, and each request answers as it
+    # does alone, in its own place, with its own prefix
+    import d1a.backends.torch as T
+    _, tok, model = tiny
+    monkeypatch.setattr(T.DecisionModel, "batch_misses", property(lambda self: True), raising=False)
+    monkeypatch.setitem(model.head.use_case_temperatures, "routing", 1.7)
+    with torch.no_grad():
+        encs = [model.encode(tok, record_of(request(n))) for n in (12, 18, 24, 12, 24, 200)]
+        encs[1]["use_case"] = "routing"
+        encs[2] = {**encs[2], "decide_idx": encs[2]["decide_idx"][:2], "opt_idx": encs[2]["opt_idx"][:2]}   # two questions, not three
+        alone = [model.probs(e) for e in encs]
+        prefix = model.prefix(encs[3])
+        short = [len(encs[i]["ids"]) for i in range(3)]
+        monkeypatch.setattr(T, "ROW_PASS_TOKENS", 3 * max(short))   # the three fit one packed pass; the last runs as rows
+        assert max(short) <= 2 * min(short) and len(encs[5]["ids"]) > T.ROW_PASS_TOKENS
+        calls = []
+        forward_batch = T.DecisionModel.forward_batch
+        monkeypatch.setattr(T.DecisionModel, "forward_batch", lambda self, es, *a, **k: calls.append(len(es)) or forward_batch(self, es, *a, **k))
+        got, prefixes = model.probs_batch(encs, [None, None, None, prefix, None, None], [False, False, False, False, True, False])
+    assert calls.count(3) == 1   # the three batchable requests, together
+    for g, a in zip(got, alone):
+        assert len(g) == len(a) and all(torch.allclose(x, y, atol=1e-5) for x, y in zip(g, a))
+    assert prefixes[:3] == [None] * 3 and prefixes[3] is prefix and prefixes[4] is not None and prefixes[5] is None
+
+
 def test_question_order_does_not_change_any_answer(tiny):
     """Questions never see each other (block-causal mask), so reordering them only reorders the answers."""
     _, tok, model = tiny

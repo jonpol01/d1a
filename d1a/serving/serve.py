@@ -131,8 +131,8 @@ class Server:
     """The loaded checkpoint, the state-prefix cache (PrefixCache), and the one model thread that runs every forward pass.
 
     Request threads encode their record and queue it; the model thread takes everything queued when it becomes free and
-    runs it as one batch (model.probs_batch: with CUDA graphs, shared state and row passes; otherwise one request at a
-    time), then answers each request. It also captures pending CUDA graphs when the graphs say so (capture_due). `lock` is
+    runs it as one batch (model.probs_batch: with CUDA graphs, shared state and row passes; on CUDA, uncached requests whose
+    prefix is not kept in packed passes of several; otherwise one request at a time), then answers each request. It also captures pending CUDA graphs when the graphs say so (capture_due). `lock` is
     held around each batch and capture: hold it to use the model directly."""
     checkpoint: Checkpoint
     tok: object

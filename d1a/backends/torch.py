@@ -21,7 +21,7 @@ import torch.nn.functional as F
 from transformers import AutoModelForCausalLM
 from transformers.cache_utils import LinearAttentionCacheLayerMixin
 from d1a.backends.backbone import Attention, for_config
-from d1a.backends.device import empty_cache
+from d1a.backends.device import empty_cache, out_of_memory
 from d1a.backends.embeddings import keep_tables, safe_embeddings
 # Encoding and the head are the backend-independent core (#60); their names stay importable from here.
 from d1a.core.encoding import (DELIMITERS, GEMMA_SPECIAL, MAX_BRANCH, MAX_PACKED, MAX_STATE, MAX_TRAIN_STATE, MAX_TRAIN_STATE_8K,  # noqa: F401
@@ -145,6 +145,13 @@ class DecisionModel(nn.Module):
 
     backend = "torch"   # d1a.backends.mlx.MLXDecisionModel is the other implementation of the scoring interface
     graphs = None       # d1a.backends.cuda_graphs.CudaGraphs for a hybrid backbone's serving passes on CUDA (LoadOptions.cuda_graphs)
+
+    @property
+    def batch_misses(self):
+        """Whether probs_batch runs uncached, unkept requests together in one packed pass (_batched_misses). On CUDA only:
+        eager attention on MPS and the CPU gains little from padded batches, and those are the devices it was not measured
+        on (d1a-engine#33)."""
+        return str(self.device).startswith("cuda")
 
     @property
     def prefix_min_tokens(self):
@@ -397,8 +404,9 @@ class DecisionModel(nn.Module):
         """d1a.serving.serve's model thread, several requests at once. prefixes[i]: request i's cached prefix or None; keep[i]:
         whether to return its new prefix. -> (probabilities per request, prefix per request: the cached one, the new one if
         kept, else None). With CUDA graphs, the requests the graphed passes admit run together (d1a.backends.cuda_graphs: shared state
-        and row passes; a state too long for the graphed state pass gets its own eager pass first); the rest, and every
-        other backend, one at a time. Rows are independent, so a request's answers do not depend on its batch."""
+        and row passes; a state too long for the graphed state pass gets its own eager pass first). Of the rest, the cache
+        misses whose prefix is not kept run together in packed passes where batch_misses allows (_batched_misses); every
+        other request runs one at a time. Rows are independent, so a request's answers do not depend on its batch."""
         splits = [rows_of(e) for e in encs]
 
         def admitted(i, cached):
@@ -406,7 +414,11 @@ class DecisionModel(nn.Module):
             return self.graphs is not None and self.graphs.admits(len(state), [len(r["ids"]) for r in rows], cached)
         long = {i for i in range(len(encs)) if prefixes[i] is None and not admitted(i, False) and admitted(i, True)}
         batched = [i for i in range(len(encs)) if i in long or admitted(i, prefixes[i] is not None)]
-        out = {i: probs_one(self, encs[i], prefixes[i], keep[i]) for i in sorted(set(range(len(encs))) - set(batched))}
+        rest = sorted(set(range(len(encs))) - set(batched))
+        together = [i for i in rest if prefixes[i] is None and not keep[i] and encs[i].get("media") is None
+                    and not self.rows_form([encs[i]])] if self.batch_misses else []
+        out = self._batched_misses(encs, together) if len(together) > 1 else {}
+        out.update({i: probs_one(self, encs[i], prefixes[i], keep[i]) for i in rest if i not in out})
         runs, held = [[]], 0   # graphed runs, each holding at most EAGER_STATES long states' eager prefixes at once
         for i in batched:
             if i in long and held == EAGER_STATES:
@@ -426,6 +438,37 @@ class DecisionModel(nn.Module):
                 made = pre[i] if i in long else None if cache is None else (len(splits[i][0]), cache, None)
                 out[i] = [next(ps) for _ in splits[i][2]], prefixes[i] or (made if keep[i] else None)
         return [out[i][0] for i in range(len(encs))], [out[i][1] for i in range(len(encs))]
+
+    def _batched_misses(self, encs, idx):
+        """Requests idx (cache misses whose prefix is not kept, text only, each within ROW_PASS_TOKENS) in packed passes of
+        several at once: forward_batch, the form probs() gives one of them, with padding masked. A pass holds requests of
+        similar length (the longest at most twice the shortest), at most ROW_PASS_TOKENS tokens once padded, so its mask
+        and attention cost no more than one maximal request's. A pass out of device memory runs its requests one at a time
+        instead. -> {i: (probabilities, None)} (d1a-engine#33)."""
+        order = sorted(idx, key=lambda i: len(encs[i]["ids"]))
+        runs = [[]]
+        for i in order:
+            n, run = len(encs[i]["ids"]), runs[-1]
+            if run and (n > 2 * len(encs[run[0]]["ids"]) or n * (len(run) + 1) > ROW_PASS_TOKENS):
+                runs.append(run := [])
+            run.append(i)
+        out = {}
+        for run in runs:
+            if len(run) == 1:
+                continue   # left to probs_one, as a request on its own always was
+            try:
+                with torch.no_grad():
+                    logits = self.forward_batch([encs[i] for i in run])
+            except Exception as e:
+                if not out_of_memory(e):
+                    raise
+                logits = None
+            if logits is None:   # after the except: its traceback holds the failed pass's tensors
+                empty_cache(self.device)
+                continue   # these requests run one at a time
+            for i, zs in zip(run, logits):
+                out[i] = [F.softmax(z, -1).cpu() for z in zs], None
+        return out
 
     def _readout_many(self, X, ks, temperatures=None):
         """Many questions' probabilities from their picked hidden states X, laid out per question as its <decide> then its
