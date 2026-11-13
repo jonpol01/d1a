@@ -16,7 +16,7 @@ Two ways to serve it:
   It starts without the model, loads it on the first request (about 20-30 s) and drops it again after --idle-unload
   seconds without one (default 600; 0 keeps it loaded), so an idle server holds almost no memory.
 """
-import argparse, base64, copy, functools, gc, io, sys, threading, time
+import argparse, base64, copy, functools, gc, io, logging, sys, threading, time
 from contextlib import contextmanager
 from pathlib import Path
 import torch
@@ -91,9 +91,41 @@ def processor_inputs(proc, media):
     return proc(text=proc.video_token, videos=[frames], video_metadata=[meta], do_sample_frames=False, return_tensors="pt")
 
 
+# The formats a photo may come in, as Media.data says. Image.open alone tries every decoder Pillow has (TIFF, GIF, BMP, PSD,
+# JPEG 2000, EPS through Ghostscript, ...) on bytes from the network, and those decoders carry most of Pillow's advisories.
+IMAGE_FORMATS = ("JPEG", "PNG", "WEBP")
+
+
 def decode_image(raw):
-    from PIL import Image, ImageOps
-    return ImageOps.exif_transpose(Image.open(io.BytesIO(raw))).convert("RGB")
+    """-> the photo as RGB, upright by its EXIF orientation. ValueError (a 422) for anything but JPEG, PNG or WebP, before any
+    other decoder sees it, and for one that does not decode. Out of memory stays a 500."""
+    from PIL import Image, ImageOps, UnidentifiedImageError
+    try:
+        image = Image.open(io.BytesIO(raw), formats=IMAGE_FORMATS)
+    except UnidentifiedImageError as e:
+        raise ValueError("the image must be a JPEG, PNG or WebP file") from e
+    except MemoryError:
+        raise
+    except Exception as e:
+        raise _undecodable(e) from e
+    try:
+        return ImageOps.exif_transpose(image).convert("RGB")
+    except MemoryError:
+        raise
+    except Exception as e:
+        raise _undecodable(e) from e
+
+
+def _undecodable(e):
+    """The 422 for a photo whose decode failed. What 42,000 mutated JPEG, PNG, WebP and MPO files raised (OSError, SyntaxError
+    for a bad PNG chunk or EXIF block, the bomb limit), and struct.error from a short header, say why. Any other failure is
+    unexpected: its text stays out of the answer and goes to the log with its traceback, so a bug still shows."""
+    import struct
+    from PIL import Image
+    if isinstance(e, (OSError, SyntaxError, struct.error, ValueError, Image.DecompressionBombError)):
+        return ValueError(f"cannot decode the image: {e}")
+    logging.getLogger(__name__).warning("decoding a photo raised %s", type(e).__name__, exc_info=e)
+    return ValueError("cannot decode the image")
 
 
 @contextmanager

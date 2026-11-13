@@ -230,4 +230,4 @@ curl -s localhost:8009/v1/systemone/media -H 'content-type: application/json' -d
 `--idle-unload 600`은 요청이 없는 상태로 10분이 지나면 인코더를 포함한 모델을 내리고, 다음 요청 때 다시 로드합니다(M1 Max에서 D1A-E4B는 2 s). `GET /v1/models`는 어느 쪽이든 응답하며 `loaded` 여부를 알려 줍니다. PyTorch 체크포인트(NVIDIA, CPU)에서는 대신 `python -m d1a.serving.media --run JohnP1/d1a-e2b --port 8010`을 실행합니다. 이 서버는 전체 Gemma 4 모델(bf16, E2B 기준 약 10 GB)을 별도 프로세스로 첫 요청 때 로드하고, 유휴 상태로 10분이 지나면 내립니다.
 
 
-`type`은 `image`(JPEG, PNG, WebP), `audio`(WAV, FLAC 또는 OGG, 최대 30 s이며 샘플 레이트는 무관), `video`(MP4, MOV 또는 WebM, 최대 32 MB: 균등하게 샘플링한 16개 프레임을 각각 타임스탬프가 붙은 이미지로 읽으며 사운드 트랙은 사용하지 않음) 중 하나입니다. 선택 사항인 `state`는 미디어와 함께 텍스트를 추가합니다. 제로샷 테스트 결과는 [DEMOS.md](DEMOS.md#photo-voice-and-video-results)에 있습니다.
+`type`은 `image`(JPEG, PNG, WebP만 가능하며, 다른 형식이나 디코딩할 수 없는 파일에는 422를 반환), `audio`(WAV, FLAC 또는 OGG, 최대 30 s이며 샘플 레이트는 무관), `video`(MP4, MOV 또는 WebM, 최대 32 MB: 균등하게 샘플링한 16개 프레임을 각각 타임스탬프가 붙은 이미지로 읽으며 사운드 트랙은 사용하지 않음) 중 하나입니다. 선택 사항인 `state`는 미디어와 함께 텍스트를 추가합니다. 제로샷 테스트 결과는 [DEMOS.md](DEMOS.md#photo-voice-and-video-results)에 있습니다.
