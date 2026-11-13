@@ -3,6 +3,8 @@ upright by their EXIF orientation; any other format is refused before its decode
 decode, each as a ValueError, which the server answers with a 422 instead of a 500. No model: images are made here."""
 import base64
 import io
+import logging
+import zlib
 
 import numpy as np
 import pytest
@@ -51,7 +53,8 @@ def test_another_format_is_refused_before_its_decoder_runs(fmt):
         decode_image(raw)
 
 
-def test_a_photo_that_does_not_decode_is_a_value_error(monkeypatch):
+def test_a_photo_that_does_not_decode_is_a_value_error(monkeypatch, caplog):
+    """Each with Pillow's reason in the 422, and nothing logged: these are broken files, not the server's failures."""
     with pytest.raises(ValueError, match="cannot decode the image"):
         decode_image(picture("JPEG")[:400])   # cut short in its header
     png = picture("PNG")
@@ -61,11 +64,12 @@ def test_a_photo_that_does_not_decode_is_a_value_error(monkeypatch):
     with pytest.raises(ValueError, match="must be a JPEG, PNG or WebP"):
         decode_image(b"not an image at all")
     for fmt in ["PNG", "WEBP"] if features.check("webp") else ["PNG"]:   # an EXIF block that is no TIFF: Pillow's SyntaxError
-        with pytest.raises(ValueError, match="cannot decode the image"):
+        with pytest.raises(ValueError, match="cannot decode the image: not a TIFF file"):
             decode_image(picture(fmt, exif=b"Exif\x00\x00not a tiff header at all"))
     monkeypatch.setattr(Image, "MAX_IMAGE_PIXELS", 100)   # past twice the limit: Pillow's decompression-bomb error
-    with pytest.raises(ValueError, match="cannot decode the image"):
+    with pytest.raises(ValueError, match="cannot decode the image: Image size"):
         decode_image(picture("PNG"))
+    assert caplog.records == []
 
 
 def test_the_endpoint_input_refuses_another_format_as_a_value_error():
@@ -76,10 +80,25 @@ def test_the_endpoint_input_refuses_another_format_as_a_value_error():
         processor_inputs(proc, Media(type="image", data=base64.b64encode(picture("TIFF")).decode()))
 
 
-@pytest.mark.parametrize("error", [MemoryError, RuntimeError, TypeError])
-def test_a_failure_that_is_not_the_photos_stays_a_server_error(monkeypatch, error):
-    """Only what a broken file raises is the client's 422: running out of memory, or a bug, stays a 500, logged as one."""
-    def fail(image): raise error("not the photo")
+def test_running_out_of_memory_stays_a_server_error(monkeypatch):
+    def fail(image): raise MemoryError()
     monkeypatch.setattr(ImageOps, "exif_transpose", fail)
-    with pytest.raises(error):
+    with pytest.raises(MemoryError):
         decode_image(picture("JPEG"))
+    monkeypatch.setattr(Image, "open", lambda *a, **kw: fail(None))
+    with pytest.raises(MemoryError):
+        decode_image(picture("JPEG"))
+
+
+@pytest.mark.parametrize("error", [KeyError, IndexError, TypeError, zlib.error, RuntimeError])
+@pytest.mark.parametrize("stage", ["open", "decode"])
+def test_an_unexpected_failure_is_a_422_that_keeps_its_text_in_the_log(monkeypatch, caplog, error, stage):
+    """A parser error no tested file raised is still the photo's 422, with no detail from inside the server; the log has it, with
+    its traceback, so a bug still shows."""
+    def fail(*a, **kw): raise error("internal detail")
+    if stage == "open": monkeypatch.setattr(Image, "open", fail)
+    else: monkeypatch.setattr(ImageOps, "exif_transpose", fail)
+    with caplog.at_level(logging.WARNING, logger="d1a.serving.media"), pytest.raises(ValueError) as refused:
+        decode_image(picture("JPEG"))
+    assert str(refused.value) == "cannot decode the image"
+    assert [r.exc_info[0] for r in caplog.records] == [error] and error.__name__ in caplog.text
