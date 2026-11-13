@@ -286,6 +286,18 @@ def test_a_mix_exported_from_feedback_is_excluded_by_its_decisions_pr(tmp_path, 
     assert {r["id"] for r in records(log.resolved())} == {"jonpol01/d1a#120"}   # new exports carry the PR id themselves
 
 
+def test_a_decision_only_the_judge_labelled_still_names_its_pr_in_the_manifest(tmp_path, server):
+    """Judge outcomes count only where a reader names them, but the manifest maps every decision to its PR whatever its
+    outcome's source: an export of a decision only the judge labelled still keeps that PR out of a judge-taught replay."""
+    log, fake = server
+    trained = decide(log, "PR as rendered at training time", "JohnP1/d1a-e4b-mlx-q8@v0.4", "jonpol01/d1a#121", src="judge")
+    decide(log, "the same PR, re-rendered after new commits", OLD, "jonpol01/d1a#121", src="judge")
+    old_export = write_jsonl(tmp_path / "feedback-mix.jsonl", [{"state": "PR as rendered at training time", "questions": {}, "meta": {"feedback_id": trained}}])
+    m = tmp_path / "trained.json"; m.write_text(json.dumps(loop.build_manifest([old_export], NEW, log)), encoding="utf-8")
+    rep = loop.replay(log, "http://s", m, src={"*": ["judge"]}, sleep=lambda s: None)
+    assert fake.sent == [] and rep["excluded"] == {"its pull request is in the served model's training": 2}
+
+
 def test_two_replays_of_one_decision_count_once(tmp_path):
     log = FeedbackLog(tmp_path / "log.jsonl")
     original = decide(log, "owner PR", OLD, "jonpol01/d1a#232")
