@@ -322,6 +322,32 @@ def test_feedback_takes_outcomes_only_for_decisions_in_the_log(tmp_path, monkeyp
     assert [json.loads(l)["id"] for l in path.read_text(encoding="utf-8").splitlines() if '"outcome"' in l] == [third]
 
 
+def test_an_outcome_for_a_replay_is_refused_and_names_the_original(tmp_path, monkeypatch):
+    """A replay takes its original's outcomes and is never read for its own (#399), so an outcome sent for a replay's id
+    was accepted and silently lost. FeedbackLog.outcome and POST /v1/feedback refuse it, write nothing and name the
+    original, both for a replay another writer logged and one this server logged itself; the same outcome recorded for
+    the original counts for each replay's run."""
+    from fastapi.testclient import TestClient
+    from d1a.serving import serve
+    from d1a.core.api import SystemOneRequest
+    path = tmp_path / "log.jsonl"
+    log, answers = FeedbackLog(path), {"resolved": {"noul": 0.8}}
+    original = log.decision("issue + patch", Q, answers, run="old")
+    replay = log.decision("issue + patch", Q, answers, run="new", replay_of=original)
+    with pytest.raises(ValueError, match=f"replay of {original}"): log.outcome(replay, {"resolved": True})
+    monkeypatch.setattr(serve, "LEARNING", serve.Learning(path))
+    _, own = serve.LEARNING.decide(SystemOneRequest(state="issue + patch", questions=Q), answers, "newer", log={"replay_of": original})
+    size = path.stat().st_size
+    with TestClient(serve.app) as client:
+        post = lambda did: client.post("/v1/feedback", json={"decision_id": did, "labels": {"resolved": True}, "src": "human"})
+        for did in (replay, own):
+            r = post(did)
+            assert r.status_code == 422 and original in r.json()["detail"]
+        assert path.stat().st_size == size
+        assert post(original).json() == {"ok": True}
+    assert [(d["id"], d["labels"]) for run in ("new", "newer") for d in log.resolved(run=run)] == [(replay, {"resolved": True}), (own, {"resolved": True})]
+
+
 def test_the_outcome_calibrator_keeps_answers_read_at_different_temperatures_apart(tmp_path, capsys, monkeypatch):
     """A checkpoint's use-case temperature (#209) reads one request's probabilities at another temperature than the next
     one's, and the log records which. Here answers read at the checkpoint's T 1.78 are far too sure (P ~0.8 when 20% are

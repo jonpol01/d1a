@@ -134,9 +134,24 @@ class FeedbackLog:
                       **({"replay_of": replay_of} if replay_of else {})})
         return did
 
-    def outcome(self, did, labels, meta=None):
-        """Record what actually happened for decision `did`: {question id: label} (bool for yes/no, option key for choice)."""
+    def outcome(self, did, labels, meta=None, checked=False):
+        """Record what actually happened for decision `did`: {question id: label} (bool for yes/no, option key for choice).
+        A replay takes its original's outcomes and is never read for its own (resolved()), so an outcome for a replay is
+        refused, naming the original to record it for (#399). `checked`: the caller already knows `did` is no replay."""
+        if not checked and (original := self.replay_of(did)):
+            raise ValueError(f"decision {did} is a replay of {original}: record the outcome for {original}, whose outcomes the replay takes")
         self._append({"kind": "outcome", "id": did, "ts": time.time(), "labels": labels, "meta": meta or {}})
+
+    def replay_of(self, did):
+        """The decision that decision `did` re-scores (its replay_of), or None: an original, or no decision in the log."""
+        if not self.path.exists(): return None
+        with open(self.path, encoding="utf-8") as f:
+            for line in f:
+                if did not in line: continue   # only lines naming `did` are parsed: the log can be long
+                try: e = json.loads(line)
+                except ValueError: continue   # cut short by a crash mid-write
+                if e.get("kind") == "decision" and e.get("id") == did: return e.get("replay_of")
+        return None
 
     def void(self, ids, src, reason):
         """Withdraw source `src`'s outcomes so far on decisions `ids` (recorded in error, e.g. not what that source means)."""
