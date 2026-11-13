@@ -107,7 +107,7 @@ tool call, D1A's gate decides.
 
 ## Clients
 
-Dependency-free clients for any System One server live in [`clients/python`](../clients/python) (PyPI `d1a-client`, import `d1a_client`) and [`clients/js`](../clients/js) (npm `d1a-client`):
+Dependency-free clients for any System One server live in [`clients/python`](../clients/python) (`d1a-client`, import `d1a_client`) and [`clients/js`](../clients/js) (`d1a-client`). Neither is on PyPI or npm yet; each README says how to install it from the repository.
 
 ```python
 from d1a_client import Client
@@ -118,6 +118,11 @@ answer = client.decide("Shoes arrived late and I was charged twice.",
                                  "criteria": {"returns": None, "shipping": None, "billing": None}}})
 print(answer["answers"]["team"]["probabilities"])
 ```
+
+Both also cover the rest of a D1A server: questions about a photo, a voice clip or a video (`decide_media` /
+`decideMedia`), outcomes for the server to learn from (`feedback`), keeping a test request out of the decision log
+(`log=False`), the served model's card (`models`), and OpenAI-format chat (`chat`). `tests/test_clients.py` checks that
+every request they send is one the server's own request models accept, and that both clients send the same requests.
 
 ## Chat with D1A
 

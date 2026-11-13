@@ -117,7 +117,7 @@ D1A_URL=http://127.0.0.1:8009 python -m d1a.agents.mcp_server        # stdio; as
 
 ## 클라이언트
 
-의존성이 없는 클라이언트가 [`clients/python`](../../clients/python)(PyPI `d1a-client`, import `d1a_client`)과 [`clients/js`](../../clients/js)(npm `d1a-client`)에 있으며, 어떤 System One 서버와도 쓸 수 있습니다:
+의존성이 없는 클라이언트가 [`clients/python`](../../clients/python)(`d1a-client`, import `d1a_client`)과 [`clients/js`](../../clients/js)(`d1a-client`)에 있으며, 어떤 System One 서버와도 쓸 수 있습니다. 둘 다 아직 PyPI와 npm에는 올리지 않았습니다. 저장소에서 설치하는 방법은 각 README에 있습니다.
 
 ```python
 from d1a_client import Client
@@ -128,6 +128,11 @@ answer = client.decide("Shoes arrived late and I was charged twice.",
                                  "criteria": {"returns": None, "shipping": None, "billing": None}}})
 print(answer["answers"]["team"]["probabilities"])
 ```
+
+두 클라이언트는 D1A 서버의 나머지 기능도 다룹니다: 사진·음성 클립·동영상에 대한 질문(`decide_media` /
+`decideMedia`), 서버가 학습에 쓰는 실제 결과 보고(`feedback`), 테스트 요청을 결정 로그에서 빼는 옵션(`log=False`),
+서비스 중인 모델 정보(`models`), OpenAI 형식 채팅(`chat`). `tests/test_clients.py`는 두 클라이언트가 보내는 모든 요청을
+서버 자신의 요청 모델이 받아들이는지, 그리고 두 클라이언트가 같은 요청을 보내는지 확인합니다.
 
 <a id="chat-with-d1a"></a>
 

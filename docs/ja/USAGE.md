@@ -117,7 +117,7 @@ D1A_URL=http://127.0.0.1:8009 python -m d1a.agents.mcp_server        # stdio; as
 
 ## クライアント
 
-あらゆる System One サーバー向けの、依存関係のないクライアントが [`clients/python`](../../clients/python)（PyPI `d1a-client`、import は `d1a_client`）と [`clients/js`](../../clients/js)（npm `d1a-client`）にあります:
+あらゆる System One サーバー向けの、依存関係のないクライアントが [`clients/python`](../../clients/python)（`d1a-client`、import は `d1a_client`）と [`clients/js`](../../clients/js)（`d1a-client`）にあります。どちらもまだ PyPI・npm には公開していません。リポジトリからのインストール方法は各 README にあります。
 
 ```python
 from d1a_client import Client
@@ -128,6 +128,11 @@ answer = client.decide("Shoes arrived late and I was charged twice.",
                                  "criteria": {"returns": None, "shipping": None, "billing": None}}})
 print(answer["answers"]["team"]["probabilities"])
 ```
+
+どちらも D1A サーバーのほかの機能にも対応しています: 写真・音声クリップ・動画についての質問（`decide_media` /
+`decideMedia`）、サーバーが学習に使う結果の報告（`feedback`）、テスト用のリクエストを判定ログに残さない指定
+（`log=False`）、提供中のモデルの情報（`models`）、OpenAI 形式のチャット（`chat`）。`tests/test_clients.py` は、両クライアントが
+送るリクエストがすべてサーバー自身のリクエストモデルで受け付けられること、そして両クライアントが同じリクエストを送ることを確かめます。
 
 <a id="chat-with-d1a"></a>
 
