@@ -431,28 +431,33 @@ class Learning:
     def logged(self, did):
         """Whether the log holds decision `did`. This server's own decisions are known as they are logged; any other id is
         looked up in the part of the log not read yet, and all of it is read again once the file was replaced or rotated."""
-        with self._lock:
-            try: st = self.log.path.stat()
-            except FileNotFoundError: return False
-            if (st.st_dev, st.st_ino) != self._file or st.st_size < self._read:
-                self._ids, self._read, self._file = {}, 0, (st.st_dev, st.st_ino)
-            if did in self._ids: return True
-            with open(self.log.path, "rb") as f:
-                f.seek(self._read)
-                for line in f:
-                    if not line.endswith(b"\n"): break   # still being written: read it next time
-                    self._read += len(line)
-                    try: e = json.loads(line) if line.strip() else {}
-                    except ValueError: continue   # cut short by a crash mid-write and run into the next line: no decision to vouch for
-                    if e.get("kind") == "decision": self._ids[e["id"]] = e.get("replay_of")
-            return did in self._ids
+        with self._lock: return self._find(did)
 
-    def replay_of(self, did):
-        """The decision that logged decision `did` re-scores, or None (after logged() found it)."""
-        with self._lock: return self._ids.get(did)
+    def _find(self, did):   # with the lock held
+        try: st = self.log.path.stat()
+        except FileNotFoundError: return False
+        if (st.st_dev, st.st_ino) != self._file or st.st_size < self._read:
+            self._ids, self._read, self._file = {}, 0, (st.st_dev, st.st_ino)
+        if did in self._ids: return True
+        with open(self.log.path, "rb") as f:
+            f.seek(self._read)
+            for line in f:
+                if not line.endswith(b"\n"): break   # still being written: read it next time
+                self._read += len(line)
+                try: e = json.loads(line) if line.strip() else {}
+                except ValueError: continue   # cut short by a crash mid-write and run into the next line: no decision to vouch for
+                if e.get("kind") == "decision": self._ids[e["id"]] = e.get("replay_of")
+        return did in self._ids
 
     def outcome(self, did, labels, meta=None):
-        with self._lock: self.log.outcome(did, labels, meta, checked=True)   # the caller looked `did` up: logged(), replay_of()
+        """Record an outcome for decision `did`, looked up and written in one hold of the lock. ValueError when the log holds
+        no such decision (an outcome for none would only grow the log: what a forged or mistyped id sends, #320) or `did` is
+        a replay, which takes its original's outcomes and is never read for its own (#399)."""
+        with self._lock:
+            if not self._find(did): raise ValueError("decision_id names no decision in the decision log")
+            if original := self._ids.get(did):
+                raise ValueError(f"decision_id is a replay of {original}: post the outcome to {original}, whose outcomes the replay takes")
+            self.log.outcome(did, labels, meta, checked=True)
 
     def card(self):
         cal = self.calibrator()
@@ -643,11 +648,8 @@ def feedback(f: Feedback):
     """Report the real outcome of an earlier decision (its decision_id from /v1/systemone), for d1a.learning.feedback to learn from."""
     if LEARNING.log is None:
         raise HTTPException(404, "feedback is off: start d1a.serving.serve with D1A_FEEDBACK_LOG=<path>")
-    if not LEARNING.logged(f.decision_id):   # an outcome for no decision would only grow the log: what a forged or mistyped id sends
-        raise HTTPException(422, "decision_id names no decision in the decision log")
-    if original := LEARNING.replay_of(f.decision_id):   # a replay is read with its original's outcomes, never its own (#399)
-        raise HTTPException(422, f"decision_id is a replay of {original}: post the outcome to {original}, whose outcomes the replay takes")
-    LEARNING.outcome(f.decision_id, f.labels, {k: v for k, v in (("src", f.src), ("group", f.group)) if v} or None)
+    try: LEARNING.outcome(f.decision_id, f.labels, {k: v for k, v in (("src", f.src), ("group", f.group)) if v} or None)
+    except ValueError as e: raise HTTPException(422, str(e))   # no such decision (#320), or a replay (#399)
     return {"ok": True}
 
 
