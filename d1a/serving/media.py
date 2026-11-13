@@ -98,17 +98,18 @@ IMAGE_FORMATS = ("JPEG", "PNG", "WEBP")
 
 def decode_image(raw):
     """-> the photo as RGB, upright by its EXIF orientation. ValueError (a 422) for anything but JPEG, PNG or WebP, before any
-    other decoder sees it, and for one that does not decode (cut short, or past Pillow's decompression-bomb limit)."""
+    other decoder sees it, and for one that does not decode. A broken file fails in many ways (OSError, SyntaxError for a
+    bad PNG chunk or EXIF block, DecompressionBombError past Pillow's limit), so any failure of a decode is the photo's."""
     from PIL import Image, ImageOps, UnidentifiedImageError
     try:
         image = Image.open(io.BytesIO(raw), formats=IMAGE_FORMATS)
-    except UnidentifiedImageError as e:   # before OSError, which it is
+    except UnidentifiedImageError as e:
         raise ValueError("the image must be a JPEG, PNG or WebP file") from e
-    except (OSError, Image.DecompressionBombError) as e:
+    except Exception as e:
         raise ValueError(f"cannot decode the image: {e}") from e
     try:
         return ImageOps.exif_transpose(image).convert("RGB")
-    except (OSError, Image.DecompressionBombError) as e:
+    except Exception as e:
         raise ValueError(f"cannot decode the image: {e}") from e
 
 

@@ -60,6 +60,9 @@ def test_a_photo_that_does_not_decode_is_a_value_error(monkeypatch):
         decode_image(png[:len(png) // 2])
     with pytest.raises(ValueError, match="must be a JPEG, PNG or WebP"):
         decode_image(b"not an image at all")
+    for fmt in ["PNG", "WEBP"] if features.check("webp") else ["PNG"]:   # an EXIF block that is no TIFF: Pillow's SyntaxError
+        with pytest.raises(ValueError, match="cannot decode the image"):
+            decode_image(picture(fmt, exif=b"Exif\x00\x00not a tiff header at all"))
     monkeypatch.setattr(Image, "MAX_IMAGE_PIXELS", 100)   # past twice the limit: Pillow's decompression-bomb error
     with pytest.raises(ValueError, match="cannot decode the image"):
         decode_image(picture("PNG"))
