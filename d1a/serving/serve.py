@@ -1,5 +1,5 @@
 # Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); lists only d1a-latest and answers any model name; model cards name D1A; serves MLX export folders; --device with a GPU usability probe; a startup self-check of the readout and a warning when serving an uncalibrated checkpoint; recent batch latency in /v1/models; a 75 s keep-alive for proxies in front of it; --idle-unload; photos and voice clips through the same model (POST /v1/systemone/media); prefix cache keyed by state ids only (option isolation removed); self-learning hooks (decision log, POST /v1/feedback, outcome calibrator, the x-d1a-decision-log: off and x-d1a-replay-of request headers); GET /metrics; PrefixCache.make_room ported from later upstream Kev (1d77363); CORS only for the origins in D1A_CORS_ORIGINS, and POST /v1/feedback only for a logged decision (#320).
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); lists only d1a-latest and answers any model name; model cards name D1A; serves MLX export folders; --device with a GPU usability probe; a startup self-check of the readout and a warning when serving an uncalibrated checkpoint; recent batch latency in /v1/models; a 75 s keep-alive for proxies in front of it; --idle-unload; photos and voice clips through the same model (POST /v1/systemone/media); prefix cache keyed by state ids only (option isolation removed); self-learning hooks (decision log, POST /v1/feedback, outcome calibrator, the x-d1a-decision-log: off and x-d1a-replay-of request headers); GET /metrics; PrefixCache.make_room ported from later upstream Kev (1d77363); CORS only for the origins in D1A_CORS_ORIGINS, and POST /v1/feedback only for a logged decision (#320), never a replay (#399).
 """FastAPI sidecar for the playground: loads one checkpoint, exposes prefill-only decisions.
 
 Run: uv run --extra serve python -m d1a.serving.serve --run runs/d1a --port 8008
@@ -396,7 +396,7 @@ class Learning:
     def __init__(self, log_path=None, calibrator_path=None):
         self.log = FeedbackLog(log_path, rewrite=load_rewrite()) if log_path else None   # D1A_LOG_REWRITE: the log keeps general wording
         self.calibrator_path, self._mtime, self._cal, self._lock = calibrator_path, None, None, threading.Lock()
-        self._ids, self._read, self._file = set(), 0, None   # decision ids in the log, the bytes logged() has read, and which file
+        self._ids, self._read, self._file = {}, 0, None   # decision id in the log -> its replay_of, the bytes logged() has read, and which file
 
     def calibrator(self):
         if not self.calibrator_path: return None
@@ -425,7 +425,7 @@ class Learning:
         with self._lock:
             did = self.log.decision(req.state, questions, answers, run=run, meta=meta,
                                     use_case=req.use_case, temperature=temperature, replay_of=replay_of)
-            self._ids.add(did)
+            self._ids[did] = replay_of
         return served, did
 
     def logged(self, did):
@@ -435,7 +435,7 @@ class Learning:
             try: st = self.log.path.stat()
             except FileNotFoundError: return False
             if (st.st_dev, st.st_ino) != self._file or st.st_size < self._read:
-                self._ids, self._read, self._file = set(), 0, (st.st_dev, st.st_ino)
+                self._ids, self._read, self._file = {}, 0, (st.st_dev, st.st_ino)
             if did in self._ids: return True
             with open(self.log.path, "rb") as f:
                 f.seek(self._read)
@@ -444,11 +444,15 @@ class Learning:
                     self._read += len(line)
                     try: e = json.loads(line) if line.strip() else {}
                     except ValueError: continue   # cut short by a crash mid-write and run into the next line: no decision to vouch for
-                    if e.get("kind") == "decision": self._ids.add(e["id"])
+                    if e.get("kind") == "decision": self._ids[e["id"]] = e.get("replay_of")
             return did in self._ids
 
+    def replay_of(self, did):
+        """The decision that logged decision `did` re-scores, or None (after logged() found it)."""
+        with self._lock: return self._ids.get(did)
+
     def outcome(self, did, labels, meta=None):
-        with self._lock: self.log.outcome(did, labels, meta)
+        with self._lock: self.log.outcome(did, labels, meta, checked=True)   # the caller looked `did` up: logged(), replay_of()
 
     def card(self):
         cal = self.calibrator()
@@ -641,6 +645,8 @@ def feedback(f: Feedback):
         raise HTTPException(404, "feedback is off: start d1a.serving.serve with D1A_FEEDBACK_LOG=<path>")
     if not LEARNING.logged(f.decision_id):   # an outcome for no decision would only grow the log: what a forged or mistyped id sends
         raise HTTPException(422, "decision_id names no decision in the decision log")
+    if original := LEARNING.replay_of(f.decision_id):   # a replay is read with its original's outcomes, never its own (#399)
+        raise HTTPException(422, f"decision_id is a replay of {original}: post the outcome to {original}, whose outcomes the replay takes")
     LEARNING.outcome(f.decision_id, f.labels, {k: v for k, v in (("src", f.src), ("group", f.group)) if v} or None)
     return {"ok": True}
 
