@@ -91,9 +91,25 @@ def processor_inputs(proc, media):
     return proc(text=proc.video_token, videos=[frames], video_metadata=[meta], do_sample_frames=False, return_tensors="pt")
 
 
+# The formats a photo may come in, as Media.data says. Image.open alone tries every decoder Pillow has (TIFF, GIF, BMP, PSD,
+# JPEG 2000, EPS through Ghostscript, ...) on bytes from the network, and those decoders carry most of Pillow's advisories.
+IMAGE_FORMATS = ("JPEG", "PNG", "WEBP")
+
+
 def decode_image(raw):
-    from PIL import Image, ImageOps
-    return ImageOps.exif_transpose(Image.open(io.BytesIO(raw))).convert("RGB")
+    """-> the photo as RGB, upright by its EXIF orientation. ValueError (a 422) for anything but JPEG, PNG or WebP, before any
+    other decoder sees it, and for one that does not decode (cut short, or past Pillow's decompression-bomb limit)."""
+    from PIL import Image, ImageOps, UnidentifiedImageError
+    try:
+        image = Image.open(io.BytesIO(raw), formats=IMAGE_FORMATS)
+    except UnidentifiedImageError as e:   # before OSError, which it is
+        raise ValueError("the image must be a JPEG, PNG or WebP file") from e
+    except (OSError, Image.DecompressionBombError) as e:
+        raise ValueError(f"cannot decode the image: {e}") from e
+    try:
+        return ImageOps.exif_transpose(image).convert("RGB")
+    except (OSError, Image.DecompressionBombError) as e:
+        raise ValueError(f"cannot decode the image: {e}") from e
 
 
 @contextmanager
