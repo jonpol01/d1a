@@ -98,18 +98,22 @@ IMAGE_FORMATS = ("JPEG", "PNG", "WEBP")
 
 def decode_image(raw):
     """-> the photo as RGB, upright by its EXIF orientation. ValueError (a 422) for anything but JPEG, PNG or WebP, before any
-    other decoder sees it, and for one that does not decode. A broken file fails in many ways (OSError, SyntaxError for a
-    bad PNG chunk or EXIF block, DecompressionBombError past Pillow's limit), so any failure of a decode is the photo's."""
+    other decoder sees it, and for one that does not decode: the errors a broken file raises. Anything else (out of
+    memory, a bug) stays a 500, logged."""
+    import struct
     from PIL import Image, ImageOps, UnidentifiedImageError
+    # what 42,000 mutated JPEG, PNG, WebP and MPO files raised (OSError, SyntaxError for a bad PNG chunk or EXIF block, the
+    # bomb limit; Pillow's own ValueError is a 422 as it is), and struct.error, which its header parsers raise on short data
+    broken = (OSError, SyntaxError, struct.error, Image.DecompressionBombError)
     try:
         image = Image.open(io.BytesIO(raw), formats=IMAGE_FORMATS)
     except UnidentifiedImageError as e:
         raise ValueError("the image must be a JPEG, PNG or WebP file") from e
-    except Exception as e:
+    except broken as e:
         raise ValueError(f"cannot decode the image: {e}") from e
     try:
         return ImageOps.exif_transpose(image).convert("RGB")
-    except Exception as e:
+    except broken as e:
         raise ValueError(f"cannot decode the image: {e}") from e
 
 

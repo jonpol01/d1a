@@ -74,3 +74,12 @@ def test_the_endpoint_input_refuses_another_format_as_a_value_error():
     proc.image_token = "<image>"
     with pytest.raises(ValueError, match="must be a JPEG, PNG or WebP"):
         processor_inputs(proc, Media(type="image", data=base64.b64encode(picture("TIFF")).decode()))
+
+
+@pytest.mark.parametrize("error", [MemoryError, RuntimeError, TypeError])
+def test_a_failure_that_is_not_the_photos_stays_a_server_error(monkeypatch, error):
+    """Only what a broken file raises is the client's 422: running out of memory, or a bug, stays a 500, logged as one."""
+    def fail(image): raise error("not the photo")
+    monkeypatch.setattr(ImageOps, "exif_transpose", fail)
+    with pytest.raises(error):
+        decode_image(picture("JPEG"))
