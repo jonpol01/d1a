@@ -28,6 +28,8 @@ by outcomes of answers read at another.
 The log is append-only JSONL (one "decision", "outcome" or "void" event per line), so it can be written by several
 processes and replayed. An outcome may name its source in meta["src"] (e.g. "human" for a person's correction, "reviewer"
 for another model's judgment); each question keeps the label from the most trusted source (PREFER), then the latest. A
+source in NAMED_ONLY ("judge", an independent blind judge's labels) counts only for a reader that names it, so a reader of
+every source never lets it replace another source's label. A
 void (`feedback void`) withdraws one source's outcomes on the decisions it names that arrived before it, with a reason,
 without rewriting the log; a later outcome of that source counts again.
 """
@@ -47,6 +49,13 @@ from d1a.core.api import choice_confidence
 
 EPS = 1e-6
 PREFER = ("human",)   # outcome sources whose label wins over any other source's, whatever the order they arrived in
+NAMED_ONLY = ("judge",)   # outcome sources that count only where a reader names them: a blind judge teaches or scores a fit only
+                          # when chosen, and never mixes its labels into one whose reader asked for every source
+
+
+def _counts(src, named):
+    """Whether an outcome from `src` counts for a reader of the sources `named` (None: every source but NAMED_ONLY's)."""
+    return src not in NAMED_ONLY if named is None else src in named
 
 
 def _logit(p):
@@ -149,7 +158,8 @@ class FeedbackLog:
     def resolved(self, src=None, run=None, events=None):
         """Decisions with an outcome, oldest first. Each question's label comes from the outcomes of the most trusted source
         (PREFER), the latest of them; `src` (a source, or a list of them) keeps only outcomes from those sources, or, as
-        {question: [sources]} with "*" for the other questions, keeps per question only the labels of its sources. label_src
+        {question: [sources]} with "*" for the other questions, keeps per question only the labels of its sources. Without
+        `src`, and for a question a per-question `src` does not cover, every source counts but NAMED_ONLY's. label_src
         says where each label came from. `run` keeps only the decisions that model made (repo@tag, as logged): a calibrator
         corrects one model's probabilities, and fitted across a model switch it would correct the new model by the old one's
         errors. A replay (a decision with replay_of, see replay()) takes the outcomes of the decision it re-scores, and
@@ -165,9 +175,9 @@ class FeedbackLog:
         for e in self._outcomes(events):
             s = e.get("meta", {}).get("src")
             if per_q is not None:   # a source can be trusted for one question and not another (a reviewer's severity scale, #252)
-                keep = {q: v for q, v in e["labels"].items() if s in per_q.get(q, per_q.get("*", [s]))}
+                keep = {q: v for q, v in e["labels"].items() if _counts(s, per_q.get(q, per_q.get("*")))}
                 if keep: outcomes.setdefault(e["id"], []).append({**e, "labels": keep})
-            elif srcs is None or s in srcs: outcomes.setdefault(e["id"], []).append(e)
+            elif _counts(s, srcs): outcomes.setdefault(e["id"], []).append(e)
         latest = {}   # one replay per original and run: two overlapping replays of a decision must not count it twice
         for i, d in decisions.items():
             if d.get("replay_of"):
@@ -555,7 +565,7 @@ def main(argv=None):
     tk.add_argument("log"); tk.add_argument("--calibrator", required=True); tk.add_argument("--server", help="the live server (its /v1/models names the served run)")
     tk.add_argument("--run", help="the served run when no --server"); tk.add_argument("--trained-dir", help="the folder of trained manifests (<repo>__<name>@<tag>.json)")
     for x in (s, r, c, pr):
-        x.add_argument("--src", help="only outcomes from this source (meta src, e.g. human or reviewer)")
+        x.add_argument("--src", help="only outcomes from this source (meta src, e.g. human or reviewer); without it every source counts but judge")
         x.add_argument("--run", help="only decisions this model made (repo@tag, as the log records it; the served model's for promote)")
     a = ap.parse_args(argv)
     from d1a.learning import loop, settings as S

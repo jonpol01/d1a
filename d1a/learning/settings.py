@@ -23,7 +23,7 @@ ENV = "D1A_LEARNING"
 VERSION = 1
 DEFAULTS = {
     "version": VERSION,
-    "outcomes": {"enabled": True, "sources": None},           # sources: the outcome sources that count (None: all of them)
+    "outcomes": {"enabled": True, "sources": None},           # sources: the outcome sources that count (None: all but "judge", which counts only where named)
     "promotion": {"auto": True, "questions": None,             # questions: the ones that learn (None: all of them)
                   "min_outcomes": 20, "held_out": 0.3, "min_held_out": 30, "ci_level": 0.95, "tolerance": 0.01, "bootstrap": 2000,
                   "form": "temperature", "split": "random", "serve_choice": False, "hold": {}},   # see d1a.learning.feedback.OutcomeCalibrator
@@ -59,7 +59,7 @@ def _str_list(v): return v is None or (isinstance(v, list) and v and all(isinsta
 RULES = {   # key -> (check, what it must be)
     "outcomes.enabled": (lambda v: isinstance(v, bool), "true or false"),
     "outcomes.sources": (lambda v: _str_list(v) or (isinstance(v, dict) and bool(v) and all(isinstance(k, str) and k.strip() and v[k] is not None and _str_list(v[k]) for k in v)),
-                         "null (every source), a non-empty list of distinct source names, e.g. [\"reviewer\", \"human\"], or per question "
+                         "null (every source but judge, which counts only where named), a non-empty list of distinct source names, e.g. [\"reviewer\", \"human\"], or per question "
                          "{\"sev\": [\"human\"], \"*\": [\"reviewer\", \"human\"]} (\"*\": every other question)"),
     "promotion.auto": (lambda v: isinstance(v, bool), "true or false (false: the gate runs and reports, and never writes the calibrator)"),
     "promotion.questions": (_str_list, "null (every question) or a non-empty list of distinct question ids"),

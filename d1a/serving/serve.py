@@ -630,7 +630,7 @@ async def embeddings(req: openai_compat.EmbeddingRequest):
 class Feedback(BaseModel):
     decision_id: str
     labels: dict[str, bool | str | int]   # {question id: what actually happened}: bool for yes/no, the option key for choice
-    src: str | None = None                # where the outcome came from (d1a.learning.feedback.PREFER: "human" beats e.g. "reviewer")
+    src: str | None = None                # where the outcome came from (d1a.learning.feedback.PREFER: "human" beats e.g. "reviewer"; "judge" counts only where named)
     group: str | None = None              # what the decision belongs to (e.g. a pull request): `d1a.learning.feedback promote` holds out whole groups
 
 

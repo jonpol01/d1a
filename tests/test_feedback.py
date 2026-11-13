@@ -177,6 +177,24 @@ def _pr_decision(log):
                          "type": {"choice": "bug", "probabilities": {"bug": 0.7, "docs": 0.3}}}, run="r@v0.4")
 
 
+def test_judge_labels_count_only_where_a_reader_names_the_judge(tmp_path):
+    """A blind judge's labels (src "judge") arrive after the reviewer's on the same decisions. A reader of every source, the
+    default outcomes.sources and a per-question filter that does not cover the question keep the reviewer's labels and never
+    see a decision only the judge labelled; a reader that names the judge gets its labels."""
+    from d1a.learning import settings
+    log = FeedbackLog(tmp_path / "f.jsonl"); did = _pr_decision(log); judged = _pr_decision(log)
+    log.outcome(did, {"type": "bug", "blast": "broad"}, {"src": "reviewer", "group": "o/r#1"})
+    log.outcome(did, {"type": "docs", "blast": "contained"}, {"src": "judge", "group": "o/r#1"})
+    log.outcome(judged, {"type": "docs"}, {"src": "judge", "group": "o/r#2"})
+    for reader in (None, settings.DEFAULTS["outcomes"]["sources"], {"sev": ["human"]}):
+        (d,) = log.resolved(reader)
+        assert d["id"] == did and d["labels"] == {"type": "bug", "blast": "broad"} and d["label_src"] == {"type": "reviewer", "blast": "reviewer"}
+    assert [d["labels"] for d in log.resolved("judge")] == [{"type": "docs", "blast": "contained"}, {"type": "docs"}]
+    a, b = log.resolved({"sev": ["human"], "*": ["judge"]})
+    assert a["label_src"] == {"type": "judge", "blast": "judge"} and b["labels"] == {"type": "docs"}
+    assert log.resolved(["reviewer", "judge"])[0]["labels"] == {"type": "docs", "blast": "contained"}   # named with another: the latest
+
+
 def test_a_void_withdraws_one_sources_outcomes_and_the_next_source_decides(tmp_path):
     """A PR author's own labels logged as "human" outrank the reviewer; voiding them (with a reason, the log untouched
     before it) leaves the reviewer's label, and a decision whose only outcome is voided is pending again."""

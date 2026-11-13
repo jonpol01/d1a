@@ -54,7 +54,9 @@ def build_manifest(mixes, run, log=None, rewrite=None):
     group stands in, so a PR re-rendered later (new commits, other truncation) is still excluded by its id."""
     groups = {}
     if log is not None:
-        for d in log.resolved(): groups[d["id"]] = d.get("group")
+        events = log.events()   # every source, NAMED_ONLY's too: a decision only the judge labelled still names its PR
+        every = {e.get("meta", {}).get("src") for e in events if e["kind"] == "outcome"}
+        for d in log.resolved(src=every, events=events): groups[d["id"]] = d.get("group")
     prs, states, sources, missing = set(), set(), [], []
     for mix in mixes:
         if not Path(mix).is_file():   # a lineage mix that cannot be read: the manifest is incomplete, and replay refuses it
