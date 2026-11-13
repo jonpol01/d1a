@@ -75,9 +75,9 @@ class Recorder(BaseHTTPRequestHandler):
             status, ctype, out = 422, "application/json", json.dumps(REFUSAL)
         elif self.path.startswith("/text"):
             status, ctype, out = 500, "text/plain", "boom\n"
-        elif self.path.startswith("/moved"):   # to the other server: another host as far as a client can tell
+        elif self.path == "/moved/v1/models":   # to the other server: another host as far as a client can tell
             status, ctype, out = 302, "text/plain", ""
-            extra["location"] = self.server.moved_to + self.path[len("/moved"):]
+            extra["location"] = self.server.moved_to + "/v1/models"
         else:
             headers = {k.lower(): v for k, v in self.headers.items()}
             self.server.seen.append((self.command, self.path, {k: headers[k] for k in KEPT_HEADERS if k in headers}, body))
