@@ -40,6 +40,8 @@ class Client {
   // OpenAI-format chat, answered whole; options (max_tokens, temperature, tools, ...) are sent as given. Only a model
   // on an instruction-tuned trunk chats (D1A-E2B-it, D1A-E4B-it).
   async chat(messages, options = {}) {
+    // the server would answer as an event stream, which this client does not read
+    if (options.stream) throw new Error("chat() answers whole; to stream, use an OpenAI client with baseURL: <server>/v1");
     return this.#send("/v1/chat/completions", { ...options, messages });
   }
   #request(state, questions, useCase) {

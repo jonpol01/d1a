@@ -4,8 +4,8 @@ A dependency-free client for D1A, a small decision model on Gemma 4, or any othe
 
 The default model name is `d1a-latest`, the only name a D1A server lists; it answers any model name a request sends.
 
-Not on npm yet. It is one file (`index.js`, Node 18 or newer, or a browser): copy it into your project, or install it from a
-checkout with `npm install <checkout>/clients/js`.
+Not on npm yet. It is one CommonJS file (`index.js`) for Node 18 or newer, or for a browser app built with a bundler: copy
+it into your project, or install it from a checkout with `npm install <checkout>/clients/js`.
 
 ```js
 const { Client } = require("d1a-client");
@@ -39,6 +39,6 @@ const photo = await client.decideMedia("image", fileInput.files[0],
 ```
 
 A request the server refuses throws a `D1AError` (exported beside `Client`) with `.status` and the server's reason in
-`.detail` (for a malformed request, the list of fields it rejected).
+`.detail` (for a malformed request, the list of fields it rejected). `fetch` drops the API key on a redirect to another origin.
 
 Apache-2.0.

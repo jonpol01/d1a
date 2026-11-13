@@ -1,5 +1,6 @@
 """Client for a D1A (or Kev) System One server: typed questions in, a probability per option out."""
 import base64
+import io
 import json
 import os
 import urllib.error
@@ -11,12 +12,15 @@ LOG_HEADER = "x-d1a-decision-log"   # "off": a D1A server answers but keeps the 
 
 
 class D1AError(urllib.error.HTTPError):
-    """A request the server refused: its status (`code`) and its reason (`detail`, FastAPI's "detail"). An HTTPError, so code
-    that caught urllib's error keeps catching it."""
+    """A request the server refused: its status (`code`) and its reason (`detail`, FastAPI's "detail"). An HTTPError like
+    the one urllib raised, body still readable (`read()`), so code written for urllib's error keeps working."""
 
-    def __init__(self, error, detail):
-        super().__init__(error.url, error.code, f"{error.reason}: {detail}" if detail else error.reason, error.headers, None)
-        self.detail = detail
+    def __init__(self, error, raw):
+        super().__init__(error.url, error.code, error.reason, error.headers, io.BytesIO(raw))
+        self.detail = detail_of(raw)
+
+    def __str__(self):
+        return f"{super().__str__()}: {self.detail}" if self.detail else super().__str__()
 
 
 class Client:
@@ -59,6 +63,8 @@ class Client:
         """POST /v1/chat/completions, OpenAI format, answered whole (not streamed); `options` (max_tokens, temperature, tools,
         ...) are sent as given. The reply is choices[0]["message"]. Only a model on an instruction-tuned trunk chats
         (D1A-E2B-it, D1A-E4B-it); for streaming, use an OpenAI client with base_url=<server>/v1."""
+        if options.get("stream"):   # the server would answer as an event stream, which this client does not read
+            raise ValueError("chat() answers whole; to stream, use an OpenAI client with base_url=<server>/v1")
         return self._send("/v1/chat/completions", {"messages": messages, **options})
 
     def _request(self, state, questions, use_case):
@@ -68,15 +74,16 @@ class Client:
 
     def _send(self, path, body=None, log=True):
         headers = {"content-type": "application/json"} if body is not None else {}
-        if self.api_key: headers["authorization"] = f"Bearer {self.api_key}"
         if not log: headers[LOG_HEADER] = "off"
         data = json.dumps(body).encode() if body is not None else None
         req = urllib.request.Request(f"{self.base_url}{path}", data=data, headers=headers)
+        if self.api_key:   # unredirected: urllib copies ordinary headers onto a redirect, to whatever host it names
+            req.add_unredirected_header("Authorization", f"Bearer {self.api_key}")
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as r:
                 return json.load(r)
         except urllib.error.HTTPError as e:
-            raise D1AError(e, detail_of(e.read())) from None
+            raise D1AError(e, e.read()) from None
 
 
 def detail_of(raw):

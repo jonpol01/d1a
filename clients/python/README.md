@@ -38,7 +38,8 @@ photo = client.decide_media("image", "parcel.jpg",
                             {"damaged": {"type": "noul", "instructions": "Is the parcel damaged?"}}, state="left at the door")
 ```
 
-A request the server refuses raises `d1a_client.D1AError`, a `urllib.error.HTTPError` with the server's reason in `.detail`
-(for a malformed request, the list of fields it rejected).
+A request the server refuses raises `d1a_client.D1AError`, a `urllib.error.HTTPError` (its body still readable) with the
+server's reason in `.detail` (for a malformed request, the list of fields it rejected). The API key is never sent on to a
+host a redirect names.
 
 Apache-2.0.
