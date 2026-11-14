@@ -19,10 +19,10 @@ zero-shot on every build (no media in training).
 | [d1a-e2b](https://huggingface.co/JohnP1/d1a-e2b) `v0.6.1` | PyTorch (adapter) | ✅ | ❌ base trunk | ✅¹ | ✅¹ | ✅¹ | |
 | [d1a-e2b-mlx-q8](https://huggingface.co/JohnP1/d1a-e2b-mlx-q8) `v0.6.1` | MLX 8-bit, merged | ✅ | ❌ base trunk | ✅ | ✅ | ✅ | 4.8 GB |
 | [d1a-e2b-coreml](https://huggingface.co/JohnP1/d1a-e2b-coreml) `v0.6` | Core ML int8 | ✅ | ❌ | ❌ | ❌ | ❌ | preview: text only, inputs ≤ 512 tokens |
-| [d1a-e4b-it](https://huggingface.co/JohnP1/d1a-e4b-it) `v0.6` | PyTorch (adapter) | ✅ | ✅² | ✅¹ | ✅¹ | ✅¹ | |
-| [d1a-e4b-it-mlx-q8](https://huggingface.co/JohnP1/d1a-e4b-it-mlx-q8) `v0.6` | MLX 8-bit, merged | ✅ | ❌ merged³ | ✅ | ✅ | ✅ | 7.5 GB |
-| [d1a-e4b-it-mlx-q4](https://huggingface.co/JohnP1/d1a-e4b-it-mlx-q4) `v0.6` | MLX 4-bit, merged | ✅ | ❌ merged³ | ✅ | ✅ | ✅ | 5.2 GB |
-| [d1a-e4b-it-coreml-4bit](https://huggingface.co/JohnP1/d1a-e4b-it-coreml-4bit) `v0.6` | Core ML 4-bit | ✅ | ❌ | ❌ | ❌ | ❌ | preview: text only, ≤ 512 tokens; 3 of 42 test answers move |
+| [d1a-e4b-it](https://huggingface.co/JohnP1/d1a-e4b-it) `v0.6` | PyTorch (adapter) | ✅ | ✅² | ✅¹ | ✅¹ | ✅¹ | overconfident on transfer-v4⁵ |
+| [d1a-e4b-it-mlx-q8](https://huggingface.co/JohnP1/d1a-e4b-it-mlx-q8) `v0.6` | MLX 8-bit, merged | ✅ | ❌ merged³ | ✅ | ✅ | ✅ | 7.5 GB; overconfident on transfer-v4⁵ |
+| [d1a-e4b-it-mlx-q4](https://huggingface.co/JohnP1/d1a-e4b-it-mlx-q4) `v0.6` | MLX 4-bit, merged | ✅ | ❌ merged³ | ✅ | ✅ | ✅ | 5.2 GB; overconfident on transfer-v4⁵ |
+| [d1a-e4b-it-coreml-4bit](https://huggingface.co/JohnP1/d1a-e4b-it-coreml-4bit) `v0.6` | Core ML 4-bit | ✅ | ❌ | ❌ | ❌ | ❌ | preview: text only, ≤ 512 tokens; 3 of 42 test answers move; overconfident on transfer-v4⁵ |
 | [d1a-e2b-it](https://huggingface.co/JohnP1/d1a-e2b-it) `v0.6` | PyTorch (adapter) | ✅ | ✅² | ✅¹ | ✅¹ | ✅¹ | |
 | [d1a-e2b-it-mlx-q8](https://huggingface.co/JohnP1/d1a-e2b-it-mlx-q8) `v0.6` | MLX 8-bit, merged | ✅ | ❌ merged³ | ✅ | ✅ | ✅ | 4.8 GB |
 | [d1a-e2b-it-mlx-q4](https://huggingface.co/JohnP1/d1a-e2b-it-mlx-q4) `v0.6` | MLX 4-bit, merged | ✅ | ❌ merged³ | ✅ | ✅ | ✅ | 3.6 GB; not scored on the suites |
@@ -32,8 +32,8 @@ zero-shot on every build (no media in training).
 | [d1a-e2b-it-qat](https://huggingface.co/JohnP1/d1a-e2b-it-qat) | PyTorch (adapter; `base_ct`: Google's QAT int4 trunk, rebuilt on load) | ✅ | ✅² | ✅¹ | ✅¹ | ✅¹ | the recommended E2B-it on PyTorch, **v0.7** (2026-11-10): published with four of its eleven checks missed, by the owner's decision (stated on its card); routing temperature 1.59 (#385); loads Gemma 4 E2B-it and the QAT checkpoint |
 | [d1a-e2b-it-qat-coreml](https://huggingface.co/JohnP1/d1a-e2b-it-qat-coreml) | Core ML (Google's QAT int4, exact; the adapter as a switch) | ✅⁴ | ✅⁴ | ✅⁴ | ✅⁴ | ✅⁴ | the recommended E2B-it on Core ML, **v0.7** (2026-11-10): published with one of its seven checks missed (photos, voice and video against the MLX build; stated on its card, #386); routing temperature 1.59 since tag `routing-t1.59` (#385; not checked on this build); photos, voice and video read the per-layer pad row exact since tag `v0.7-media-pad-row` (#394: 0.117 → 0.068 against full precision); 4.6 GB; verified on a Mac (M1 Max, GPU), not yet on an iPhone |
 | [d1a-e2b-it-qat-onnx](https://huggingface.co/JohnP1/d1a-e2b-it-qat-onnx) | ONNX Runtime 1.22 (Android / CPU; Google's QAT int4, exact; the adapter as a switch) | ✅ | ✅ | ❌ | ❌ | ❌ | D1A-E2B-it QAT v0.7 on ONNX Runtime: decisions and chat in one graph and one copy of the trunk; text only; ~12.9 tokens/s chat and ~0.4 s per decision on a Pixel 10 Pro |
-| [d1a-e4b-it-qat-mlx-q4](https://huggingface.co/JohnP1/d1a-e4b-it-qat-mlx-q4) | MLX 4-bit (Google's QAT int4, exact), **unmerged** | ✅ | ✅ | ✅ | ✅ | ✅ | D1A-E4B-it v0.6 retrained on the QAT trunk; level with v0.6 overall, typesafe −7.8 ([scorecard](reports/2026-10-28-e4b-it-qat-scorecard.md)); routing temperature 1.41 since tag `routing-t1.41` (#382); photos, voice and video read the per-layer pad row exact since tag `t1-media-pad-row` (#394); 5.3 GB |
-| [d1a-e4b-it-qat](https://huggingface.co/JohnP1/d1a-e4b-it-qat) | PyTorch (adapter; `base_ct`: Google's QAT int4 trunk, rebuilt on load) | ✅ | ✅² | ✅¹ | ✅¹ | ✅¹ | the same adapter on PyTorch; loads Gemma 4 E4B-it and the QAT checkpoint; routing temperature 1.41 since tag `routing-t1.41` (#382) |
+| [d1a-e4b-it-qat-mlx-q4](https://huggingface.co/JohnP1/d1a-e4b-it-qat-mlx-q4) | MLX 4-bit (Google's QAT int4, exact), **unmerged** | ✅ | ✅ | ✅ | ✅ | ✅ | D1A-E4B-it v0.6 retrained on the QAT trunk; level with v0.6 overall, typesafe −7.8 ([scorecard](reports/2026-10-28-e4b-it-qat-scorecard.md)); routing temperature 1.41 since tag `routing-t1.41` (#382); photos, voice and video read the per-layer pad row exact since tag `t1-media-pad-row` (#394); overconfident on transfer-v4⁵; 5.3 GB |
+| [d1a-e4b-it-qat](https://huggingface.co/JohnP1/d1a-e4b-it-qat) | PyTorch (adapter; `base_ct`: Google's QAT int4 trunk, rebuilt on load) | ✅ | ✅² | ✅¹ | ✅¹ | ✅¹ | the same adapter on PyTorch; loads Gemma 4 E4B-it and the QAT checkpoint; routing temperature 1.41 since tag `routing-t1.41` (#382); overconfident on transfer-v4⁵ |
 
 ¹ Through the separate PyTorch media server, `python -m d1a.serving.media --run <repo>`, which loads the full Gemma 4
 model (bf16, about 10 GB for E2B) ([Photos, voice and video](USAGE.md)).
@@ -44,6 +44,12 @@ model (bf16, about 10 GB for E2B) ([Photos, voice and video](USAGE.md)).
 ⁴ Through the repository's Python reference runner (`reference/d1a_coreml_qat.py`, no server; `io.json` lists every model
 input and output for a port); every model on the GPU, none on the Neural Engine yet; decisions up to 1,536 tokens, chat up to
 2,048 positions ([APPLE.md](APPLE.md#d1a-e2b-it-qat-on-core-ml)).
+
+⁵ On transfer-v4 (eight public task sources held out of training), mean confidence runs above accuracy, and one global temperature does not fix it ([#361](https://github.com/jonpol01/d1a/issues/361#issuecomment-6874951783)):
+- **D1A-E4B-it QAT:** 0.10 above (ECE 0.105), from about 0 (sciq) to +0.25 (paws, emotion) by source; 10.7% of answers given
+  at ≥ 0.9 are wrong. The temperature this suite alone wants (2.9, against the served 1.66) makes 15 of the 21 other suites worse.
+- **D1A-E4B-it v0.6** (measured on the MLX 8-bit build): 0.08 above (ECE 0.081), from about −0.04 (qnli) to +0.25 (emotion);
+  8.8% of answers given at ≥ 0.9 are wrong. Its suite-only temperature (2.3, against 1.55) also makes 15 of 21 worse.
 
 D1A-E2B-it QAT is the only Core ML build with chat, photo, voice and video; the v0.6 Core ML builds are text only.
 
