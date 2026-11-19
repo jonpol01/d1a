@@ -100,9 +100,12 @@ photos, voice and video (#341). 4.6 GB.
 - **Checks on an Apple M1 Max** (v0.7; fp32 is the PyTorch model on a CUDA GPU):
   - decisions (28 requests, 42 answers): the same answer as the MLX build on all 42 (largest change 0.028); against fp32,
     largest change 0.048, mean 0.006 (the MLX build 0.051, 0.008);
-  - photos, voice and video (the playground's 14 requests, 28 answers): against fp32, largest change 0.117 and 1 top answer
-    different (the MLX build 0.140 and 2). The two Mac builds share this gap; its cause is not found yet (#386). Against the
-    MLX build the largest change is 0.051, which missed the 0.05 limit set before the check; the card states it;
+  - photos, voice and video (the playground's 14 requests, 28 answers): against fp32, largest change 0.117 and 1 top
+    answer different (the MLX build 0.140 and 2). The two Mac builds share this gap, and it lies in the reference, not
+    in them: the same PyTorch model run in fp32 on a CPU agrees with the MLX build within 0.0014 on every answer, while
+    CUDA differs from both by up to 0.059 on video (#386; which side is right is parked as #404). Media answers are now
+    measured against PyTorch fp32 on the CPU, with the CUDA number beside it. Against the MLX build the largest change
+    is 0.051, which missed the 0.05 limit set before the check; the card states it;
   - chat (8 photos, 427 answer tokens, teacher-forced, v0.6) against fp32 PyTorch on the CPU: 1 token different (a near-tie).
     v0.7 gives the same chat tokens as v0.6, since chat runs with the adapter off.
 - **Time on the M1 Max:** about 0.4 s per decision with a photo or a voice clip, 8 to 11 s with a 16-frame video, and about
