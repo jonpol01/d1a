@@ -53,9 +53,14 @@ class MediaRequest(SystemOneRequest):
 
 def decode_audio(raw):
     """-> mono float32 samples at SAMPLE_RATE. Linear resampling: these clips are speech, and the feature extractor
-    computes its own mel bins."""
+    computes its own mel bins. ValueError (a 422) for a clip that does not decode or holds no samples; soundfile's own
+    errors are RuntimeErrors, which would be 500s. Out of memory stays a 500."""
     import numpy as np, soundfile as sf
-    wav, sr = sf.read(io.BytesIO(raw), dtype="float32", always_2d=True)
+    try:
+        wav, sr = sf.read(io.BytesIO(raw), dtype="float32", always_2d=True)
+    except sf.SoundFileError as e:   # libsndfile's reason; str(e) also names the buffer object
+        raise ValueError(f"cannot decode the audio: {getattr(e, 'error_string', None) or e}") from e
+    if not len(wav): raise ValueError("the audio holds no samples")
     wav = wav.mean(axis=1)
     if sr != SAMPLE_RATE:
         n = round(len(wav) * SAMPLE_RATE / sr)
