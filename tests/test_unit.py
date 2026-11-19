@@ -173,6 +173,22 @@ def test_media_audio_is_mono_16k_and_bounded():
         decode_audio(wav(MAX_AUDIO_S + 1, 8_000, 1))
 
 
+def test_media_audio_that_does_not_decode_is_a_422():
+    # soundfile raises its own RuntimeError for a clip it cannot read; the endpoint answers only ValueError with a 422 (#406)
+    sf = pytest.importorskip("soundfile")
+    import base64, io, numpy as np
+    from types import SimpleNamespace
+    from d1a.serving.media import Media, decode_audio, processor_inputs
+    def wav(samples):
+        buf = io.BytesIO(); sf.write(buf, np.zeros(samples, dtype="float32"), 16_000, format="WAV"); return buf.getvalue()
+    for raw in (b"not an audio file at all", wav(16_000)[:20], b"", b"fLaC" + bytes(64), wav(0)):
+        with pytest.raises(ValueError) as e:
+            decode_audio(raw)
+        assert "BytesIO" not in str(e.value)   # libsndfile's reason, not the buffer's repr
+    with pytest.raises(ValueError):           # before the processor sees it
+        processor_inputs(SimpleNamespace(audio_token="<audio>"), Media(type="audio", data=base64.b64encode(b"not an audio file at all").decode()))
+
+
 def test_max_state_lifts_row_and_packed_limits_together():
     from d1a.backends.torch import MAX_BRANCH, MAX_PACKED, MAX_STATE, MAX_TRAIN_STATE, SERVE_MAX_BRANCH, SERVE_MAX_STATE, training_context
     from d1a.eval.suite import CONTEXT
