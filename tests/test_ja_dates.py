@@ -181,3 +181,21 @@ def test_the_media_server_applies_it_as_the_text_server_does(monkeypatch):
     for r in (req(), req(ja_dates=False)): media.MediaModel.answer(fake, r)
     media.MediaModel.answer(fake, media.MediaRequest(questions=Q, media={"type": "image", "data": ""}))   # no text beside the media
     assert seen == ["2026年8月8日の配送", "August 8, 2026の配送", "August 8, 2026の配送", "2026年8月8日の配送", ""]
+
+
+def test_the_model_card_says_what_the_server_rewrites_and_is_unchanged_when_it_rewrites_nothing(monkeypatch):
+    import json
+    from types import SimpleNamespace
+    from d1a.serving import serve
+    monkeypatch.setattr(serve.app.state, "models", SimpleNamespace(model=None, idle_s=None), raising=False)
+    monkeypatch.setattr(serve.app.state, "card", {"description": "d", "release_date": "2026-01-01", "run": "r@v"}, raising=False)
+    card = lambda: serve.models()["models"][0]
+    monkeypatch.setattr(serve, "JA_DATES", False); monkeypatch.setattr(serve, "DATE_FACTS", False)
+    off = json.dumps(serve.models(), sort_keys=True)
+    assert "preprocessing" not in off   # no block: the card a server with both off has always had
+    monkeypatch.setattr(serve, "JA_DATES", True)
+    on = card()
+    assert on["preprocessing"] == {"ja_dates": True, "date_facts": False}
+    assert json.dumps({**serve.models(), "models": [{k: v for k, v in on.items() if k != "preprocessing"}]}, sort_keys=True) == off
+    monkeypatch.setattr(serve, "JA_DATES", False); monkeypatch.setattr(serve, "DATE_FACTS", True)
+    assert card()["preprocessing"] == {"ja_dates": False, "date_facts": True}
