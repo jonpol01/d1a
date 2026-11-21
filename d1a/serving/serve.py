@@ -497,6 +497,13 @@ def latency_summary(ms):
     return {"recent": len(xs), "p50_ms": rank(0.5), "p95_ms": rank(0.95), "max_ms": xs[-1]}
 
 
+def preprocessing():
+    """What this server rewrites in every state before the model reads it, for GET /v1/models: {"ja_dates": D1A_JA_DATES,
+    "date_facts": D1A_DATE_FACTS}, or None when it rewrites nothing, so the card of a server with both off is what it was. A
+    request's own ja_dates still overrides the first for that request."""
+    return {"ja_dates": JA_DATES, "date_facts": DATE_FACTS} if JA_DATES or DATE_FACTS else None
+
+
 def prepare(req):
     """Opt-in preprocessing applied to every request before the model sees it: Japanese dates rewritten (D1A_JA_DATES or
     the request's ja_dates, #410), then date facts (D1A_DATE_FACTS). Off, the request itself comes back."""
@@ -704,11 +711,13 @@ def models():
     a client may ignore: the run, the base, the device, the backend and precision, the temperature and the use-case
     temperatures a request may select (use_case_temperatures, {} for most checkpoints), where media positions read the
     pad id's per-layer embedding (media_pad_row: "export", "table", or null without per-layer embeddings), whether the model is
-    in memory (--idle-unload), and while it is, prefix-cache and batch stats. Answers without loading the model, so a
-    client polling it does not keep an idle model in memory."""
+    in memory (--idle-unload), and while it is, prefix-cache and batch stats; and, only when the server rewrites a state before
+    the model reads it, what it rewrites (preprocessing()). Answers without loading the model, so a client polling it does not
+    keep an idle model in memory."""
     od = app.state.models
     s, card = od.model, dict(app.state.card)
     card["loaded"], card["idle_unload_s"], card["learning"] = s is not None, od.idle_s, LEARNING.card()
+    if pre := preprocessing(): card["preprocessing"] = pre
     if s is not None:
         card.update({"cuda_graphs": graphs.stats() if (graphs := getattr(s.model, "graphs", None)) else None,
                      "prefix_cache": {"size": s.prefix_cache.size, "min_state_tokens": s.prefix_cache.min_tokens, "max_tokens": s.prefix_cache.max_tokens, "hits": s.prefix_cache.hits,
