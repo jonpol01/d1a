@@ -25,7 +25,8 @@ the question's `<decide>` token. README.md is the front page and docs/ is the us
     publish; publishing refuses an uncalibrated checkpoint), `composition.py`, `temperature_gate.py` (the rule a refitted
     temperature must pass);
   - `eval/`: `benchmark.py` (scores a checkpoint or a remote endpoint on a suite), `metrics.py`, `predictors.py`,
-    `suite.py` (frozen suites, Hub-mirrored partitions), `suites.py` (D1A's own suites);
+    `suite.py` (frozen suites, Hub-mirrored partitions), `suites.py` (D1A's own suites), `selection.py` (the selection
+    pre-check: one yes/no per candidate item of a day, against a type-and-|z| rule);
   - `agents/`: `presets.py`, `mcp_server.py`, `claude_code_gate.py` (the Claude Code PreToolUse hook), `demo.py` (one task
     through an agent's day).
 - `evals/` frozen suites from Kev (manifests pin every partition's sha256; never edit them in place). `evals/d1a/` holds D1A's

@@ -43,6 +43,20 @@ curl -s localhost:8009/v1/feedback -H 'content-type: application/json' \
 python -m d1a.learning.feedback calibrate runs/feedback/verifier.jsonl --out runs/feedback/cal.json   # picked up on the next request
 ```
 
+**Choosing a day's report items: the selection pre-check.** Some use cases ask D1A which of a day's candidate items (for example, measures that moved unusually) belong in that day's report. A writer then turns the chosen items into prose; D1A writes none. Each candidate is one decision: the day's whole candidate list is the state, and one yes/no question with the fixed id `include` names the candidate. A calibrator fitted on outcomes then learns one question, not one per position in the list. Before such a use case relies on D1A, `python -m d1a.eval.selection precheck <days.jsonl> --server <url>` asks whether D1A's zero-shot p(include) ranks each day's candidates better than the rule the use case would otherwise run on.
+- The rule is a logistic model on |z| and the candidate's type, fitted without the day it scores. |z| alone is a second baseline.
+- The pre-check passes when at least 14 days count and the per-day AUC difference beats both baselines. The bar is a 95% interval, from resampling whole days, whose lower bound is above 0.
+- If it fails, the use case runs on the rule.
+- The gold labels come from a teacher model (`gold_src: teacher`) or a person (`human`). Only the teacher's days are judged; a person's days are reported beside them.
+- `report` adds precision, recall and F1, fitted on the first 70% of days and reported on the rest:
+  - at p ≥ 0.5;
+  - at the threshold a served calibrator would apply;
+  - at the best-F1 threshold, a ceiling.
+
+  It also gives the teacher's agreement with a second draft of its own, and how many of its facts matched no candidate.
+- The input format and the report's fields are in the module's docstring (`d1a/eval/selection.py`).
+- On synthetic days, a scorer that reads a signal the rule cannot see passes, while one that only rediscovers type and |z| fails, even with no noise. Pure noise passed 2 of 200 seeded checks.
+
 **Settings, replay and a scheduled loop.** `D1A_LEARNING=<file>` holds the loop's settings, validated, read on every run and changed with `python -m d1a.learning.feedback config set key=value`. They cover which questions and outcome sources learn, the minimum outcomes, the gate's held-out share and interval, when it runs, replay, and where reports go. `tick` runs the loop every few minutes. After a model switch it **replays** the earlier models' decisions that have outcomes through the live server, so the new model starts with every outcome instead of none. A replay is logged as a decision of its own (`replay_of` names the original) and reads the original's outcomes, so an outcome goes to the original's `decision_id`: `POST /v1/feedback` refuses a replay's, with a 422 that names the original. Replay is fail-closed: a decision whose pull request or state is in the new model's training is never replayed, and no replay runs without a complete trained manifest of that model. It then gates after N new outcomes or at a daily time, once the outcomes have grown by `schedule.growth` (half, by default) since the last gate run, and promotes only on at least `promotion.min_held_out` (30) held-out groups. Each report says the smallest log-loss gain its held-out set can detect. Every gate run can promote: run every 10 outcomes, the gate promoted noise in 36.5% and 56.5% of 200 null replays by 1,000 outcomes, and with these two defaults in 7% and 9.5% ([#364](https://github.com/jonpol01/d1a/issues/364)). A changed promotion setting also waits for that growth, unless `promote` is run by hand. Every setting: [docs/CONFIGURATION.md](CONFIGURATION.md#self-learning).
 
 `gate()` decides whether the retrained candidate replaces the current model: lower held-out log loss with a 95% bootstrap interval (over repositories, for example) entirely below zero, and no frozen suite more than a point worse. Otherwise the current model stays.
