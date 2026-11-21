@@ -11,7 +11,8 @@ backends) is free, as long as the answers are the same.
 ## 1. Requests
 
 A request is TypeSafe's System One request (`POST /v1/systemone`): a `state` (any JSON value), a `model` name, and
-`questions`, an object of question id → question, plus D1A's optional `use_case` (a string of at most 64 characters; §6), which is never model input.
+`questions`, an object of question id → question, plus D1A's optional `use_case` (a string of at most 64 characters; §6) and
+`ja_dates` (`true` or `false`; below), neither of which is model input.
 A question is one of:
 
 | type | fields | options, in this order | reported under the keys |
@@ -39,6 +40,9 @@ texts. The text rules are part of every trained model's contract; a change to th
 - Questions keep the request's order.
 
 `d1a.serving.serve` can add date facts to the state (`with_date_facts`, opt-in); that is a preprocessing step, not part of the model.
+Likewise it can rewrite the state's Japanese dates as `Month D, YYYY` first (`d1a.core.ja_dates.with_ja_dates`, #410): when the
+request's `ja_dates` is `true`, or it is absent and the server runs with `D1A_JA_DATES=1`. The record is then built from the
+rewritten state; the decision log keeps the state as sent, with the request's `ja_dates`.
 
 ## 2. Model input
 

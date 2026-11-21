@@ -121,17 +121,19 @@ class FeedbackLog:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with open(self.path, "a", encoding="utf-8") as f: f.write(json.dumps(event) + "\n")
 
-    def decision(self, state, questions, answers, run, meta=None, use_case=None, temperature=None, replay_of=None):
+    def decision(self, state, questions, answers, run, meta=None, use_case=None, temperature=None, replay_of=None, ja_dates=None):
         """Record a decision as it was made: the request, the answers and the model `run` (repo@tag), and, when known, the
         request's use case and the temperature its probabilities were read at (a checkpoint's use-case temperature moves
         them without changing `run`, #209). `replay_of`: the id of an earlier decision this one re-scores with the model
-        now served (replay()); it takes that decision's outcomes and never gets its own. -> its id."""
+        now served (replay()); it takes that decision's outcomes and never gets its own. `ja_dates`: the request's own
+        ja_dates when it sent one (#410), so a replay reads the state as this decision did; the state is logged as sent.
+        -> its id."""
         did = uuid.uuid4().hex
         state, questions, answers = (reword(x, self.rewrite) for x in (state, questions, answers))   # ids, run and meta as they are
         self._append({"kind": "decision", "id": did, "ts": time.time(), "run": run, "state": state, "questions": questions,
                       "answers": answers, "meta": meta or {}, **({"use_case": use_case} if use_case is not None else {}),
                       **({"temperature": temperature} if temperature is not None else {}),
-                      **({"replay_of": replay_of} if replay_of else {})})
+                      **({"replay_of": replay_of} if replay_of else {}), **({"ja_dates": ja_dates} if ja_dates is not None else {})})
         return did
 
     def outcome(self, did, labels, meta=None, checked=False):

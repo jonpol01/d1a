@@ -45,7 +45,7 @@ const questions = JSON.parse(process.argv[5]);
   const c = new Client(url, { apiKey: "k" });
   await c.decide("Charged twice.", questions);
   await c.decide("Charged twice.", questions, { useCase: "routing", log: false });
-  await c.decideMedia("image", fs.readFileSync(mediaPath), questions, { state: "from the driver" });
+  await c.decideMedia("image", fs.readFileSync(mediaPath), questions, { state: "from the driver", jaDates: true });
   await c.decideMedia("audio", new Blob([fs.readFileSync(mediaPath)]), questions);
   await c.feedback("%s", { team: "billing", urgent: true }, { src: "human", group: "pr-1" });
   await c.feedback("%s", { urgent: false });
@@ -118,7 +118,7 @@ def python_calls(base, media_path):
     c = client.Client(base, api_key="k")
     c.decide("Charged twice.", QUESTIONS)
     c.decide("Charged twice.", QUESTIONS, use_case="routing", log=False)
-    c.decide_media("image", media_path, QUESTIONS, state="from the driver")
+    c.decide_media("image", media_path, QUESTIONS, state="from the driver", ja_dates=True)
     c.decide_media("audio", MEDIA, QUESTIONS)
     c.feedback(DECISION, {"team": "billing", "urgent": True}, src="human", group="pr-1")
     c.feedback(DECISION, {"urgent": False})
@@ -146,10 +146,11 @@ def test_python_client_requests_match_the_server(server, tmp_path):
         else:
             assert body is None and "content-type" not in headers
     (_, _, h1, plain), (_, _, h2, routed) = seen[:2]
-    assert "use_case" not in plain and serve.logged(SimpleNamespace(headers=h1)) is True   # without the options: as before
+    assert "use_case" not in plain and "ja_dates" not in plain and serve.logged(SimpleNamespace(headers=h1)) is True   # without the options: as before
     assert routed["use_case"] == "routing" and serve.logged(SimpleNamespace(headers=h2)) is False and plain["model"] == "d1a-latest"
     photo, voice = seen[2][3], seen[3][3]
     assert base64.b64decode(photo["media"]["data"]) == MEDIA and photo["media"]["type"] == "image" and photo["state"] == "from the driver"
+    assert photo["ja_dates"] is True and "ja_dates" not in voice   # sent only when given
     assert voice["media"]["type"] == "audio" and voice["state"] is None
     assert seen[4][3] == {"decision_id": DECISION, "labels": {"team": "billing", "urgent": True}, "src": "human", "group": "pr-1"}
     assert seen[5][3] == {"decision_id": DECISION, "labels": {"urgent": False}}

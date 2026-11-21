@@ -27,21 +27,22 @@ class Client:
     def __init__(self, base_url="http://127.0.0.1:8009", api_key=None, model="d1a-latest", timeout=120):
         self.base_url, self.api_key, self.model, self.timeout = base_url.rstrip("/"), api_key, model, timeout
 
-    def decide(self, state, questions, use_case=None, log=True):
+    def decide(self, state, questions, use_case=None, log=True, ja_dates=None):
         """POST /v1/systemone. `questions` maps an id to {"type": "noul"|"choice"|"score", "instructions": ..., "criteria": ...}.
         `use_case` (e.g. "routing"), sent only when given: a D1A server reads the answers at the checkpoint's temperature for
         that use case, if it has one. `log=False` keeps the decision out of the server's decision log (tests, demos: no
-        outcome will follow)."""
-        return self._send("/v1/systemone", self._request(state, questions, use_case), log)
+        outcome will follow). `ja_dates`, sent only when given: True has a D1A server rewrite the state's Japanese dates as
+        "Month D, YYYY" before reading it, False keeps them as written (unset: the server's setting, off by default)."""
+        return self._send("/v1/systemone", self._request(state, questions, use_case, ja_dates), log)
 
-    def decide_media(self, media_type, media, questions, state=None, use_case=None, log=True):
+    def decide_media(self, media_type, media, questions, state=None, use_case=None, log=True, ja_dates=None):
         """POST /v1/systemone/media: the same questions about a photo, a voice clip or a video. `media_type` is "image",
         "audio" or "video"; `media` is the file's bytes or its path. `state` is optional text beside it (a caption, a note).
         A D1A server answers these when it serves an MLX export with its media/ folder."""
         if isinstance(media, (str, os.PathLike)):
             with open(media, "rb") as f:
                 media = f.read()
-        request = self._request(state, questions, use_case)
+        request = self._request(state, questions, use_case, ja_dates)
         request["media"] = {"type": media_type, "data": base64.b64encode(media).decode("ascii")}
         return self._send("/v1/systemone/media", request, log)
 
@@ -67,9 +68,10 @@ class Client:
             raise ValueError("chat() answers whole; to stream, use an OpenAI client with base_url=<server>/v1")
         return self._send("/v1/chat/completions", {"messages": messages, **options})
 
-    def _request(self, state, questions, use_case):
+    def _request(self, state, questions, use_case, ja_dates=None):
         request = {"state": state, "model": self.model, "questions": questions}
         if use_case is not None: request["use_case"] = use_case
+        if ja_dates is not None: request["ja_dates"] = ja_dates   # never sent unset: an older D1A server refuses a field it does not know
         return request
 
     def _send(self, path, body=None, log=True):
