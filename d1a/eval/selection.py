@@ -30,10 +30,13 @@ thresholded the same ways. It also gives the teacher's agreement with its own se
 and the generator's misses.
 """
 import argparse
+import ipaddress
 import json
 import math
+import re
 import sys
 import time
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -42,6 +45,8 @@ import numpy as np
 QUESTION = "include"
 SOURCES = ("teacher", "human")
 MIN_DAYS, SAMPLES, SEED, FIT_SHARE, L2 = 14, 10_000, 0, 0.7, 1.0
+ID = re.compile(r"^[A-Za-z0-9_.-]{1,32}$")   # a candidate id, as the question and the state's lines name it
+CONTROL = re.compile(r"[\x00-\x1f\x7f\u2028\u2029]")   # a newline in a candidate's text could forge another line of the state
 
 
 # --- days and requests --------------------------------------------------------------------------------------------------
@@ -59,8 +64,10 @@ def check_days(days):
         cands = d.get("candidates")
         if not isinstance(cands, list) or not cands: problems.append(f"{where}: candidates, a non-empty list"); continue
         ids = [c.get("id") for c in cands if isinstance(c, dict)]
-        if len(ids) != len(cands) or len(set(ids)) != len(ids) or not all(isinstance(x, str) and x for x in ids):
-            problems.append(f"{where}: every candidate needs a distinct id")
+        if len(ids) != len(cands) or len(set(ids)) != len(ids) or not all(isinstance(x, str) and ID.match(x) for x in ids):
+            problems.append(f"{where}: every candidate needs a distinct id of letters, digits, '_', '.' or '-' (at most 32)")
+        if any(isinstance(v, str) and CONTROL.search(v) for v in [d.get("group")] + [c.get(k) for c in cands if isinstance(c, dict) for k in ("type", "facts")]):
+            problems.append(f"{where}: a group, type or facts with a newline or another control character")
         if not all(isinstance(c.get("z"), (int, float)) and not isinstance(c.get("z"), bool) and math.isfinite(c["z"]) for c in cands):
             problems.append(f"{where}: every candidate needs a finite z")
         if not all(isinstance(c.get("type"), str) and isinstance(c.get("facts"), str) for c in cands):
@@ -91,9 +98,23 @@ def request(day, candidate):
     return {"state": state(day), "questions": {QUESTION: q}, **({"use_case": day["use_case"]} if day.get("use_case") else {})}
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs): return None   # a redirect is an error: urllib would carry the key along
+
+
+def _loopback(host):
+    try: return host == "localhost" or ipaddress.ip_address(host).is_loopback
+    except ValueError: return False
+
+
 def score_server(days, server, api_key=None, timeout=120, retries=3):
     """{group: {candidate id: p(include)}} from a System One server, one request per candidate (the server keeps the day's
-    state prefix cached between them)."""
+    state prefix cached between them). A key goes only over https or to this machine, and never follows a redirect."""
+    url = urllib.parse.urlsplit(server)
+    if url.scheme not in ("http", "https"): raise ValueError(f"{server}: an http or https URL")
+    if api_key and url.scheme != "https" and not _loopback(url.hostname or ""):
+        raise ValueError(f"{server}: a key is sent only over https or to a loopback address")
+    opener = urllib.request.build_opener(_NoRedirect)
     out = {}
     for d in days:
         out[d["group"]] = {}
@@ -103,7 +124,7 @@ def score_server(days, server, api_key=None, timeout=120, retries=3):
             for attempt in range(retries):
                 try:
                     req = urllib.request.Request(f"{server.rstrip('/')}/v1/systemone", data=body, headers=headers, method="POST")
-                    with urllib.request.urlopen(req, timeout=timeout) as r: answer = json.loads(r.read())
+                    with opener.open(req, timeout=timeout) as r: answer = json.loads(r.read())
                     out[d["group"]][c["id"]] = float(answer["answers"][QUESTION]["noul"]); break
                 except Exception:
                     if attempt == retries - 1: raise

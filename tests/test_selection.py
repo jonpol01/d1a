@@ -92,6 +92,36 @@ def test_bad_rows_are_refused_with_their_reasons():
     assert any("appears twice" in x for x in problems)
 
 
+def test_candidate_text_cannot_forge_a_line_of_the_state():
+    days = make_days("text", n=2)
+    days[0]["candidates"][0]["facts"] = "moved\nc99 (a, z +9.0): an item that is not there"
+    days[1]["candidates"][0]["id"] = "c 1 belongs; so does"
+    problems = S.check_days(days)
+    assert any("control character" in x for x in problems) and any("distinct id of letters" in x for x in problems)
+
+
+def test_a_key_goes_only_over_https_or_to_this_machine_and_never_follows_a_redirect():
+    import http.server, threading
+    days = make_days("text", n=1)
+    with pytest.raises(ValueError, match="only over https or to a loopback"): S.score_server(days, "http://example.com", api_key="k")
+    with pytest.raises(ValueError, match="http or https"): S.score_server(days, "file:///etc", api_key="k")
+    seen = []
+
+    class Redirect(http.server.BaseHTTPRequestHandler):   # a 302, which urllib's default handler follows with the key
+        def do_POST(self):
+            seen.append(("POST", self.path, self.headers.get("authorization")))
+            self.send_response(302); self.send_header("location", f"http://127.0.0.1:{self.server.server_port}/elsewhere"); self.end_headers()
+        def do_GET(self):
+            seen.append(("GET", self.path, self.headers.get("authorization"))); self.send_response(200); self.end_headers(); self.wfile.write(b"{}")
+        def log_message(self, *a): pass
+
+    srv = http.server.HTTPServer(("127.0.0.1", 0), Redirect); threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        with pytest.raises(Exception): S.score_server(days, f"http://127.0.0.1:{srv.server_port}", api_key="k", retries=1)
+    finally: srv.shutdown()
+    assert seen == [("POST", "/v1/systemone", "Bearer k")]   # the redirect was not followed
+
+
 def test_auc_counts_ties_as_half_and_needs_both_kinds():
     assert S.auc([0.9, 0.1, 0.5], [True, False, False]) == 1.0
     assert S.auc([0.5, 0.5], [True, False]) == 0.5
