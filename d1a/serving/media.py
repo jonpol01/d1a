@@ -27,6 +27,7 @@ from pydantic import BaseModel, Field
 from typing import Literal
 from d1a.core.settings import get as setting
 from d1a.core.api import SystemOneRequest, answer_in_passes, conditional, in_request_order, output_tokens, to_answers, to_record
+from d1a.core.ja_dates import with_ja_dates
 from d1a.backends.checkpoint import Checkpoint, ct_dir, load_ct_base, weight_shards
 from d1a.backends.device import default_device, empty_cache
 from d1a.backends.embeddings import safe_embeddings
@@ -44,6 +45,9 @@ MAX_VIDEO_FRAMES = 16            # sampled evenly over a clip, ~63 tokens each (
 class Media(BaseModel):
     type: Literal["image", "audio", "video"]
     data: str = Field(description="base64 of the file: an image PIL reads (JPEG, PNG, WebP), a WAV/FLAC/OGG clip, or a video PyAV reads (MP4, MOV, WebM)")
+
+
+JA_DATES = setting("D1A_JA_DATES") == "1"   # rewrite Japanese dates in the text beside the media (#410), as d1a.serving.serve does
 
 
 class MediaRequest(SystemOneRequest):
@@ -208,6 +212,8 @@ class MediaModel:
 
     def answer(self, req: MediaRequest):
         t0 = time.perf_counter()
+        if (JA_DATES if req.ja_dates is None else req.ja_dates):   # as d1a.serving.serve's prepare() (#410)
+            req = req.model_copy(update={"state": with_ja_dates(req.state)})
 
         def run(sub):
             rec, meta = to_record(sub); ps, n = self.probs(rec, req.media, req.use_case); return meta, ps, n

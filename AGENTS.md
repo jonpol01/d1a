@@ -9,7 +9,8 @@ the question's `<decide>` token. README.md is the front page and docs/ is the us
   them for scripts/kev_share.py and scripts/check_license.py):
   - `core/`: `api.py` (the System One request and answer schema), `encoding.py` (how a request is packed into tokens, the
     context limits, rows), `head.py` (the pointer head), `versions.py`, `settings.py` (every `D1A_*` setting, its default and
-    reader), `hygiene.py` (what must never be published: local paths, AI-attribution lines);
+    reader), `hygiene.py` (what must never be published: local paths, AI-attribution lines), `ja_dates.py` (the opt-in
+    rewrite of Japanese dates as "Month D, YYYY", #410);
   - `backends/`: `torch.py` (DecisionModel, masks; re-exports encoding and the head), `mlx.py` (Apple Silicon backend for Qwen3.5
     and Gemma 4, and the MLX export folders `scripts/export_mlx.py` writes), `checkpoint.py` (loading; `D1A_*` load options
     are read only by `LoadOptions.from_env`), `backbone.py`, `device.py`, `shared_prefix.py` (Qwen3.5 training through a

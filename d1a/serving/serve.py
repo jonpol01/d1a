@@ -28,7 +28,8 @@ send the rule's use case (the answer then carries "rule"); the log keeps the mod
 --idle-unload N drops the model (and the media encoders) after N seconds without a request and loads it again on the
 next one; GET /v1/models answers either way without loading it, and so does GET /metrics (Prometheus text: loaded, requests,
 batches, queue depth, batch latency, prefix cache, memory). D1A_PREFIX_CACHE / D1A_PREFIX_MIN_TOKENS / D1A_PREFIX_MAX_TOKENS size the state-prefix cache; D1A_DATE_FACTS=1 opts into the
-date preprocessing (api.with_date_facts). Backend and precision follow LoadOptions (D1A_BACKEND, D1A_DTYPE, ...): on Apple
+date preprocessing (api.with_date_facts), and D1A_JA_DATES=1 into rewriting Japanese dates as "Month D, YYYY" (core.ja_dates,
+#410; a request's "ja_dates" overrides it). Backend and precision follow LoadOptions (D1A_BACKEND, D1A_DTYPE, ...): on Apple
 Silicon the hybrid Qwen3.5 checkpoints run on MLX by default, elsewhere on torch in bf16.
 """
 import argparse, asyncio, atexit, base64, copy, hashlib, hmac, json, logging, math, os, queue, random, re, subprocess, sys, threading, time, traceback, uuid
@@ -44,6 +45,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from d1a.core.api import SystemOneRequest, answer_in_passes, conditional, in_request_order, render, to_record, to_answers, output_tokens, with_date_facts
+from d1a.core.ja_dates import with_ja_dates
 from d1a.backends.checkpoint import EXPORT_CONFIG, Checkpoint, LoadOptions, base_dir, fused_available, is_hub_id
 from d1a.backends.device import allocated_bytes, default_device, empty_cache, out_of_memory, sync
 from d1a.learning.feedback import FeedbackLog, OutcomeCalibrator, load_rewrite
@@ -57,6 +59,7 @@ PREFIX_MIN_TOKENS = setting("D1A_PREFIX_MIN_TOKENS")               # states shor
 PREFIX_MAX_TOKENS = int(setting("D1A_PREFIX_MAX_TOKENS"))  # state tokens the cache holds in all (least recently used evicted first); a longer state is not cached.
                                                                          # One 64k state (Kev-27B: ~1.3 GB of keys, values and DeltaNet states), or four 16k ones, not four 64k ones
 DATE_FACTS = setting("D1A_DATE_FACTS") == "1"
+JA_DATES = setting("D1A_JA_DATES") == "1"                           # rewrite Japanese dates as "Month D, YYYY" (#410); a request's ja_dates overrides it
 FEEDBACK_LOG = setting("D1A_FEEDBACK_LOG")                         # set = log every decision (d1a.learning.feedback) and accept outcomes at POST /v1/feedback
 OUTCOME_CALIBRATOR = setting("D1A_OUTCOME_CALIBRATOR")             # set = apply this d1a.learning.feedback calibrator to yes/no and choice answers, reloaded when the file changes
 CHAT_LOG = setting("D1A_CHAT_LOG") == "1"                           # print a line per chat (log_chats); counts and time, never text
@@ -424,7 +427,7 @@ class Learning:
                 **({"rules": fired} if fired else {})} or None   # flags: #237; rules: #252
         with self._lock:
             did = self.log.decision(req.state, questions, answers, run=run, meta=meta,
-                                    use_case=req.use_case, temperature=temperature, replay_of=replay_of)
+                                    use_case=req.use_case, temperature=temperature, replay_of=replay_of, ja_dates=req.ja_dates)
             self._ids[did] = replay_of
         return served, did
 
@@ -495,8 +498,12 @@ def latency_summary(ms):
 
 
 def prepare(req):
-    """Opt-in preprocessing applied to every request before the model sees it."""
-    return req.model_copy(update={"state": with_date_facts(req.state)}) if DATE_FACTS else req
+    """Opt-in preprocessing applied to every request before the model sees it: Japanese dates rewritten (D1A_JA_DATES or
+    the request's ja_dates, #410), then date facts (D1A_DATE_FACTS). Off, the request itself comes back."""
+    state = req.state
+    if (JA_DATES if req.ja_dates is None else req.ja_dates): state = with_ja_dates(state)
+    if DATE_FACTS: state = with_date_facts(state)
+    return req if state is req.state else req.model_copy(update={"state": state})
 
 
 app = FastAPI(title="d1a")

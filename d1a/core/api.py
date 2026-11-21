@@ -89,6 +89,9 @@ class SystemOneRequest(BaseModel):
     # or a name the checkpoint has no temperature for, the checkpoint's own temperature applies. Never guessed from the text.
     # Bounded: the decision log records it verbatim. Stripped, as the map's names are (" routing " is routing).
     use_case: str | None = Field(None, max_length=USE_CASE_MAX_LENGTH)
+    # D1A's own optional field (#410), never model input: true rewrites the state's Japanese dates as "Month D, YYYY" before
+    # the pass (d1a.core.ja_dates), false keeps them as written; absent, the server's D1A_JA_DATES decides (off by default).
+    ja_dates: bool | None = Field(None, strict=True)   # a JSON true or false, never "yes" or 1
 
     @field_validator("use_case", mode="before")
     @classmethod

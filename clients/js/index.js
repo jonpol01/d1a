@@ -15,13 +15,15 @@ class Client {
   }
   // useCase (e.g. "routing"), sent as use_case only when given: a D1A server reads the answers at the checkpoint's
   // temperature for that use case, if it has one. log: false keeps the decision out of the server's decision log.
-  async decide(state, questions, { useCase, log = true } = {}) {
-    return this.#send("/v1/systemone", this.#request(state, questions, useCase), log);
+  // jaDates (sent as ja_dates only when given): true has a D1A server rewrite the state's Japanese dates as
+  // "Month D, YYYY" before reading it, false keeps them as written; unset, the server's setting (off by default).
+  async decide(state, questions, { useCase, log = true, jaDates } = {}) {
+    return this.#send("/v1/systemone", this.#request(state, questions, useCase, jaDates), log);
   }
   // The same questions about a photo, a voice clip or a video: mediaType "image", "audio" or "video"; media is the
   // file's bytes (Uint8Array, Buffer, ArrayBuffer, Blob or File) or a base64 string. state: optional text beside it.
-  async decideMedia(mediaType, media, questions, { state = null, useCase, log = true } = {}) {
-    const request = this.#request(state, questions, useCase);
+  async decideMedia(mediaType, media, questions, { state = null, useCase, log = true, jaDates } = {}) {
+    const request = this.#request(state, questions, useCase, jaDates);
     request.media = { type: mediaType, data: await base64(media) };
     return this.#send("/v1/systemone/media", request, log);
   }
@@ -44,9 +46,10 @@ class Client {
     if (options.stream) throw new Error("chat() answers whole; to stream, use an OpenAI client with baseURL: <server>/v1");
     return this.#send("/v1/chat/completions", { ...options, messages });
   }
-  #request(state, questions, useCase) {
+  #request(state, questions, useCase, jaDates) {
     const request = { state, model: this.model, questions };
     if (useCase != null) request.use_case = useCase;
+    if (jaDates != null) request.ja_dates = jaDates;   // never sent unset: an older D1A server refuses a field it does not know
     return request;
   }
   async #send(path, body, log = true) {

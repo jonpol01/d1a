@@ -17,6 +17,7 @@ from pathlib import Path
 import numpy as np
 
 from d1a.core.api import option_text, question_keys, with_date_facts
+from d1a.core.ja_dates import with_ja_dates
 from d1a.backends.checkpoint import LoadOptions
 from d1a.training.data import api_request, load_records
 from d1a.backends.device import default_device
@@ -316,6 +317,8 @@ def parse_args(argv=None):
     ap.add_argument("--split", choices=["development", "calibration", "train"], default="development",
                     help="suite partition to score (train: teacher predictions for distillation; --allow-test reads the locked test instead)")
     ap.add_argument("--date_facts", action="store_true", help="apply d1a.core.api.with_date_facts to every state before scoring (the opt-in serving preprocessor); reported in report.json")
+    ap.add_argument("--ja_dates", action="store_true", help="rewrite Japanese dates in every state as \"Month D, YYYY\" before scoring "
+                    "(d1a.core.ja_dates, the opt-in serving preprocessor D1A_JA_DATES; before --date_facts, as the server applies them); reported in report.json")
     ap.add_argument("--rotations", type=int, default=1, help="average every Choice question over this many cyclic option rotations (d1a.eval.predictors.RotationAveraged); 1 = one order")
     ap.add_argument("--identical-options", type=int, default=100, help="identical-option controls scored after the suite (position bias, #38): "
                     "the first N clean choice questions asked with every option the same text; 0 for none")
@@ -343,6 +346,8 @@ def inputs(a):
 def main():
     a = parse_args()
     records, heldout, split, source_hash, context, skip_overlong = inputs(a)
+    if a.ja_dates:
+        records = [{**record, "state": with_ja_dates(record["state"])} for record in records]
     if a.date_facts:
         records = [{**record, "state": with_date_facts(record["state"])} for record in records]
     if a.remote:
@@ -351,7 +356,7 @@ def main():
         predictor = LocalPredictor(a.run, a.device, LoadOptions.from_env(), context=context)
     scorer = RotationAveraged(predictor, a.rotations) if a.rotations > 1 else predictor
     report, _ = evaluate_records(records, scorer, a.out, heldout_sources=tuple(heldout), skip_overlong=skip_overlong, identical=a.identical_options)
-    report.update(suite_sha256=source_hash, data=a.data, date_facts=a.date_facts, rotations=a.rotations, run=a.run or a.remote, split=split,
+    report.update(suite_sha256=source_hash, data=a.data, date_facts=a.date_facts, ja_dates=a.ja_dates, rotations=a.rotations, run=a.run or a.remote, split=split,
                   calibration_applied=None if a.remote else predictor.temperature != 1.0,
                   remote={"base_url": a.remote, "requested_model": a.remote_model, "served_model": predictor.served_model,
                           "concurrency": a.remote_concurrency} if a.remote else None)

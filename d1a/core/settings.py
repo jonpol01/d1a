@@ -27,6 +27,7 @@ SETTINGS = {s.name: s for s in (
     Setting("D1A_PREFIX_MIN_TOKENS", None, "d1a.serving.serve"),
     Setting("D1A_PREFIX_MAX_TOKENS", "65536", "d1a.serving.serve"),
     Setting("D1A_DATE_FACTS", "0", "d1a.serving.serve"),
+    Setting("D1A_JA_DATES", "0", "d1a.serving.serve, d1a.serving.media"),
     Setting("D1A_FEEDBACK_LOG", None, "d1a.serving.serve"),
     Setting("D1A_OUTCOME_CALIBRATOR", None, "d1a.serving.serve"),
     Setting("D1A_LOG_REWRITE", None, "d1a.learning.feedback (the server's decision log)"),

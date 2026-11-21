@@ -17,6 +17,7 @@ from dataclasses import replace
 import torch
 
 from d1a.core.api import SystemOneRequest, answer_in_passes, conditional, in_request_order, to_answers, to_record
+from d1a.core.ja_dates import with_ja_dates
 from d1a.backends.checkpoint import Checkpoint, LoadOptions
 from d1a.backends.device import default_device
 from d1a.core.encoding import SERVE_MAX_BRANCH, SERVE_MAX_STATE
@@ -37,10 +38,12 @@ class D1A:
         tok, model = ck.load(dev, opts)
         return cls(ck, tok, model, dev)
 
-    def decide(self, state, questions, use_case=None):
+    def decide(self, state, questions, use_case=None, ja_dates=None):
         """state: the document; questions: {id: question} as in a /v1/systemone request; use_case: as its `use_case` (the
-        checkpoint's temperature for it, if it has one). -> {id: answer}."""
-        req = SystemOneRequest(model="d1a-latest", state=state, questions=questions, use_case=use_case)
+        checkpoint's temperature for it, if it has one); ja_dates: True rewrites the state's Japanese dates as "Month D,
+        YYYY" first (d1a.core.ja_dates, #410; no server setting applies here). -> {id: answer}."""
+        req = SystemOneRequest(model="d1a-latest", state=state, questions=questions, use_case=use_case, ja_dates=ja_dates)
+        if req.ja_dates: req = req.model_copy(update={"state": with_ja_dates(req.state)})
 
         def run(sub):
             rec, meta = to_record(sub)

@@ -146,7 +146,8 @@ def replay(log, server, manifest_file, cap=50, pause_s=1.0, exclude_no_pr_id=Tru
     for d in todo[:cap]:
         if (server_card(server, api_key).get("batches") or {}).get("queued", 0) > 0:
             skipped_busy += 1; break   # live traffic first: the rest waits for the next tick
-        body = {"state": d["state"], "questions": d["questions"], "model": "d1a-latest", **({"use_case": d["use_case"]} if d.get("use_case") else {})}
+        body = {"state": d["state"], "questions": d["questions"], "model": "d1a-latest", **({"use_case": d["use_case"]} if d.get("use_case") else {}),
+                **({"ja_dates": d["ja_dates"]} if d.get("ja_dates") is not None else {})}   # as the original was read (#410)
         try:
             _http(f"{server.rstrip('/')}/v1/systemone", body, {REPLAY_HEADER: d["id"], **_auth(api_key)}); sent += 1
         except (urllib.error.URLError, OSError, ValueError) as e:
