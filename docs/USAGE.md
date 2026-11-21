@@ -17,7 +17,9 @@ state's Japanese dates before reading it: `2026年8月8日`, `2026/8/8`, `令和
 full-width digits, a weekday kept as written (`（金）`), and ranges that start with a full date. Dates without a year, dates
 that are not real days and relative terms (`来週`, `明日`) stay as written, and a state with no Japanese in it is never
 touched. `false` keeps the dates as written even on a server started with `D1A_JA_DATES=1`; without the field, that
-setting decides (off by default, so answers are unchanged). `D1A.decide(..., ja_dates=True)` and both clients pass it. To
+setting decides (off by default, so answers are unchanged). `GET /v1/models` shows whether a server rewrites: its card has
+`"preprocessing": {"ja_dates": true, "date_facts": ...}` when the setting is on, and no `preprocessing` field when it rewrites
+nothing. `D1A.decide(..., ja_dates=True)` and both clients pass it. To
 do the same on the client side before sending, run `d1a.core.ja_dates.with_ja_dates` on the whole state; its docstring lists
 the rules for a client in another language. Rewriting was measured on `年月日` and era dates; slash dates, ranges and
 dates followed by a time are covered by unit tests only.
