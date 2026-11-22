@@ -1,6 +1,9 @@
 """The opt-in Japanese date normaliser (d1a.core.ja_dates, #410): what it rewrites, what it leaves as written, and that a
-state without Japanese, or without dates, comes back byte-identical."""
+state without Japanese, or without dates, comes back byte-identical. Also that date facts find a date written right against
+Japanese text (#411), the form the rewrite writes."""
 import json
+import random
+import re
 
 import pytest
 
@@ -96,6 +99,44 @@ def test_no_state_is_no_state():
 
 
 Q = {"u": {"type": "noul", "instructions": "urgent?"}}
+
+
+NEXT_TO_JAPANESE = [
+    ("締切はAugust 8, 2026までに、開始はJuly 1, 2026です", "July 1, 2026 is 38 days before August 8, 2026."),
+    ("期限はAugust 8, 2026、発行はAugust 1, 2026。", "August 1, 2026 is 7 days before August 8, 2026."),
+    ("開始は2026-07-01から、終了は2026-07-31まで", "2026-07-31 is 30 days after 2026-07-01."),       # ISO dates next to kanji and kana
+]
+
+
+@pytest.mark.parametrize("text,facts", NEXT_TO_JAPANESE)
+def test_date_facts_find_a_date_written_right_against_japanese_text(text, facts):
+    from d1a.core.api import date_facts
+    assert date_facts(text) == facts
+
+
+def test_two_rewritten_dates_next_to_kana_give_their_fact():
+    from d1a.core.api import with_date_facts
+    state = "発注は2026年8月1日、納期は令和8年8月8日（土）までにお願いします"
+    assert with_date_facts(with_ja_dates(state)) == ("発注はAugust 1, 2026、納期はAugust 8, 2026（土）までにお願いします\n\n"
+                                                    "date_facts: August 8, 2026 is 7 days after August 1, 2026.")
+
+
+def test_a_date_that_runs_on_into_a_word_or_a_number_is_still_not_a_date():
+    from d1a.core.api import DATE_PATTERN
+    for text in ("12026-08-08", "2026-08-0812", "XAugust 8, 2026", "August 8, 20261", "report_2026-08-08", "１2026-08-08", "2026-08-08１"):
+        assert DATE_PATTERN.search(text) is None, text
+
+
+def test_without_kana_or_kanji_next_to_it_a_date_is_found_exactly_as_before():
+    """The old pattern, bounded by \\b, against random text with no kana or kanji: the same dates at the same places, so an
+    English state's date facts are byte-identical."""
+    from d1a.core.api import DATE_PATTERN, MONTH_NAMES
+    before = re.compile(r"\b(?:" + "|".join(MONTH_NAMES) + r") \d{1,2}, \d{4}\b|\b\d{4}-\d{2}-\d{2}\b")
+    rng = random.Random(411)
+    pieces = ["August 8, 2026", "2026-08-08", "May 31, 2025", "x", "_", "7", "１", "é", "Ω", " ", ",", ".", "-", "/", "(", "\n", "a1"]
+    for _ in range(5000):
+        text = "".join(rng.choice(pieces) for _ in range(rng.randint(1, 8)))
+        assert [m.span() for m in DATE_PATTERN.finditer(text)] == [m.span() for m in before.finditer(text)], text
 
 
 def test_the_server_rewrites_only_when_asked_and_a_request_overrides_its_setting(monkeypatch):

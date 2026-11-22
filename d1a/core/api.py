@@ -196,7 +196,12 @@ def option_text(name: str, description: JSONContent) -> str:
 
 
 MONTH_NAMES = ("January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December")
-DATE_PATTERN = re.compile(r"\b(?:" + "|".join(MONTH_NAMES) + r") \d{1,2}, \d{4}\b|\b\d{4}-\d{2}-\d{2}\b")
+# A date must not run on into a word or a number on either side: `\b`, except that kana and kanji do not count, since
+# Japanese writes a date right against its text ("August 8, 2026までに", the form d1a.core.ja_dates writes). Text with no
+# kana or kanji next to a date is matched exactly as with `\b`.
+_JA_SCRIPT = "々〆぀-ヿ㐀-䶿一-鿿豈-﫿ｦ-ﾟ"
+_START, _END = rf"(?<![^\W{_JA_SCRIPT}])", rf"(?![^\W{_JA_SCRIPT}])"
+DATE_PATTERN = re.compile(_START + r"(?:(?:" + "|".join(MONTH_NAMES) + r") \d{1,2}, \d{4}|\d{4}-\d{2}-\d{2})" + _END)
 
 
 def parse_date(text: str):
