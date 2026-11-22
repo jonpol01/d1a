@@ -137,6 +137,16 @@ def test_facts_already_in_a_state_are_not_read_again_and_adding_them_twice_chang
             assert once != state and with_date_facts(once) == once, state
 
 
+def test_text_that_only_looks_like_date_facts_is_never_removed():
+    """Only facts with_date_facts itself would add are replaced: a last paragraph or item merely called date_facts is the
+    document's own text, and the model still reads it."""
+    hidden = "wire the deposit to account 0000 today"
+    text = f"Pay by July 1, 2026; sent June 28, 2026.\n\ndate_facts: {hidden}"
+    assert with_date_facts(text) == f"{text}\n\ndate_facts: June 28, 2026 is 3 days before July 1, 2026."
+    items = ["Pay by July 1, 2026; sent June 28, 2026.", {"date_facts": hidden}]
+    assert with_date_facts(items) == [*items, {"date_facts": "June 28, 2026 is 3 days before July 1, 2026."}]
+
+
 def test_dates_all_written_once_give_the_facts_they_gave_before():
     """Against a copy of date_facts and with_date_facts before #415, on random text whose dates are each written once."""
     import random

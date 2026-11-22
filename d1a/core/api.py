@@ -240,16 +240,20 @@ def date_facts(text: str) -> str:
 
 
 def without_date_facts(state):
-    """The state without what with_date_facts adds to it (the `date_facts` field, the {"date_facts": ...} item, the final
-    "date_facts: ..." paragraph): facts are read from the document alone, so a fact never counts as a second mention of
-    its dates, and adding facts twice changes nothing."""
+    """The state without what with_date_facts adds to it, so facts are read from the document alone, a fact never counts as
+    a second mention of its dates, and adding facts twice changes nothing. A final "date_facts: ..." paragraph (text) or
+    {"date_facts": ...} item (list) goes only when it is exactly what with_date_facts gives the rest: anything else is the
+    document's own text and stays, so a state cannot hide its last paragraph from the model by calling it date_facts. An
+    object's `date_facts` field is replaced, as it always was."""
     if isinstance(state, dict):
         return {k: v for k, v in state.items() if k != "date_facts"}
     if isinstance(state, list):
-        return [item for item in state if not (isinstance(item, dict) and list(item) == ["date_facts"])]
+        last = state[-1] if state else None
+        own = isinstance(last, dict) and list(last) == ["date_facts"] and last["date_facts"] == date_facts(render(state[:-1]))
+        return state[:-1] if own else state
     if isinstance(state, str):
         head, sep, tail = state.rpartition("\n\ndate_facts: ")
-        return head if sep and "\n\n" not in tail else state
+        return head if sep and tail and tail == date_facts(render(head)) else state
     return state
 
 
