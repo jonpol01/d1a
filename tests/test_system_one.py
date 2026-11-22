@@ -102,7 +102,7 @@ def test_score_confidence_on_typesafes_examples(p, shown):
 def test_date_facts():
     text = "Due July 4, 2026. Received June 26, 2026. Shipped 2026-07-01. Due July 4, 2026 again; not a day: 2026-02-30."
     assert date_facts(text) == ("June 26, 2026 is 8 days before July 4, 2026. 2026-07-01 is 3 days before July 4, 2026. "
-                                "2026-07-01 is 5 days after June 26, 2026. July 4, 2026 is the same day as July 4, 2026.")   # written twice (#415)
+                                "2026-07-01 is 5 days after June 26, 2026.")   # July 4 written twice beside other dates: no line (#415)
     assert date_facts("May 1, 2026 and 2026-05-02") == "2026-05-02 is 1 day after May 1, 2026."
     assert date_facts("2026-05-01 or May 1, 2026") == "May 1, 2026 is the same day as 2026-05-01."
     assert date_facts("only May 1, 2026") == ""
@@ -117,12 +117,13 @@ def test_with_date_facts_per_state_shape():
     assert with_date_facts({"case": "one date: May 1, 2026"}) == {"case": "one date: May 1, 2026"}
 
 
-def test_a_date_written_twice_says_it_is_the_same_day():
-    """A deadline on the day the document was written is one written date twice; it gets its own line, after the pairs (#415)."""
+def test_a_documents_only_date_written_twice_says_it_is_the_same_day():
+    """A deadline on the day the document was written is its one date written twice; it gets a line. Beside other dates a
+    repeated date adds nothing (#415)."""
     from d1a.core.ja_dates import with_ja_dates
     assert date_facts("Sent July 22, 2026. Please reply by July 22, 2026.") == "July 22, 2026 is the same day as July 22, 2026."
-    assert date_facts("Met July 20, 2026. Sent July 22, 2026; reply by July 22, 2026 or July 22, 2026.") == (
-        "July 22, 2026 is 2 days after July 20, 2026. July 22, 2026 is the same day as July 22, 2026.")   # one line however often
+    assert date_facts("Sent July 22, 2026; reply by July 22, 2026 or July 22, 2026.") == "July 22, 2026 is the same day as July 22, 2026."
+    assert date_facts("Met July 20, 2026. Sent July 22, 2026; reply by July 22, 2026.") == "July 22, 2026 is 2 days after July 20, 2026."
     assert with_date_facts(with_ja_dates("2026年7月22日送付。2026年7月22日までにご返信ください。")).endswith(
         "date_facts: July 22, 2026 is the same day as July 22, 2026.")
     assert date_facts("2026-02-30 and 2026-02-30") == ""   # not a real day, however often

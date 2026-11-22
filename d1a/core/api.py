@@ -222,9 +222,10 @@ def day_gap(later: str, d_later, earlier: str, d_earlier) -> str:
 
 def date_facts(text: str) -> str:
     """One sentence per pair of distinct dates written in `text`, in order of first appearance ("August 3, 2026 is 12 days
-    after July 22, 2026."). The model cannot subtract dates reliably (issue #8), but it can read a stated day count. Then
-    one sentence for each date written more than once ("July 22, 2026 is the same day as July 22, 2026."): a deadline on
-    the day the document was written is the same written date twice, which no pair shows (#415). "" when there is neither."""
+    after July 22, 2026."). The model cannot subtract dates reliably (issue #8), but it can read a stated day count. When a
+    document's only date is written more than once, one sentence says so ("July 22, 2026 is the same day as July 22,
+    2026."): a deadline on the day the document was written is that one date twice, and there is no pair to show it
+    (#415). In a document with other dates a repeated date adds nothing. "" when there is neither."""
     dates, repeated = {}, []
     for match in DATE_PATTERN.finditer(text):
         written = match.group(0)
@@ -235,7 +236,7 @@ def date_facts(text: str) -> str:
             dates[written] = day
     found = list(dates.items())
     pairs = [day_gap(*found[j], *found[i]) for i in range(len(found)) for j in range(i + 1, len(found))]
-    repeats = [day_gap(w, dates[w], w, dates[w]) for w in sorted(repeated, key=list(dates).index)]
+    repeats = [day_gap(w, dates[w], w, dates[w]) for w in repeated] if len(dates) == 1 else []
     return " ".join(pairs + repeats)
 
 
