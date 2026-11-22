@@ -222,29 +222,50 @@ def day_gap(later: str, d_later, earlier: str, d_earlier) -> str:
 
 def date_facts(text: str) -> str:
     """One sentence per pair of distinct dates written in `text`, in order of first appearance ("August 3, 2026 is 12 days
-    after July 22, 2026."). The model cannot subtract dates reliably (issue #8), but it can read a stated day count.
-    "" when fewer than two dates appear."""
-    dates = {}
+    after July 22, 2026."). The model cannot subtract dates reliably (issue #8), but it can read a stated day count. Then
+    one sentence for each date written more than once ("July 22, 2026 is the same day as July 22, 2026."): a deadline on
+    the day the document was written is the same written date twice, which no pair shows (#415). "" when there is neither."""
+    dates, repeated = {}, []
     for match in DATE_PATTERN.finditer(text):
         written = match.group(0)
-        if written not in dates and (day := parse_date(written)) is not None:
+        if written in dates:
+            if written not in repeated:
+                repeated.append(written)
+        elif (day := parse_date(written)) is not None:
             dates[written] = day
     found = list(dates.items())
-    return " ".join(day_gap(*found[j], *found[i]) for i in range(len(found)) for j in range(i + 1, len(found)))
+    pairs = [day_gap(*found[j], *found[i]) for i in range(len(found)) for j in range(i + 1, len(found))]
+    repeats = [day_gap(w, dates[w], w, dates[w]) for w in sorted(repeated, key=list(dates).index)]
+    return " ".join(pairs + repeats)
+
+
+def without_date_facts(state):
+    """The state without what with_date_facts adds to it (the `date_facts` field, the {"date_facts": ...} item, the final
+    "date_facts: ..." paragraph): facts are read from the document alone, so a fact never counts as a second mention of
+    its dates, and adding facts twice changes nothing."""
+    if isinstance(state, dict):
+        return {k: v for k, v in state.items() if k != "date_facts"}
+    if isinstance(state, list):
+        return [item for item in state if not (isinstance(item, dict) and list(item) == ["date_facts"])]
+    if isinstance(state, str):
+        head, sep, tail = state.rpartition("\n\ndate_facts: ")
+        return head if sep and "\n\n" not in tail else state
+    return state
 
 
 def with_date_facts(state):
-    """The state with its date_facts added when it holds two or more dates: a `date_facts` field (object), a
-    {"date_facts": ...} item (list) or a final "date_facts: ..." paragraph (text). Opt-in (D1A_DATE_FACTS=1 in d1a.serving.serve,
-    --date_facts in d1a.eval.benchmark)."""
-    facts = date_facts(render(state))
+    """The state with its date_facts (date_facts of the document, without any facts already added) when there are any:
+    a `date_facts` field (object), a {"date_facts": ...} item (list) or a final "date_facts: ..." paragraph (text), each
+    replacing one already there. Opt-in (D1A_DATE_FACTS=1 in d1a.serving.serve, --date_facts in d1a.eval.benchmark)."""
+    document = without_date_facts(state)
+    facts = date_facts(render(document))
     if not facts:
         return state
     if isinstance(state, dict):
         return {**state, "date_facts": facts}
     if isinstance(state, list):
-        return [*state, {"date_facts": facts}]
-    return f"{state}\n\ndate_facts: {facts}"
+        return [*document, {"date_facts": facts}]
+    return f"{document}\n\ndate_facts: {facts}"
 
 
 # --- request -> record -> answers ---------------------------------------------------------------------------------------
