@@ -196,3 +196,33 @@ def test_training_refuses_held_out_compositional_structures():
     for held in (canonical(SHAPES[DEV_SHAPES[0]]), negated):
         with pytest.raises(ValueError, match="held-out"):
             S.validate_training([{"_meta": {"source": "compositional", "family": "rand:7", "structure": held}}], allowed)
+
+
+def bench_folder(folder, records):
+    """A d1a.eval.benchmark folder: rows.json, and predictions.jsonl listing the same records ((id, request sha, rows)) in order."""
+    folder.mkdir(parents=True, exist_ok=True)
+    S.write_json(folder / "rows.json", [row for _, _, rows in records for row in rows])
+    S.write_jsonl(folder / "predictions.jsonl", [{"request_sha256": sha, "id": rid, "prediction": {}, "rows": rows} for rid, sha, rows in records])
+    return folder
+
+
+def test_benchmark_rows_names_an_id_held_twice_by_its_request(tmp_path):
+    """devtools-v1 holds one id for two records (#417): each gets its request's name, the same in every run whatever the
+    order, and ids held once are untouched. Without predictions.jsonl, or with the same record twice, it refuses."""
+    rec = lambda rid, sha, qs=("q",): (rid, sha, [{"id": rid, "question": q, "parent": rid} for q in qs])
+    a = S.benchmark_rows(bench_folder(tmp_path / "a", [rec("one", "f" * 64), rec("x", "b" * 64, ("q", "r")), rec("x", "c" * 64, ("q", "r"))]))
+    b = S.benchmark_rows(bench_folder(tmp_path / "b", [rec("x", "c" * 64, ("q", "r")), rec("one", "f" * 64), rec("x", "b" * 64, ("q", "r"))]))
+    names = lambda rows: sorted((r["id"], r["question"], r["parent"]) for r in rows)
+    assert names(a) == names(b) == [("one", "q", "one")] + [(f"x#{h * 12}", q, f"x#{h * 12}") for h in "bc" for q in "qr"]
+    (tmp_path / "plain").mkdir()
+    S.write_json(tmp_path / "plain/rows.json", [{"id": "one", "question": "q"}])
+    assert S.benchmark_rows(tmp_path / "plain") == [{"id": "one", "question": "q"}]   # no repeat: rows.json alone is enough
+    (tmp_path / "a/predictions.jsonl").unlink()
+    with pytest.raises(ValueError, match="no predictions.jsonl"):
+        S.benchmark_rows(tmp_path / "a")
+    with pytest.raises(ValueError, match="the same record twice"):
+        S.benchmark_rows(bench_folder(tmp_path / "c", [rec("x", "b" * 64), rec("x", "b" * 64)]))
+    with pytest.raises(ValueError, match="different records"):
+        bench_folder(tmp_path / "d", [rec("x", "b" * 64), rec("x", "c" * 64)])
+        S.write_json(tmp_path / "d/rows.json", [{"id": "y", "question": "q"}, {"id": "y", "question": "q"}])
+        S.benchmark_rows(tmp_path / "d")

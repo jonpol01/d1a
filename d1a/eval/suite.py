@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 import shutil
+from collections import Counter
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -161,6 +162,39 @@ def read_jsonl(path):
 
 def write_jsonl(path, records):
     Path(path).write_text("".join(json.dumps(record, ensure_ascii=False) + "\n" for record in records), encoding=ENCODING)
+
+
+def benchmark_rows(folder):
+    """A d1a.eval.benchmark folder's rows (rows.json), with an id held by more than one record made distinct by that
+    record's request: `<id>#<first 12 hex of its request_sha256>`, read from predictions.jsonl. A frozen suite can hold one
+    id for two records (devtools-v1, #417). Paired or grouped by (id, question), they would lose one record, or pair the
+    wrong two when two runs list them in another order; the request names the same record in every run. Ids held once
+    are unchanged."""
+    folder = Path(folder)
+    rows = read_json(folder / "rows.json")
+    held = Counter((row["id"], row["question"]) for row in rows)
+    repeated = {key[0] for key, n in held.items() if n > 1}
+    if not repeated:
+        return rows
+    if not (folder / "predictions.jsonl").exists():
+        raise ValueError(f"{folder}: {len(repeated)} id(s) held by more than one record, and no predictions.jsonl to tell them apart")
+    at = 0
+    for logged in read_jsonl(folder / "predictions.jsonl"):   # the benchmark writes both files record by record, in one order
+        mine = rows[at:at + len(logged["rows"])]
+        if len(mine) != len(logged["rows"]) or any(row["id"] != logged["id"] for row in mine):
+            raise ValueError(f"{folder}: rows.json and predictions.jsonl list different records at row {at}")
+        if logged["id"] in repeated:
+            name = f"{logged['id']}#{logged['request_sha256'][:12]}"
+            for row in mine:
+                if row.get("parent") == row["id"]:
+                    row["parent"] = name
+                row["id"] = name
+        at += len(mine)
+    if at != len(rows):
+        raise ValueError(f"{folder}: predictions.jsonl covers {at} of {len(rows)} rows")
+    if (n := len(rows) - len({(row["id"], row["question"]) for row in rows})):
+        raise ValueError(f"{folder}: {n} row(s) repeat an id and a request: the same record twice")
+    return rows
 
 
 # --- suites -------------------------------------------------------------------------------------------------------------

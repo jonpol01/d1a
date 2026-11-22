@@ -87,3 +87,20 @@ def test_main_writes_the_table_and_fails_a_run_below_the_bar(tmp_path, capsys):
     assert "good fitted" in capsys.readouterr().out                               # --fit replaces the served temperature
     assert cmp.main(args[:2] + ["--run", f"bad={tmp_path / 'bad'}", "--bar", "hard-v1=3"]) == 1
     assert "bar bad: FAIL (hard-v1: -16.67 < +3)" in capsys.readouterr().out
+
+
+def test_an_id_held_by_two_records_counts_both_and_pairs_them_by_request(tmp_path):
+    """devtools-v1 holds one id for two records (#417). Read through load(), both are compared, each with itself even when
+    the runs list them in another order; rows that still repeat a question are refused, never silently dropped."""
+    def folder(name, records):
+        d = tmp_path / name; write(d, [r for _, _, r in records for r in [r]])
+        (d / "predictions.jsonl").write_text("".join(json.dumps({"request_sha256": sha, "id": rid, "rows": [r]}) + "\n" for rid, sha, r in records), encoding="utf-8")
+        return d
+    rec = lambda rid, sha, right: (rid, sha * 64, row(rid, "a", right))
+    ref = cmp.load(folder("ref", [rec("one", "f", True), rec("x", "b", True), rec("x", "c", False)]))
+    run = cmp.load(folder("run", [rec("x", "c", True), rec("x", "b", False), rec("one", "f", True)]))
+    r = cmp.paired(ref, run)
+    assert r["n"] == len(ref) == len(run) == 3                                  # nothing dropped
+    assert (r["ref"], r["run"], r["delta"]) == (2 / 3, 2 / 3, 0.0)              # c: wrong -> right, b: right -> wrong
+    with pytest.raises(ValueError, match="listed twice"):
+        cmp.paired([row("x", "a", True), row("x", "a", False)], [row("x", "a", True)])
