@@ -54,6 +54,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(ROOT))
 from d1a.eval.metrics import metrics, paired_bootstrap, scored_rows   # noqa: E402
+from d1a.eval.suite import benchmark_rows                             # noqa: E402
 from quality_gate import CARD_SUITES, suite_list                     # noqa: E402
 
 # group: (requests, questions) the playground at 4baeee9 sends, as quality_gate.demo_requests lists them: 13 groups, 145
@@ -92,14 +93,9 @@ BONUS = [round(0.1 * k, 1) for k in range(21)]  # the P1 bonuses the severity-of
 # --- rows ---------------------------------------------------------------------------------------------------------------
 
 def load(d):
-    """The scored rows, with a repeated (id, question) renamed by occurrence (devtools-v1 development holds one record id
-    twice, which d1a.eval.metrics.paired_bootstrap refuses); both sides are scored in the same order, so the names pair."""
-    rows, seen = scored_rows(json.loads((Path(d) / "rows.json").read_text(encoding="utf-8"))), Counter()
-    for r in rows:
-        k = (r["id"], r["question"]); seen[k] += 1
-        if seen[k] > 1:
-            r["id"] = f"{r['id']}#dup{seen[k]}"
-    return rows
+    """The scored rows, an id held by two records made distinct by each one's request (d1a.eval.suite.benchmark_rows:
+    devtools-v1 development and test each hold one id twice, which d1a.eval.metrics.paired_bootstrap refuses)."""
+    return scored_rows(benchmark_rows(d))
 
 
 def paired(head, base, metric="acc"):
@@ -149,7 +145,7 @@ def correct(rows):
 
 def sev_rows(d):
     """The sev question's rows of <d>/rows.json: (ids, keys, raw logits, labels)."""
-    rows = [r for r in json.loads((Path(d) / "rows.json").read_text(encoding="utf-8")) if r.get("question") == "sev"]
+    rows = [r for r in benchmark_rows(d) if r.get("question") == "sev"]
     keys = rows[0]["keys"]
     if not all(r["keys"] == keys for r in rows):
         raise ValueError("option order differs between rows")

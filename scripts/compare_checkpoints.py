@@ -9,7 +9,8 @@ Each run folder holds one subfolder per suite with the rows.json d1a.eval.benchm
 every run has (calibration folders, cal-*, are not suites). Accuracy is on d1a.eval.metrics.scored_rows (clean, knowable),
 the rows the benchmark's own report scores. ECE is at the temperature fitted on a run's --fit rows (fit_temperature with
 TEMPERATURE_FIT, the fit d1a.training.calibrate makes), else at the temperature its rows were served at. Differences are
-paired: only questions both runs answered, resampled by record, since a record's questions share a state. The bar is on
+paired: only questions both runs answered, resampled by record, since a record's questions share a state; an id
+a suite holds for two records is told apart by each one's request (d1a.eval.suite.benchmark_rows, #417). The bar is on
 point estimates in points (--bar SUITE=MIN for the suites the run must raise, --floor for every other suite), as #167
 pre-registered it. Exit 0 when every run passes the bar (or none is given), 1 otherwise.
 """
@@ -30,12 +31,13 @@ from d1a.eval.metrics import (
     recorded,
     scored_rows,
 )
-from d1a.eval.suite import read_json, write_json
+from d1a.eval.suite import benchmark_rows, write_json
 
 
 def load(folder):
-    """A suite folder's scored rows, as they were served."""
-    return scored_rows(read_json(Path(folder) / "rows.json"))
+    """A suite folder's scored rows, as they were served, an id held by two records made distinct by each one's request
+    (d1a.eval.suite.benchmark_rows, #417), so pairing and per-record resampling count both."""
+    return scored_rows(benchmark_rows(folder))
 
 
 def suites(folder):
@@ -51,6 +53,8 @@ def paired(ref, run, seed=0, draws=2000):
     """{n, ref, run, delta, lo, hi}: accuracy of each on the questions both answered, the difference (run - ref) and its 95%
     bootstrap interval, records resampled with all their questions."""
     a, b = {(r["id"], r["question"]): r for r in ref}, {(r["id"], r["question"]): r for r in run}
+    if len(a) != len(ref) or len(b) != len(run):   # one row per question, or a record would silently drop out
+        raise ValueError("a question is listed twice: read rows through load() (d1a.eval.suite.benchmark_rows)")
     common = sorted(set(a) & set(b))
     if not common:
         raise ValueError("no question was answered by both runs")

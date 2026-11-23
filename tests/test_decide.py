@@ -431,3 +431,19 @@ def test_the_paired_memo_never_shares_a_result_between_different_inputs():
     got = [decide.paired(h, b) for h, b in pairs]
     want = [_REAL_PAIRED(h, b) for h, b in pairs]
     assert got == want and (got[0]["lo"], got[0]["hi"]) != (got[1]["lo"], got[1]["hi"])
+
+
+def test_an_id_held_by_two_records_pairs_each_with_itself(tmp_path):
+    """devtools-v1 holds one id for two records (#417): base and head are paired by request, not by the order they list
+    them in, so a fix on one and a break on the other are both seen."""
+    def side(name, records):
+        d = tmp_path / name; d.mkdir()
+        rows = [{"id": "x", "question": "q", "label": 0, "p": [0.9, 0.1] if right else [0.1, 0.9], "keys": ["a", "b"], "type": "choice",
+                 "variant": "clean", "source": "s", "parent": "x"} for _, right in records]
+        (d / "rows.json").write_text(json.dumps(rows), encoding="utf-8")
+        log = "".join(json.dumps({"request_sha256": sha * 64, "id": "x", "rows": [r]}) + "\n" for (sha, _), r in zip(records, rows))
+        (d / "predictions.jsonl").write_text(log, encoding="utf-8")
+        return d
+    base = decide.load(side("base", [("b", True), ("c", False)]))
+    head = decide.load(side("head", [("c", True), ("b", False)]))
+    assert len(base) == len(head) == 2 and decide.flips(head, base) == (1, 1)
