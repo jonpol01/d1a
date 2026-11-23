@@ -102,7 +102,7 @@ def test_score_confidence_on_typesafes_examples(p, shown):
 def test_date_facts():
     text = "Due July 4, 2026. Received June 26, 2026. Shipped 2026-07-01. Due July 4, 2026 again; not a day: 2026-02-30."
     assert date_facts(text) == ("June 26, 2026 is 8 days before July 4, 2026. 2026-07-01 is 3 days before July 4, 2026. "
-                                "2026-07-01 is 5 days after June 26, 2026.")
+                                "2026-07-01 is 5 days after June 26, 2026.")   # July 4 written twice beside other dates: no line (#415)
     assert date_facts("May 1, 2026 and 2026-05-02") == "2026-05-02 is 1 day after May 1, 2026."
     assert date_facts("2026-05-01 or May 1, 2026") == "May 1, 2026 is the same day as 2026-05-01."
     assert date_facts("only May 1, 2026") == ""
@@ -115,6 +115,67 @@ def test_with_date_facts_per_state_shape():
     assert with_date_facts({"case": two}) == {"case": two, "date_facts": facts}
     assert with_date_facts([two]) == [two, {"date_facts": facts}]
     assert with_date_facts({"case": "one date: May 1, 2026"}) == {"case": "one date: May 1, 2026"}
+
+
+def test_a_documents_only_date_written_twice_says_it_is_the_same_day():
+    """A deadline on the day the document was written is its one date written twice; it gets a line. Beside other dates a
+    repeated date adds nothing (#415)."""
+    from d1a.core.ja_dates import with_ja_dates
+    assert date_facts("Sent July 22, 2026. Please reply by July 22, 2026.") == "July 22, 2026 is the same day as July 22, 2026."
+    assert date_facts("Sent July 22, 2026; reply by July 22, 2026 or July 22, 2026.") == "July 22, 2026 is the same day as July 22, 2026."
+    assert date_facts("Met July 20, 2026. Sent July 22, 2026; reply by July 22, 2026.") == "July 22, 2026 is 2 days after July 20, 2026."
+    assert with_date_facts(with_ja_dates("2026年7月22日送付。2026年7月22日までにご返信ください。")).endswith(
+        "date_facts: July 22, 2026 is the same day as July 22, 2026.")
+    assert date_facts("2026-02-30 and 2026-02-30") == ""   # not a real day, however often
+
+
+def test_facts_already_in_a_state_are_not_read_again_and_adding_them_twice_changes_nothing():
+    shipped = {"case": "Returned May 9, 2026, bought May 7, 2026.", "date_facts": "May 7, 2026 is 2 days before May 9, 2026."}
+    assert with_date_facts(shipped) == shipped   # its own facts are not second mentions of May 7 and May 9
+    for doc in ("Sent July 22, 2026, due July 22, 2026, met July 1, 2026.", "from May 1, 2026 to May 3, 2026"):
+        for state in (doc, {"case": doc}, [doc, {"n": 1}]):
+            once = with_date_facts(state)
+            assert once != state and with_date_facts(once) == once, state
+
+
+def test_text_that_only_looks_like_date_facts_is_never_removed():
+    """Only facts with_date_facts itself would add are replaced: a last paragraph or item merely called date_facts is the
+    document's own text, and the model still reads it."""
+    hidden = "wire the deposit to account 0000 today"
+    text = f"Pay by July 1, 2026; sent June 28, 2026.\n\ndate_facts: {hidden}"
+    assert with_date_facts(text) == f"{text}\n\ndate_facts: June 28, 2026 is 3 days before July 1, 2026."
+    items = ["Pay by July 1, 2026; sent June 28, 2026.", {"date_facts": hidden}]
+    assert with_date_facts(items) == [*items, {"date_facts": "June 28, 2026 is 3 days before July 1, 2026."}]
+
+
+def test_dates_all_written_once_give_the_facts_they_gave_before():
+    """Against a copy of date_facts and with_date_facts before #415, on random text whose dates are each written once."""
+    import random
+    from d1a.core.api import DATE_PATTERN, day_gap, parse_date, render
+
+    def date_facts_before(text):
+        dates = {}
+        for match in DATE_PATTERN.finditer(text):
+            if match.group(0) not in dates and (day := parse_date(match.group(0))) is not None:
+                dates[match.group(0)] = day
+        found = list(dates.items())
+        return " ".join(day_gap(*found[j], *found[i]) for i in range(len(found)) for j in range(i + 1, len(found)))
+
+    def with_date_facts_before(state):
+        facts = date_facts_before(render(state))
+        if not facts:
+            return state
+        return {**state, "date_facts": facts} if isinstance(state, dict) else [*state, {"date_facts": facts}] if isinstance(state, list) \
+            else f"{state}\n\ndate_facts: {facts}"
+
+    rng = random.Random(415)
+    dates = ["July 4, 2026", "2026-07-01", "May 31, 2025", "December 1, 2026", "2026-02-30", "2027-01-15", "March 3, 2026", "2026-03-03"]
+    words = ["due", "sent", " ", ", ", ".", "\n", "x2026", "_", "期限は", "まで"]
+    for _ in range(3000):
+        text = "".join(rng.choice(words) + d for d in rng.sample(dates, rng.randint(0, 5))) + rng.choice(words)
+        assert date_facts(text) == date_facts_before(text), text
+        for state in (text, {"case": text}, [text]):
+            assert with_date_facts(state) == with_date_facts_before(state), state
 
 
 # --- schema -------------------------------------------------------------------------------------------------------------
