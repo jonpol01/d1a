@@ -2,7 +2,7 @@
 
 # Apple Silicon
 
-D1A on Apple hardware: MLX on the GPU and a Core ML preview on the Neural Engine.
+D1A on Apple hardware: MLX on the GPU, and a Core ML preview converted for the Neural Engine, measured on Macs only (not yet on an iPhone or iPad).
 
 ## Apple Silicon (MLX)
 
@@ -48,14 +48,15 @@ CUDA and the CPU were never affected. PyTorch runs on MPS before this fix read t
 
 ## Apple Neural Engine (Core ML)
 
-D1A also runs on the Apple Neural Engine through Core ML, as a preview for iPhone/iPad; on Macs MLX is faster. The v0.6 builds
+D1A's Core ML builds are converted for the Apple Neural Engine, as a preview meant for iPhone and iPad. They have been measured
+on Macs only (an M1 Max and an M4), not yet on an iPhone or iPad; on Macs MLX is faster. The v0.6 builds
 below are text only, ≤ 512 tokens (#224); D1A-E2B-it QAT's build does all five functions ([below](#d1a-e2b-it-qat-on-core-ml)):
 - The text model is converted in chunks of 6 or 7 layers (5 chunks for E2B, 7 for E4B), with int8 weights (per block of 64).
 - The embedding tables stay on the host as row lookups.
 - Each chunk runs in its own process.
 
 Both Core ML builds give the same answers as the full-precision model on every clear-cut question. On a Mac, MLX on the GPU
-is several times faster, so the serving host keeps MLX; Core ML is for iPhone and iPad, where it keeps the GPU free. The
+is several times faster, so the serving host keeps MLX; Core ML is meant for iPhone and iPad (not yet measured there). The
 v0.6 builds have no photo, voice or video encoders. Each Core ML repository's `reference/run.py` answers a request from
 the downloaded files.
 
@@ -65,7 +66,7 @@ Measured on 2026-10-11 on the same 28 real requests (42 questions, all ≤ 512 t
 |---|---|---|---|---|
 | Version | v0.6 | v0.6 | v0.6 | v0.6 |
 | Repository | [JohnP1/d1a-e2b-mlx-q8](https://huggingface.co/JohnP1/d1a-e2b-mlx-q8) | [JohnP1/d1a-e2b-coreml](https://huggingface.co/JohnP1/d1a-e2b-coreml) | [JohnP1/d1a-e4b-mlx-q8](https://huggingface.co/JohnP1/d1a-e4b-mlx-q8) | [JohnP1/d1a-e4b-coreml](https://huggingface.co/JohnP1/d1a-e4b-coreml) |
-| Runs on | Mac GPU | Neural Engine (iPhone, iPad, M4-class Macs) | Mac GPU | Neural Engine |
+| Runs on | Mac GPU | Core ML, converted for the Neural Engine (measured on Macs; not yet on an iPhone or iPad) | Mac GPU | Core ML, converted for the Neural Engine (measured on Macs) |
 | Text | yes | yes | yes | yes |
 | Photo, voice, video (16 frames, no sound) | yes | not yet (next) | yes | not yet |
 | Input length | long documents | ≤ 512 tokens | long documents | ≤ 512 tokens |

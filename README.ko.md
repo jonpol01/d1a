@@ -22,7 +22,7 @@
   <a href="https://huggingface.co/JohnP1/d1a-e4b"><img src="https://img.shields.io/badge/%F0%9F%A4%97%20model-JohnP1%2Fd1a--e4b-yellow" alt="model"></a>
   <a href="https://huggingface.co/collections/JohnP1/d1a-for-pytorch-cuda-cpu-non-mac"><img src="https://img.shields.io/badge/PyTorch-CUDA%20%7C%20CPU-ee4c2c" alt="PyTorch collection"></a>
   <a href="https://huggingface.co/collections/JohnP1/d1a-for-mlx-apple-silicon-gpu"><img src="https://img.shields.io/badge/Apple%20Silicon-MLX-black" alt="MLX collection"></a>
-  <a href="https://huggingface.co/collections/JohnP1/d1a-for-core-ml-apple-neural-engine"><img src="https://img.shields.io/badge/Neural%20Engine-Core%20ML%20preview-555555" alt="Core ML collection"></a>
+  <a href="https://huggingface.co/collections/JohnP1/d1a-for-core-ml-apple-neural-engine"><img src="https://img.shields.io/badge/Core%20ML-preview-555555" alt="Core ML collection"></a>
   <a href="https://huggingface.co/mlx-community/d1a-e4b-8bit"><img src="https://img.shields.io/badge/mlx--community-8bit-black" alt="mlx-community mirror"></a>
   <a href="https://github.com/jonpol01/d1a-playground"><img src="https://img.shields.io/badge/demos-d1a--playground-7c3aed" alt="demos"></a>
 </p>
@@ -194,7 +194,7 @@ D1A는 에이전트의 작은 의사결정에 빠르게 답하고, 페일세이�
 
 ## 결과로부터 학습
 
-`D1A_FEEDBACK_LOG`를 설정하면(기본값은 꺼짐) 서버가 `/v1/systemone`의 모든 답을 기록합니다. 주기적으로 실행하는 `python -m d1a.learning.feedback tick`이 돌아온 결과로 확률을 다시 맞추고, 그 게이트를 통과하면 서버가 적용하는 보정기(`D1A_OUTCOME_CALIBRATOR`)를 기록합니다. 이 과정에 사람은 개입하지 않으며, 프로덕션에서 사용 중입니다. 해결된 의사결정으로 하는 재학습은 사람이 직접 실행하고 홀드아웃 게이트를 통과해야 합니다. 아직 통과한 것은 없습니다. 자세한 내용과 수치: [docs/SELF_LEARNING.md](docs/SELF_LEARNING.md).
+`D1A_FEEDBACK_LOG`를 설정하면(기본값은 꺼짐) 서버가 `/v1/systemone`의 모든 답을 기록합니다. 주기적으로 실행하는 `python -m d1a.learning.feedback tick`이 돌아온 결과로 확률을 다시 맞추고, 홀드아웃 게이트를 통과하고 자동 승격이 켜져 있으면 서버가 적용하는 보정기(`D1A_OUTCOME_CALIBRATOR`)를 기록합니다. 이를 실행하는 곳은 PR 라벨링을 하는 배포 하나이며, 결과로는 자동 리뷰어의 라벨을 씁니다(2026-11-14까지는 그 리뷰어가 D1A의 라벨을 먼저 보았고, 사람이 고친 결과는 없습니다). 2026년 10월에 게이트가 변경 유형과 영향 범위의 보정기를 승격했고, 현재 보정기(2026-10-29에 일부 변경 유형을 유지하도록 손으로 수정)는 14일 동안 변경 유형 답의 약 9개 중 1개, 영향 범위 답의 약 6개 중 1개를 옮겼으며, 옮긴 곳은 매번 `feature` 또는 `moderate`였습니다. 모델 자신의 답보다 정확도가 나아졌다는 것은 보이지 않았으며(블라인드 확인은 결론이 나지 않았습니다), 그 배포의 자동 승격은 2026-11-14부터 멈춰 있습니다. 해결된 의사결정으로 하는 재학습은 사람이 직접 실행하고 홀드아웃 게이트를 통과해야 합니다. 아직 통과한 것은 없습니다. 자세한 내용과 수치: [docs/SELF_LEARNING.md](docs/SELF_LEARNING.md).
 
 <a id="demos"></a>
 

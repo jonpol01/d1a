@@ -1,6 +1,6 @@
 # Self-learning
 
-How D1A logs its decisions and learns from their outcomes: recalibration is in production use; retraining sits behind a held-out gate that no retrain has passed yet.
+How D1A logs its decisions and learns from their outcomes: recalibration is in production use in one deployment, with automatic promotion paused since 2026-11-14 and no accuracy gain shown yet; retraining sits behind a held-out gate that no retrain has passed yet.
 
 Most of D1A's decisions get a ground truth later: a patch passes or fails its tests, a maintainer keeps or corrects a label, a routed task succeeds or fails. `d1a.learning.feedback` turns those outcomes into a better model without letting a worse one through.
 

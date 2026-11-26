@@ -11,8 +11,10 @@ How to call D1A: the System One API, the in-process library, the MCP tools for a
 A request may also name its use case, `"use_case": "routing"` (optional, at most 64 characters, surrounding whitespace ignored; D1A's own field, which other System One servers ignore). When the checkpoint carries a temperature for that use case, the request's probabilities are read at it; without `use_case`, or with a name the checkpoint has no temperature for, the checkpoint's own temperature applies and the answers are exactly what they were. The top answer never changes, only how sure it is. `GET /v1/models` lists the checkpoint's `use_case_temperatures` (`{}` for most checkpoints), and the decision log records each request's use case and the temperature it was read at. The agent presets, the MCP tools, `D1A.decide(..., use_case=...)` and both clients pass it. 
 
 **Japanese dates (`ja_dates`, #410).** D1A reads urgency from dates far better when they are written `Month D, YYYY`: on
-Japanese documents whose dates alone were rewritten that way, urgency accuracy rose from 75.0% to 81.7% (83.0% for the same
-documents in English). A request may send `"ja_dates": true` (D1A's own field, a JSON boolean) to have the server rewrite the
+300 synthetic Japanese documents whose dates alone were rewritten that way, urgency accuracy rose from 75.0% to 81.7% (83.0% for
+the same documents in English), and from 76.3% to 81.7% where the dates were era dates (令和), at a cost there: 184 of the 187
+documents without an urgent deadline were answered right before, 170 after. Measured on the served build (D1A-E4B-it QAT, 4-bit)
+through the server setting, 2026-11-27 ([FEATURE_TESTS.md](FEATURE_TESTS.md)). A request may send `"ja_dates": true` (D1A's own field, a JSON boolean) to have the server rewrite the
 state's Japanese dates before reading it: `2026年8月8日`, `2026/8/8`, `令和8年8月8日` (also `令和元年`, `平成`, `昭和`),
 full-width digits, a weekday kept as written (`（金）`), and ranges that start with a full date. Dates without a year, dates
 that are not real days and relative terms (`来週`, `明日`) stay as written, and a state with no Japanese in it is never
