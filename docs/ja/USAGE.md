@@ -84,7 +84,7 @@ print(answers["team"]["probabilities"], answers["urgent"]["noul"])
 
 ## エージェントから使う（MCP）
 
-`d1a.agents.mcp_server` は、エージェント（Hermes、Claude Code、任意の MCP クライアント）に、エージェントファクトリーの意思決定をツールとして提供します。`d1a_intake`（新しいリクエスト: どのワーカーか、どの規模のモデルか、先にユーザーに確認するか）、`d1a_judge`（カードとその最新のレポート: 完了、ブロック、人が必要、次のステップ）、`d1a_tier`（実装に使うのは小・中・大のどのモデルか）、`d1a_gate`（このツール呼び出しを実行してよいか: allow、ask、deny）、`d1a_route`（プロンプトにどの規模のモデルが答えるか）、`d1a_decide`（独自の質問）です。いずれも、確率付きの回答に加えて `advice` を返します。これはデフォルトがフェイルセーフなアクションで、確信のない回答は、上位に回す、人に確認する、カードを開いたままにする、のいずれかになります（`d1a.agents.presets.advise`）。
+`d1a.agents.mcp_server` は、エージェント（Hermes、Claude Code、任意の MCP クライアント）に、エージェントファクトリーの意思決定をツールとして提供します。`d1a_intake`（新しいリクエスト: どのワーカーか、どの規模のモデルか、先にユーザーに確認するか）、`d1a_judge`（カードとその最新のレポート: 完了、ブロック、人が必要、次のステップ）、`d1a_tier`（実装に使うのは小・中・大のどのモデルか）、`d1a_gate`（このツール呼び出しを実行してよいか: allow、ask、deny）、`d1a_route`（プロンプトにどの規模のモデルが答えるべきか）、`d1a_decide`（独自の質問）です。いずれも、確率付きの回答に加えて `advice` を返します。これは取るべきアクションで、デフォルトはフェイルセーフです。確信のない回答には、より大きなモデル、人への確認、カードを開いたままにする、のいずれかを助言します（`d1a.agents.presets.advise`）。助言に従って動くのは呼び出し側のエージェントです。d1a-serve 自身にチャットを転送させるには、英語版の [Route chats to other models](../USAGE.md#route-chats-to-other-models) を参照してください。
 
 ```bash
 pip install "d1a[mcp] @ git+https://github.com/jonpol01/d1a"

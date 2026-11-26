@@ -4,18 +4,20 @@
 
 An agent makes many small decisions between its real work: who should take a request, how large a model it needs,
 whether a tool call is safe to run, whether a task is done. D1A answers each in one forward pass (about 0.2–1 s), with
-a calibrated probability for every option. The defaults turn unsure answers into the safe action: route up, ask a
-person, or keep a task open.
+a calibrated probability for every option, and advice whose defaults turn an unsure answer into the safe action: a
+larger model, asking a person, or keeping a task open. Your agent acts on the advice. Two places act on it themselves:
+the Claude Code gate hook, and d1a-serve's chat endpoint with `D1A_ROUTES` set, which forwards each chat to the model D1A
+picks ([USAGE.md](USAGE.md#route-chats-to-other-models)).
 
 ## What D1A decides
 
-| Decision | Preset | Answers | Fail-safe action |
+| Decision | Preset | Answers | Fail-safe advice |
 |---|---|---|---|
-| **Intake:** a new request | `intake` | which worker, model size, does it name its target and say what done looks like, ask the user first? | asks the user when the target or the finished state looks missing |
-| **Tier:** a task, before work starts | `tier` | small, medium or large model | routes up unless D1A is sure a smaller model is enough |
+| **Intake:** a new request | `intake` | which worker, model size, does it name its target and say what done looks like, ask the user first? | ask the user when the target or the finished state looks missing |
+| **Tier:** a task, before work starts | `tier` | small, medium or large model | a larger model unless D1A is sure a smaller one is enough |
 | **Route:** any prompt | `route` | small, medium or large model | the same |
-| **Gate:** a tool call | `gate` | allow, ask, deny | allows only at p ≥ 0.8; deny at p ≥ 0.5; otherwise asks |
-| **Judge:** a task and the worker's report | `judge` | done? blocked? needs a person? next: complete, rework, consult, repair | closes a task only when D1A is sure it is done |
+| **Gate:** a tool call | `gate` | allow, ask, deny | allow only at p ≥ 0.8; deny at p ≥ 0.5; otherwise ask |
+| **Judge:** a task and the worker's report | `judge` | done? blocked? needs a person? next: complete, rework, consult, repair | close a task only when D1A is sure it is done |
 
 The questions are in `d1a/agents/presets.py`, worded as D1A's routing and agent training data asks them. The
 fail-safe rules are `advise()` in the same file.
