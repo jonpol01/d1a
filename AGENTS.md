@@ -43,6 +43,8 @@ the question's `<decide>` token. README.md is the front page and docs/ is the us
 - License and provenance: `python scripts/check_license.py` (add `--skip-upstream` offline). See CONTRIBUTING.md.
 
 ## Rules
+- **Claims follow their gate** (the maintainer, 2026-11-26). A feature is claimed, demoed or deployed only after its row
+  in docs/FEATURE_TESTS.md passes its gate; a status change updates that file in the same PR.
 - **Complete models only** (the maintainer, 2026-10-25). A training run, retrain, export or published build keeps every
   capability its model line has: decisions, chat, photo, voice and video, in each format it ships (PyTorch, MLX, Core ML).
   A build that would lack one is made only when the maintainer scoped it that way ("text only", "decisions only"); ask
