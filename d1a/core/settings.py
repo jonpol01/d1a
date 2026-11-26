@@ -37,6 +37,7 @@ SETTINGS = {s.name: s for s in (
     Setting("D1A_CHAT_CACHE_MB", "1024", "d1a.serving.serve"),
     Setting("D1A_CHAT_LOG", "1", "d1a.serving.serve"),
     Setting("D1A_CHAT_CONTEXT", "", "d1a.serving.serve"),
+    Setting("D1A_ROUTES", None, "d1a.serving.serve"),
     Setting("D1A_EMBED_GGUF", None, "d1a.serving.serve"),
     Setting("D1A_EMBED_NAME", "text-embedding-nomic-embed-text-v1.5", "d1a.serving.serve"),
     # loading a checkpoint (d1a.backends.checkpoint.LoadOptions.from_env)
