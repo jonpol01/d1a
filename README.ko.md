@@ -43,8 +43,9 @@
 - **어려운 의사결정, 개발자 도구, 긴 문서, 일본어**(D1A-E4B-it v0.6, D1A의 스킬 스위트): 75.7%, 74.3%,
   88.6%, 78.6%([docs/ko/MODELS.md](docs/ko/MODELS.md)).
 - **하나의 모델로 의사결정과 채팅:** 어댑터를 끄면 D1A-E4B-it는 OpenAI 형식 엔드포인트 뒤의 Gemma 4 E4B-it입니다. 프롬프트 캐시 덕분에 20k 토큰 프롬프트에서 에이전트 한 단계가 33 s에서 1–1.7 s로 줄어듭니다(M1 Max).
-- **일상적으로 쓰는 PR 라벨링**(D1A-E4B v0.6): M4에서 PR당 0.63 s. 학습에 쓰인 어떤 데이터보다도 최신인 PR 487건에서
-  심각도 79%, 변경 유형 91%([recipes/pr-labeler](recipes/pr-labeler/README.md)).
+- **일상적으로 쓰는 PR 라벨링**(D1A-E4B-it QAT, 4-bit, 실제 서비스 중인 빌드): 학습에 쓰인 어떤 데이터보다도 최신인 PR 487건에서
+  심각도 81.7%, 변경 유형 91.6%, P0/P1을 30건 중 10건 정확히 판정(같은 PR에서 D1A-E4B v0.6은 79.1%, 90.6%, 30건 중 13건)
+  ([recipes/pr-labeler](recipes/pr-labeler/README.md), [docs/FEATURE_TESTS.md](docs/FEATURE_TESTS.md)).
 
 사진, 음성, 영상도 Gemma 4 자체 인코더로 제로샷 처리할 수 있지만, 아직 데모일 뿐 측정된 결과는 아닙니다
 ([docs/ko/DEMOS.md](docs/ko/DEMOS.md)).

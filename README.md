@@ -42,8 +42,9 @@ Every claim's tests and status: [docs/FEATURE_TESTS.md](docs/FEATURE_TESTS.md).
   88.6% and 78.6% ([docs/MODELS.md](docs/MODELS.md)).
 - **Decisions and chat in one model:** with its adapter off, D1A-E4B-it is Gemma 4 E4B-it behind an OpenAI-format
   endpoint, and the prompt cache brings an agent step on a 20k-token prompt from 33 s to 1–1.7 s (M1 Max).
-- **PR labeling in daily use** (D1A-E4B v0.6): 0.63 s per PR on an M4; on 487 PRs newer than all its training,
-  severity 79% and change type 91% ([recipes/pr-labeler](recipes/pr-labeler/README.md)).
+- **PR labeling in daily use** (D1A-E4B-it QAT, 4-bit, the served build): on 487 PRs newer than all its training,
+  severity 81.7% and change type 91.6%, and P0/P1 exactly right for 10 of 30 (D1A-E4B v0.6 on the same PRs: 79.1%,
+  90.6%, 13 of 30) ([recipes/pr-labeler](recipes/pr-labeler/README.md), [docs/FEATURE_TESTS.md](docs/FEATURE_TESTS.md)).
 
 Photos, voice and video also run, zero-shot through Gemma 4's own encoders: a demo so far, not a measured result
 ([docs/DEMOS.md](docs/DEMOS.md)).
