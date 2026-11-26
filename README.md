@@ -29,6 +29,8 @@
 
 ## Proven at
 
+Every claim's tests and status: [docs/FEATURE_TESTS.md](docs/FEATURE_TESTS.md).
+
 - **Agent decisions** (D1A-E4B-it v0.6, held-out agent items): tool-call gate 98%, task judge 92%, model routing 45 of
   45 hand-labelled prompts. With the fail-safe advice, 0 of 33 calls that should be asked or denied were allowed
   ([docs/AGENTS_GUIDE.md](docs/AGENTS_GUIDE.md)).
