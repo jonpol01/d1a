@@ -45,8 +45,9 @@
   88.6%、78.6%（[docs/ja/MODELS.md](docs/ja/MODELS.md)）。
 - **意思決定とチャットを 1 つのモデルで:** アダプターをオフにすると、D1A-E4B-it は OpenAI 形式のエンドポイントの背後で動く
   Gemma 4 E4B-it になり、プロンプトキャッシュによって、20k トークンのプロンプトでのエージェントの 1 ステップが 33 s から 1–1.7 s に短縮されます（M1 Max）。
-- **日常運用での PR ラベル付け**（D1A-E4B v0.6）: M4 で 1 PR あたり 0.63 s。学習データのいずれよりも新しい 487 件の PR で、
-  重大度 79%、変更タイプ 91%（[recipes/pr-labeler](recipes/pr-labeler/README.md)）。
+- **日常運用での PR ラベル付け**（D1A-E4B-it QAT、4-bit、実際に提供しているビルド）: 学習データのいずれよりも新しい 487 件の PR で、
+  重大度 81.7%、変更タイプ 91.6%、P0/P1 を 30 件中 10 件で正確に判定（同じ PR で D1A-E4B v0.6 は 79.1%、90.6%、30 件中 13 件）
+  （[recipes/pr-labeler](recipes/pr-labeler/README.md)、[docs/FEATURE_TESTS.md](docs/FEATURE_TESTS.md)）。
 
 写真、音声、動画も Gemma 4 自身のエンコーダーでゼロショット処理できますが、今のところデモであり、測定結果ではありません
 （[docs/ja/DEMOS.md](docs/ja/DEMOS.md)）。
