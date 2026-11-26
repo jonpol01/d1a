@@ -31,16 +31,22 @@
 
 Every claim's tests and status: [docs/FEATURE_TESTS.md](docs/FEATURE_TESTS.md).
 
-- **Agent decisions** (D1A-E4B-it v0.6, held-out agent items): tool-call gate 98%, task judge 92%, model routing 45 of
-  45 hand-labelled prompts. With the fail-safe advice, 0 of 33 calls that should be asked or denied were allowed
-  ([docs/AGENTS_GUIDE.md](docs/AGENTS_GUIDE.md)).
+- **Agent decisions** (D1A-E4B-it v0.6, held-out agent items): tool-call gate 98%, task judge 92%, the right model
+  size for 45 of 45 hand-labelled prompts. Following the fail-safe advice, 0 of 33 calls that should be asked or denied
+  were allowed ([docs/AGENTS_GUIDE.md](docs/AGENTS_GUIDE.md)).
+- **Model routing** (D1A-E4B-it QAT, the served build, 30 held-out prompts): D1A picks the model that should answer a
+  chat, and with `D1A_ROUTES` set its chat endpoint forwards the chat there. It sorted 29 of 30 prompts into small vs
+  not small and kept none of the 20 that needed a larger model, and the large model's log confirmed every forward
+  (32 of 32) ([docs/USAGE.md](docs/USAGE.md#route-chats-to-other-models)).
 - **Hard decisions, developer tools, long documents, Japanese** (D1A-E4B-it v0.6, D1A's skill suites): 75.7%, 74.3%,
   88.6% and 78.6% ([docs/MODELS.md](docs/MODELS.md)).
 - **Decisions and chat in one model:** with its adapter off, D1A-E4B-it is Gemma 4 E4B-it behind an OpenAI-format
   endpoint, and the prompt cache brings an agent step on a 20k-token prompt from 33 s to 1–1.7 s (M1 Max).
 - **PR labeling in daily use** (D1A-E4B v0.6): 0.63 s per PR on an M4; on 487 PRs newer than all its training,
   severity 79% and change type 91% ([recipes/pr-labeler](recipes/pr-labeler/README.md)).
-- **Photos, voice and video,** zero-shot through Gemma 4's own encoders ([docs/DEMOS.md](docs/DEMOS.md)).
+
+Photos, voice and video also run, zero-shot through Gemma 4's own encoders: a demo so far, not a measured result
+([docs/DEMOS.md](docs/DEMOS.md)).
 
 ## Quick Start
 
@@ -144,11 +150,13 @@ print(answers["team"]["probabilities"], answers["urgent"]["noul"])
 
 ## For Agents
 
-D1A makes an agent's small decisions fast and fail-safe: who takes a request, how large a model it needs, whether a
-tool call may run (allow, ask, deny), and whether a task is done.
+D1A answers an agent's small decisions fast, with advice that fails safe: who should take a request, how large a model
+it needs, whether a tool call may run (allow, ask, deny), and whether a task is done. The agent acts on the advice. Two
+places act on it themselves: the Claude Code gate hook, and, with `D1A_ROUTES` set, the chat endpoint, which sends each
+chat to the model D1A picks.
 - **Three ways in:** MCP tools for any agent, a Claude Code gate hook, or Python presets.
 - **Try it:** `python -m d1a.agents.demo` walks one task through an agent's day.
-- **Measured:** on held-out agent items, with the fail-safe advice, it allowed 0 of 33 calls that should be asked or
+- **Measured:** on held-out agent items, following the fail-safe advice allowed 0 of 33 calls that should be asked or
   denied, and closed 0 of 33 unfinished tasks.
 - **Limit:** it catches 60% of public prompt injections, so it is a second opinion, not a security boundary.
 
@@ -159,8 +167,8 @@ Guide, demo output and numbers: [docs/AGENTS_GUIDE.md](docs/AGENTS_GUIDE.md).
 1. **The input.** The document goes in once; each question follows as its own branch with its options and a `<decide>` token.
 2. **The model.** A Gemma 4 backbone with a LoRA adapter and a small pointer head score each option, and a calibrated softmax turns the scores into probabilities.
 3. **Two ways to run it.** Packed (one sequence under a block-causal mask) or rows (the document cached, one short row per question), with the same answers.
-4. **Where it runs.** `d1a.serving.serve` speaks the System One API on MLX or PyTorch, and reads photos, voice notes and video with Gemma 4's own encoders.
-5. **Learning from outcomes.** Decisions are logged with the model that made them; when outcomes come back they refit the probabilities.
+4. **Where it runs.** `d1a.serving.serve` speaks the System One API on MLX or PyTorch, and reads photos, voice notes and video with Gemma 4's own encoders (on PyTorch through `d1a.serving.media`). With `D1A_ROUTES` set, its chat endpoint sends each chat to the model D1A picks.
+5. **Learning from outcomes.** With `D1A_FEEDBACK_LOG` set, decisions are logged with the model that made them; when outcomes come back they refit the probabilities.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/arch/model-dark.svg">
@@ -171,7 +179,7 @@ Prose and the other diagrams: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). The 
 
 ## Learns From Outcomes
 
-D1A logs every decision. When outcomes come back it recalibrates its probabilities (used in production), and it can retrain behind a held-out gate (no retrain has passed the gate yet). Details and numbers: [docs/SELF_LEARNING.md](docs/SELF_LEARNING.md).
+With `D1A_FEEDBACK_LOG` set (off by default), D1A logs every decision. When outcomes come back it recalibrates its probabilities, automatically and in production. A retrain on the resolved decisions is run by hand and has to pass a held-out gate; none has passed yet. Details and numbers: [docs/SELF_LEARNING.md](docs/SELF_LEARNING.md).
 
 ## Demos
 
@@ -193,7 +201,7 @@ One L4 is enough. Fine-tuning, calibration and scoring: [docs/TRAINING.md](docs/
 
 As of 2026-10-22:
 
-- D1A-E4B-it v0.6 is in daily use as one model: decisions (the PR labeler, and a Hermes agent's tool gate in shadow mode) and OpenAI-format chat and embeddings for local apps and agents, with a prompt cache.
+- D1A-E4B-it v0.6 is in daily use as one model for decisions (the PR labeler, and a Hermes agent's tool gate in shadow mode) and OpenAI-format chat for local apps and agents, with a prompt cache. The embeddings served beside it come from a separate embedding model.
 - The SWE verifier is no better than cheap trajectory heuristics within an issue (a null result); recalibration on outcomes works ([docs/SELF_LEARNING.md](docs/SELF_LEARNING.md)).
 - The photo, voice and video demos are zero-shot: the checkpoints are trained on text only ([docs/DEMOS.md](docs/DEMOS.md)).
 - Core ML is a preview, slower than MLX on Macs ([docs/APPLE.md](docs/APPLE.md)): the v0.6 builds are text only (inputs up to 512 tokens); D1A-E2B-it QAT's does all five, verified on a Mac but not yet on an iPhone.

@@ -88,7 +88,7 @@ print(answers["team"]["probabilities"], answers["urgent"]["noul"])
 
 ## From Agents (MCP)
 
-`d1a.agents.mcp_server` gives agents (Hermes, Claude Code, any MCP client) the decisions of an agent factory as tools: `d1a_intake` (a new request: which worker, how large a model, ask the user first?), `d1a_judge` (a card and its latest report: done, blocked, needs a person, next step), `d1a_tier` (small, medium or large model for the implementation), `d1a_gate` (may this tool call run: allow, ask, deny), `d1a_route` (which model size answers a prompt) and `d1a_decide` (your own questions). Each returns the answers with probabilities plus `advice`, an action whose defaults fail safe: unsure answers route up, ask a person, or keep a card open (`d1a.agents.presets.advise`).
+`d1a.agents.mcp_server` gives agents (Hermes, Claude Code, any MCP client) the decisions of an agent factory as tools: `d1a_intake` (a new request: which worker, how large a model, ask the user first?), `d1a_judge` (a card and its latest report: done, blocked, needs a person, next step), `d1a_tier` (small, medium or large model for the implementation), `d1a_gate` (may this tool call run: allow, ask, deny), `d1a_route` (which model size should answer a prompt) and `d1a_decide` (your own questions). Each returns the answers with probabilities plus `advice`, the action to take, whose defaults fail safe: an unsure answer advises a larger model, asking a person, or keeping a card open (`d1a.agents.presets.advise`). The calling agent acts on it; to have d1a-serve forward chats itself, see [Route chats to other models](#route-chats-to-other-models).
 
 ```bash
 pip install "d1a[mcp] @ git+https://github.com/jonpol01/d1a"

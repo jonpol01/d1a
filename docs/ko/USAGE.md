@@ -82,7 +82,7 @@ print(answers["team"]["probabilities"], answers["urgent"]["noul"])
 
 ## 에이전트에서 사용하기(MCP)
 
-`d1a.agents.mcp_server`는 에이전트(Hermes, Claude Code, 모든 MCP 클라이언트)에게 에이전트 팩토리의 의사결정을 도구로 제공합니다. `d1a_intake`(새 요청: 어느 워커가 맡을지, 얼마나 큰 모델이 필요한지, 먼저 사용자에게 물을지), `d1a_judge`(카드와 그 최신 보고서: 완료, 차단됨, 사람 필요, 다음 단계), `d1a_tier`(구현에 쓸 소형, 중형, 대형 모델), `d1a_gate`(이 도구 호출을 실행해도 되는지: allow, ask, deny), `d1a_route`(프롬프트에 답할 모델 크기), `d1a_decide`(직접 작성한 질문)입니다. 각 도구는 확률이 포함된 답과 함께, 기본값이 페일세이프인 동작인 `advice`를 반환합니다. 확신이 없는 답은 상위로 올리거나, 사람에게 묻거나, 카드를 열어 둡니다(`d1a.agents.presets.advise`).
+`d1a.agents.mcp_server`는 에이전트(Hermes, Claude Code, 모든 MCP 클라이언트)에게 에이전트 팩토리의 의사결정을 도구로 제공합니다. `d1a_intake`(새 요청: 어느 워커가 맡을지, 얼마나 큰 모델이 필요한지, 먼저 사용자에게 물을지), `d1a_judge`(카드와 그 최신 보고서: 완료, 차단됨, 사람 필요, 다음 단계), `d1a_tier`(구현에 쓸 소형, 중형, 대형 모델), `d1a_gate`(이 도구 호출을 실행해도 되는지: allow, ask, deny), `d1a_route`(프롬프트에 답해야 할 모델 크기), `d1a_decide`(직접 작성한 질문)입니다. 각 도구는 확률이 포함된 답과 함께, 취해야 할 동작인 `advice`를 반환하며 그 기본값은 페일세이프입니다. 확신이 없는 답에는 더 큰 모델, 사람에게 묻기, 카드를 열어 두기 중 하나를 권고합니다(`d1a.agents.presets.advise`). 권고에 따라 움직이는 것은 호출한 에이전트입니다. d1a-serve가 직접 채팅을 전달하게 하려면 영어판 [Route chats to other models](../USAGE.md#route-chats-to-other-models)를 참고하세요.
 
 ```bash
 pip install "d1a[mcp] @ git+https://github.com/jonpol01/d1a"

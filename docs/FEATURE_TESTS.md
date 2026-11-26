@@ -24,5 +24,5 @@ Status: **Pass** · **Building** · **Next** · **Reword** (the claim says more 
 | Playground demos (14) | The right answer hand-labelled for every example; all 14 scored on the served build | Each demo's examples are right, or the demo is reworded | Next |
 | Japanese dates (`ja_dates`) | The urgency gain (75.0 → 81.7) re-run on the served build | The gain holds, or the number is dropped | Next |
 | Self-learning (outcome calibrator, shadow gate) | Evidence in the serving host's logs of calibrator updates and of the gate running | Evidence found, or the wording changes | Next |
-| Wording-only claims | Embeddings come from a separate model; decision logging is off by default; no code turns a retrain into the next version; the gate catches 60% of prompt injections | Text matches the code | Reword |
+| Wording-only claims | Embeddings come from a separate model; decision logging is off by default; no code turns a retrain into the next version; the gate catches 60% of prompt injections | Text matches the code | Reworded in the d1a docs (README, AGENTS_GUIDE, USAGE, ARCHITECTURE, and the Japanese and Korean pages): embeddings, logging off by default, retrain by hand; the playground's prompt-injection wording is next |
 | iPhone / Neural Engine, ONNX on Android | A fixed set run on the device | Measured on the device, or marked untested | Needs hardware |
