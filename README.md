@@ -20,7 +20,7 @@
   <a href="https://huggingface.co/JohnP1/d1a-e4b"><img src="https://img.shields.io/badge/%F0%9F%A4%97%20model-JohnP1%2Fd1a--e4b-yellow" alt="model"></a>
   <a href="https://huggingface.co/collections/JohnP1/d1a-for-pytorch-cuda-cpu-non-mac"><img src="https://img.shields.io/badge/PyTorch-CUDA%20%7C%20CPU-ee4c2c" alt="PyTorch collection"></a>
   <a href="https://huggingface.co/collections/JohnP1/d1a-for-mlx-apple-silicon-gpu"><img src="https://img.shields.io/badge/Apple%20Silicon-MLX-black" alt="MLX collection"></a>
-  <a href="https://huggingface.co/collections/JohnP1/d1a-for-core-ml-apple-neural-engine"><img src="https://img.shields.io/badge/Neural%20Engine-Core%20ML%20preview-555555" alt="Core ML collection"></a>
+  <a href="https://huggingface.co/collections/JohnP1/d1a-for-core-ml-apple-neural-engine"><img src="https://img.shields.io/badge/Core%20ML-preview-555555" alt="Core ML collection"></a>
   <a href="https://huggingface.co/mlx-community/d1a-e4b-8bit"><img src="https://img.shields.io/badge/mlx--community-8bit-black" alt="mlx-community mirror"></a>
   <a href="https://github.com/jonpol01/d1a-playground"><img src="https://img.shields.io/badge/demos-d1a--playground-7c3aed" alt="demos"></a>
 </p>
@@ -180,7 +180,7 @@ Prose and the other diagrams: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). The 
 
 ## Learns From Outcomes
 
-With `D1A_FEEDBACK_LOG` set (off by default), the server logs every `/v1/systemone` answer. A scheduled `python -m d1a.learning.feedback tick` refits the probabilities on the outcomes that come back and, when the refit passes its gate, writes the calibrator the server applies (`D1A_OUTCOME_CALIBRATOR`); no person is in that loop, and it runs in production. A retrain on the resolved decisions is run by hand and has to pass a held-out gate; none has passed yet. Details and numbers: [docs/SELF_LEARNING.md](docs/SELF_LEARNING.md).
+With `D1A_FEEDBACK_LOG` set (off by default), the server logs every `/v1/systemone` answer. A scheduled `python -m d1a.learning.feedback tick` refits the probabilities on the outcomes that come back and, when the refit passes its held-out gate and automatic promotion is on, writes the calibrator the server applies (`D1A_OUTCOME_CALIBRATOR`). One deployment runs it, labeling pull requests, with an automated reviewer's labels as the outcomes (until 2026-11-14 that reviewer saw D1A's labels first; no person has corrected any). The gate promoted calibrators for change type and blast radius in October 2026, and the one in use (last edited by hand on 2026-10-29, to hold some change types) moved about 1 in 9 change-type answers and 1 in 6 blast-radius answers over 14 days, to `feature` or `moderate` every time. No accuracy gain over the model's own answers has been shown (a blind check was inconclusive), and automatic promotion there has been paused since 2026-11-14. A retrain on the resolved decisions is run by hand and has to pass a held-out gate; none has passed yet. Details and numbers: [docs/SELF_LEARNING.md](docs/SELF_LEARNING.md).
 
 ## Demos
 

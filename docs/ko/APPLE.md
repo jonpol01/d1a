@@ -6,7 +6,7 @@
 
 # Apple Silicon
 
-Apple 하드웨어에서의 D1A: GPU에서 실행하는 MLX와, Neural Engine에서 실행하는 Core ML 프리뷰입니다.
+Apple 하드웨어에서의 D1A: GPU에서 실행하는 MLX와, Neural Engine용으로 변환한 Core ML 프리뷰입니다(측정은 Mac에서만 했고, iPhone이나 iPad에서는 아직 측정하지 않았습니다).
 
 <a id="apple-silicon-mlx"></a>
 
@@ -44,14 +44,14 @@ MPS에서의 PyTorch(`D1A_BACKEND=torch`, Mac에서의 학습, PyTorch 미디어
 
 ## Apple Neural Engine (Core ML)
 
-D1A는 Core ML을 통해 Apple Neural Engine에서도 실행되며, iPhone/iPad용 프리뷰입니다. Mac에서는 MLX가 더 빠릅니다. 아래의 v0.6 빌드는
+D1A의 Core ML 빌드는 Apple Neural Engine용으로 변환한 것으로, iPhone과 iPad를 위한 프리뷰입니다. 측정은 Mac에서만 했고(M1 Max와 M4), iPhone이나 iPad에서는 아직 측정하지 않았습니다. Mac에서는 MLX가 더 빠릅니다. 아래의 v0.6 빌드는
 텍스트 전용이며 ≤ 512 토큰입니다(#224). D1A-E2B-it QAT의 빌드는 다섯 가지 기능을 모두 지원합니다([아래](#d1a-e2b-it-qat-on-core-ml)):
 - 텍스트 모델은 6개 또는 7개 레이어 단위의 청크로 변환되며(E2B는 5개 청크, E4B는 7개), 가중치는 int8입니다(64개 블록 단위).
 - 임베딩 테이블은 호스트에 남아 행 조회 방식으로 쓰입니다.
 - 각 청크는 자체 프로세스에서 실행됩니다.
 
 두 Core ML 빌드는 명확한 질문에서는 모두 전체 정밀도 모델과 같은 답을 냅니다. Mac에서는 GPU에서 실행하는 MLX가
-몇 배 더 빠르므로 서빙 호스트는 MLX를 유지합니다. Core ML은 iPhone과 iPad용이며, 그곳에서는 GPU를 비워 둘 수 있습니다. v0.6
+몇 배 더 빠르므로 서빙 호스트는 MLX를 유지합니다. Core ML은 iPhone과 iPad용입니다(둘 다 아직 측정하지 않았습니다). v0.6
 빌드에는 사진, 음성, 영상 인코더가 없습니다. 각 Core ML 저장소의 `reference/run.py`는 내려받은 파일로 요청에 답합니다.
 
 2026-10-11에 같은 실제 요청 28개(질문 42개, 모두 ≤ 512 토큰)로 Apple M1 Max와 Apple M4에서 측정했습니다.
@@ -60,7 +60,7 @@ D1A는 Core ML을 통해 Apple Neural Engine에서도 실행되며, iPhone/iPad�
 |---|---|---|---|---|
 | 버전 | v0.6 | v0.6 | v0.6 | v0.6 |
 | 저장소 | [JohnP1/d1a-e2b-mlx-q8](https://huggingface.co/JohnP1/d1a-e2b-mlx-q8) | [JohnP1/d1a-e2b-coreml](https://huggingface.co/JohnP1/d1a-e2b-coreml) | [JohnP1/d1a-e4b-mlx-q8](https://huggingface.co/JohnP1/d1a-e4b-mlx-q8) | [JohnP1/d1a-e4b-coreml](https://huggingface.co/JohnP1/d1a-e4b-coreml) |
-| 실행 환경 | Mac GPU | Neural Engine(iPhone, iPad, M4급 Mac) | Mac GPU | Neural Engine |
+| 실행 환경 | Mac GPU | Core ML, Neural Engine용으로 변환(Mac에서 측정, iPhone·iPad는 아직) | Mac GPU | Core ML, Neural Engine용으로 변환(Mac에서 측정) |
 | 텍스트 | 예 | 예 | 예 | 예 |
 | 사진, 음성, 영상(16프레임, 소리 없음) | 예 | 아직 아님(다음 단계) | 예 | 아직 아님 |
 | 입력 길이 | 긴 문서 | ≤ 512 토큰 | 긴 문서 | ≤ 512 토큰 |

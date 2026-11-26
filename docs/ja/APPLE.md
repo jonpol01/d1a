@@ -6,7 +6,7 @@
 
 # Apple Silicon
 
-Apple ハードウェア上の D1A: GPU 上の MLX と、Neural Engine 上の Core ML プレビュー。
+Apple ハードウェア上の D1A: GPU 上の MLX と、Neural Engine 向けに変換した Core ML プレビュー（測定は Mac のみで、iPhone や iPad ではまだ測定していません）。
 
 <a id="apple-silicon-mlx"></a>
 
@@ -47,14 +47,14 @@ CUDA、CPU は影響を受けたことはありません。この修正前の MP
 
 ## Apple Neural Engine（Core ML）
 
-D1A は Core ML を通じて Apple Neural Engine 上でも動作します。iPhone/iPad 向けのプレビューで、Mac では MLX の方が高速です。以下の v0.6 ビルドは
+D1A の Core ML ビルドは Apple Neural Engine 向けに変換したもので、iPhone と iPad 向けのプレビューです。測定したのは Mac だけ（M1 Max と M4）で、iPhone や iPad ではまだ測定していません。Mac では MLX の方が高速です。以下の v0.6 ビルドは
 テキストのみ、512 トークン以下です（#224）。D1A-E2B-it QAT のビルドは 5 つの機能すべてに対応します（[下記](#d1a-e2b-it-qat-on-core-ml)）:
 - テキストモデルは 6 または 7 レイヤーずつのチャンクに変換されます（E2B は 5 チャンク、E4B は 7 チャンク）。重みは int8（64 個のブロックごと）です。
 - 埋め込みテーブルは、行のルックアップとしてホスト側に残ります。
 - 各チャンクは独自のプロセスで動作します。
 
 どちらの Core ML ビルドも、明確な質問ではすべて、完全精度のモデルと同じ回答を返します。Mac では GPU 上の MLX の方が数倍高速
-なため、サービング用ホストでは MLX を使い続けます。Core ML は iPhone と iPad 向けで、GPU を空けておけます。
+なため、サービング用ホストでは MLX を使い続けます。Core ML は iPhone と iPad 向けです（どちらでもまだ測定していません）。
 v0.6 のビルドには写真、音声、動画のエンコーダーがありません。各 Core ML リポジトリの `reference/run.py` は、ダウンロードしたファイルからリクエストに回答します。
 
 2026-10-11 に、同じ 28 件の実際のリクエスト（42 質問、すべて 512 トークン以下）で、Apple M1 Max と Apple M4 上で測定しました。
@@ -63,7 +63,7 @@ v0.6 のビルドには写真、音声、動画のエンコーダーがありま
 |---|---|---|---|---|
 | バージョン | v0.6 | v0.6 | v0.6 | v0.6 |
 | リポジトリ | [JohnP1/d1a-e2b-mlx-q8](https://huggingface.co/JohnP1/d1a-e2b-mlx-q8) | [JohnP1/d1a-e2b-coreml](https://huggingface.co/JohnP1/d1a-e2b-coreml) | [JohnP1/d1a-e4b-mlx-q8](https://huggingface.co/JohnP1/d1a-e4b-mlx-q8) | [JohnP1/d1a-e4b-coreml](https://huggingface.co/JohnP1/d1a-e4b-coreml) |
-| 実行環境 | Mac の GPU | Neural Engine（iPhone、iPad、M4 クラスの Mac） | Mac の GPU | Neural Engine |
+| 実行環境 | Mac の GPU | Core ML、Neural Engine 向けに変換（Mac で測定。iPhone、iPad ではまだ） | Mac の GPU | Core ML、Neural Engine 向けに変換（Mac で測定） |
 | テキスト | はい | はい | はい | はい |
 | 写真、音声、動画（16 フレーム、音声トラックなし） | はい | 未対応（次の予定） | はい | 未対応 |
 | 入力長 | 長い文書 | 512 トークン以下 | 長い文書 | 512 トークン以下 |

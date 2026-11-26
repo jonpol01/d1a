@@ -22,7 +22,7 @@
   <a href="https://huggingface.co/JohnP1/d1a-e4b"><img src="https://img.shields.io/badge/%F0%9F%A4%97%20model-JohnP1%2Fd1a--e4b-yellow" alt="モデル"></a>
   <a href="https://huggingface.co/collections/JohnP1/d1a-for-pytorch-cuda-cpu-non-mac"><img src="https://img.shields.io/badge/PyTorch-CUDA%20%7C%20CPU-ee4c2c" alt="PyTorch コレクション"></a>
   <a href="https://huggingface.co/collections/JohnP1/d1a-for-mlx-apple-silicon-gpu"><img src="https://img.shields.io/badge/Apple%20Silicon-MLX-black" alt="MLX コレクション"></a>
-  <a href="https://huggingface.co/collections/JohnP1/d1a-for-core-ml-apple-neural-engine"><img src="https://img.shields.io/badge/Neural%20Engine-Core%20ML%20preview-555555" alt="Core ML コレクション"></a>
+  <a href="https://huggingface.co/collections/JohnP1/d1a-for-core-ml-apple-neural-engine"><img src="https://img.shields.io/badge/Core%20ML-preview-555555" alt="Core ML コレクション"></a>
   <a href="https://huggingface.co/mlx-community/d1a-e4b-8bit"><img src="https://img.shields.io/badge/mlx--community-8bit-black" alt="mlx-community ミラー"></a>
   <a href="https://github.com/jonpol01/d1a-playground"><img src="https://img.shields.io/badge/demos-d1a--playground-7c3aed" alt="デモ"></a>
 </p>
@@ -196,7 +196,7 @@ D1A は、エージェントの小さな意思決定に高速に答え、フェ�
 
 ## 結果から学習する
 
-`D1A_FEEDBACK_LOG` を設定すると（既定はオフ）、サーバーは `/v1/systemone` のすべての回答を記録します。定期実行する `python -m d1a.learning.feedback tick` が、戻ってきた結果で確率を再フィットし、そのゲートを通過すると、サーバーが適用する較正器（`D1A_OUTCOME_CALIBRATOR`）を書き出します。この流れに人は介在せず、本番で使っています。解決済みの意思決定での再学習は手作業で行い、ホールドアウトのゲートを通過する必要があります。これまでに通過したものはありません。詳細と数値: [docs/SELF_LEARNING.md](docs/SELF_LEARNING.md)。
+`D1A_FEEDBACK_LOG` を設定すると（既定はオフ）、サーバーは `/v1/systemone` のすべての回答を記録します。定期実行する `python -m d1a.learning.feedback tick` が、戻ってきた結果で確率を再フィットし、ホールドアウトのゲートを通過して自動昇格がオンのとき、サーバーが適用する較正器（`D1A_OUTCOME_CALIBRATOR`）を書き出します。これを動かしているのは PR のラベル付けを行う1つのデプロイで、結果には自動レビュアーのラベルを使っています（2026-11-14 まではそのレビュアーが先に D1A のラベルを見ていました。人が修正した結果はありません）。2026 年 10 月にゲートが変更タイプと影響範囲の較正器を昇格させ、現在の較正器（2026-10-29 に一部の変更タイプを保持するよう手で編集）は、14 日間で変更タイプの回答の約 9 件に 1 件、影響範囲の回答の約 6 件に 1 件を動かし、行き先は毎回 `feature` か `moderate` でした。モデル自身の回答に対する精度の向上は示されておらず（ブラインドの確認では結論が出ませんでした）、そのデプロイでの自動昇格は 2026-11-14 から停止しています。解決済みの意思決定での再学習は手作業で行い、ホールドアウトのゲートを通過する必要があります。これまでに通過したものはありません。詳細と数値: [docs/SELF_LEARNING.md](docs/SELF_LEARNING.md)。
 
 <a id="demos"></a>
 
