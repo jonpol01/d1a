@@ -36,8 +36,8 @@ Every claim's tests and status: [docs/FEATURE_TESTS.md](docs/FEATURE_TESTS.md).
   were allowed ([docs/AGENTS_GUIDE.md](docs/AGENTS_GUIDE.md)).
 - **Model routing** (D1A-E4B-it QAT, the served build, 30 held-out prompts): D1A picks the model that should answer a
   chat, and with `D1A_ROUTES` set its chat endpoint forwards the chat there. It sorted 29 of 30 prompts into small vs
-  not small and kept none of the 20 that needed a larger model, and the large model's log confirmed every forward
-  (32 of 32) ([docs/USAGE.md](docs/USAGE.md#route-chats-to-other-models)).
+  not small and, with `min_tier: medium`, kept none of the 20 that needed a larger model; the large model's log confirmed
+  every forward of the run (32 of 32, extra cases included) ([docs/USAGE.md](docs/USAGE.md#route-chats-to-other-models)).
 - **Hard decisions, developer tools, long documents, Japanese** (D1A-E4B-it v0.6, D1A's skill suites): 75.7%, 74.3%,
   88.6% and 78.6% ([docs/MODELS.md](docs/MODELS.md)).
 - **Decisions and chat in one model:** with its adapter off, D1A-E4B-it is Gemma 4 E4B-it behind an OpenAI-format
@@ -167,7 +167,7 @@ Guide, demo output and numbers: [docs/AGENTS_GUIDE.md](docs/AGENTS_GUIDE.md).
 1. **The input.** The document goes in once; each question follows as its own branch with its options and a `<decide>` token.
 2. **The model.** A Gemma 4 backbone with a LoRA adapter and a small pointer head score each option, and a calibrated softmax turns the scores into probabilities.
 3. **Two ways to run it.** Packed (one sequence under a block-causal mask) or rows (the document cached, one short row per question), with the same answers.
-4. **Where it runs.** `d1a.serving.serve` speaks the System One API on MLX or PyTorch, and reads photos, voice notes and video with Gemma 4's own encoders (on PyTorch through `d1a.serving.media`). With `D1A_ROUTES` set, its chat endpoint sends each chat to the model D1A picks.
+4. **Where it runs.** `d1a.serving.serve` speaks the System One API on MLX or PyTorch, and, on an MLX export, reads photos, voice notes and video with Gemma 4's own encoders (a PyTorch checkpoint uses the separate `python -m d1a.serving.media` server). With `D1A_ROUTES` set, its chat endpoint sends each chat to the model D1A picks.
 5. **Learning from outcomes.** With `D1A_FEEDBACK_LOG` set, decisions are logged with the model that made them; when outcomes come back they refit the probabilities.
 
 <picture>
@@ -179,7 +179,7 @@ Prose and the other diagrams: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). The 
 
 ## Learns From Outcomes
 
-With `D1A_FEEDBACK_LOG` set (off by default), D1A logs every decision. When outcomes come back it recalibrates its probabilities, automatically and in production. A retrain on the resolved decisions is run by hand and has to pass a held-out gate; none has passed yet. Details and numbers: [docs/SELF_LEARNING.md](docs/SELF_LEARNING.md).
+With `D1A_FEEDBACK_LOG` set (off by default), the server logs every `/v1/systemone` answer. A scheduled `python -m d1a.learning.feedback tick` refits the probabilities on the outcomes that come back and, when the refit passes its gate, writes the calibrator the server applies (`D1A_OUTCOME_CALIBRATOR`); no person is in that loop, and it runs in production. A retrain on the resolved decisions is run by hand and has to pass a held-out gate; none has passed yet. Details and numbers: [docs/SELF_LEARNING.md](docs/SELF_LEARNING.md).
 
 ## Demos
 
