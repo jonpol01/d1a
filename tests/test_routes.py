@@ -42,7 +42,10 @@ class Target:
 
             def log_message(self, *args): pass
 
-        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        class Server(ThreadingHTTPServer):
+            def handle_error(self, request, client_address): pass   # a client that hung up on purpose (the timeout cases)
+
+        self.server = Server(("127.0.0.1", 0), Handler)
         self.url = f"http://127.0.0.1:{self.server.server_port}"
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
 
@@ -102,7 +105,7 @@ def held():
     def run_task(fn):
         f = Future(); f.set_result(fn(None, None)); return f
     s = SimpleNamespace(model=SimpleNamespace(loras=["one"]), checkpoint=SimpleNamespace(path="/nowhere"), run_task=run_task,
-                        between_tokens=lambda: None, chat_prompts=None, tok=None)
+                        between_tokens=lambda: None, chat_prompts="the server's prompt cache", tok=None)   # made already: no mlx-lm needed
 
     @asynccontextmanager
     async def server_async():
