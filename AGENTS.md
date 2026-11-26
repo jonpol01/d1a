@@ -16,7 +16,7 @@ the question's `<decide>` token. README.md is the front page and docs/ is the us
     are read only by `LoadOptions.from_env`), `backbone.py`, `device.py`, `shared_prefix.py` (Qwen3.5 training through a
     shared state prefix), `fused_qwen35.py`, `cuda_graphs.py`, `q4_0.py` (llama.cpp's Q4_0 grid, in numpy);
   - `serving/`: `serve.py` (FastAPI System One server), `media.py`, `lib.py` (in-process `from d1a import D1A`),
-    `openai_compat.py` (OpenAI-format chat and embeddings, #274);
+    `openai_compat.py` (OpenAI-format chat and embeddings, #274), `routes.py` (chat routes to other models, D1A_ROUTES, #419);
   - `learning/`: `feedback.py` (the decision log, outcomes, the outcome calibrator and its promotion gate), `settings.py` (the
     `D1A_LEARNING` settings file), `loop.py` (the trained manifest, replay and the tick), `flags.py` (learned decision flags,
     #237), `rules.py` (served decode rules, #252);

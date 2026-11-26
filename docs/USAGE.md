@@ -212,6 +212,79 @@ r = client.chat.completions.create(model="d1a-chat", messages=[{"role": "user", 
   stored, search finds them; an add takes about 11 s on an M1 Max. Its graph search on questions finds no entities: the 2B
   model answers the question instead of calling the extraction tool, as it did under LM Studio.
 
+## Route chats to other models
+
+With `D1A_ROUTES` set, `POST /v1/chat/completions` picks the model that answers each chat (#419). A client points at D1A
+alone:
+- a request to review a pull request or a piece of code goes to a review service;
+- a hard request goes to a larger OpenAI-compatible model;
+- everything else is answered by D1A, as above.
+
+Unset, the endpoint is unchanged.
+
+```json
+{"routes": [
+  {"name": "review", "target": {"kind": "review", "url": "http://127.0.0.1:<port>/v1/review", "key_file": "<secret file>", "timeout_s": 300},
+   "repos": ["<owner>/*"], "is_review_min_p": 0.8},
+  {"name": "large", "target": {"kind": "openai", "url": "http://127.0.0.1:<port>/v1/chat/completions", "model": "<model name>", "key_file": "<secret file>", "timeout_s": 300}}]}
+```
+
+```bash
+D1A_API_KEY=<key> D1A_ROUTES=routes.json uv run --extra serve python -m d1a.serving.serve --run <chat-capable model> --port 8009
+```
+
+**Setup**
+- Either route may be left out.
+- The server refuses to start with `D1A_ROUTES` set and no `D1A_API_KEY`, since anyone who reached the port could then
+  start long jobs on a target.
+- Target URLs and keys come from the file only, never from a request. The key file holds one key on one line; it is sent
+  as `Authorization: Bearer <key>` (never the client's own header) and is never logged.
+- Startup checks the file and never contacts a target. Redirects are not followed, and proxy settings in the environment
+  are not used.
+
+**Which chats are routed:** only a chat whose last message is the user's. In the middle of a tool loop (the last message
+is a tool result) the chat stays with D1A. Routing runs before D1A reads the request, so D1A's own limits (its context,
+`max_tokens`) never stop a chat meant for another model.
+
+**Review.** One yes/no question is read on the last user message:
+
+> Is this a request to review an existing pull request (read its diff and give feedback), rather than to write or change code?
+
+It is read raw: no use case, no date rewriting, no calibrator, and it is kept out of the decision log and the prefix cache.
+On 40 hand-written English and Japanese requests without links it was right on 38 (AUROC 0.96). Then, in this order:
+1. A GitHub pull-request link and P(yes) ≥ 0.5: that pull request is reviewed (`{"mode": "pr", "pr": "owner/repo#N"}`).
+   A message that only mentions a pull request is answered by D1A.
+2. A fenced code block, with a review verb outside it (review, レビュー, look over, check) or P(yes) ≥ 0.5: that code is
+   reviewed (`{"mode": "code", "files": {"<path>": "<the text inside the fence>"}}`). The path comes from "… from
+   `<path>`:", else `snippet.py`.
+3. P(yes) ≥ `is_review_min_p` (0.8): the pull request named as `owner/repo#N`.
+
+The review service's `text` comes back verbatim, whatever its status, so its own "no review was written" replies reach
+the user. D1A never writes review text itself; instead it sends one of these fixed replies:
+- no pull request named, or two: "Which pull request? Send its link and I'll have it reviewed.";
+- a repository not in `repos`: "That repository is not on the review list — no review was written.";
+- a review already running (one runs at a time): "The reviewer is busy — no review was written. Try again in a few minutes.";
+- no reply text (connection refused, timeout, a status without text): "reviewer unavailable — no review was written.".
+
+A streamed review sends the role chunk at once, then a keep-alive comment every 10 s, then the text. `tools` are ignored.
+
+**Large.** The route preset (`d1a.agents.presets`, use case `routing`, fail-up advice: an unsure answer goes up) is read
+on the first and on the last user message. The larger tier wins, so a "continue" mid-task stays with the large model.
+- On "large", the request body goes to the target as the client sent it (`tools`, `stream_options` and all), with only
+  `model` replaced. The target's response, streamed or not, comes back verbatim, its `model` included.
+- A 4xx comes back as the target sent it.
+- If the target cannot be reached, fails (5xx) or sends nothing within `timeout_s` before its first byte, D1A answers
+  instead. Its reply then starts with "(The large model is unavailable — answered by D1A.)".
+- `timeout_s` bounds each read from the target, not the whole answer.
+
+**Headers:** every chat answered with routes on carries `x-d1a-route` (`review`, `large` or `none`). A route that failed
+also carries `x-d1a-route-error`: `which-pr`, `not-listed`, `busy`, `connect`, `timeout`, `status <code>`, `empty`,
+`too-large`, `not-json` or `error`. A streamed review sends its headers before the review ends, so a failure there
+shows only in the text.
+
+**Logs:** the chat log (`D1A_CHAT_LOG`) prints a line per routed chat: the route, P(yes), the tiers and the outcome. It
+never prints message text or a key.
+
 ## Photos, Voice and Video
 
 The model server answers questions about an image, a short voice clip or a video with the same model, the same request shape plus a `media` field. On Apple Silicon, serve an MLX build that carries Gemma 4's vision and audio encoders (`media/`, about 1 GB, fetched on the first such request; `JohnP1/d1a-e4b-mlx-q8@v0.3` has them, and `scripts/export_mlx.py --media` adds them to your own export):

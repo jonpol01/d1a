@@ -1,5 +1,5 @@
 # Modified from Kev (https://github.com/jaredpalmer/kev), Copyright 2026 Jared Palmer, Apache-2.0.
-# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); lists only d1a-latest and answers any model name; model cards name D1A; serves MLX export folders; --device with a GPU usability probe; a startup self-check of the readout and a warning when serving an uncalibrated checkpoint; recent batch latency in /v1/models; a 75 s keep-alive for proxies in front of it; --idle-unload; photos and voice clips through the same model (POST /v1/systemone/media); prefix cache keyed by state ids only (option isolation removed); self-learning hooks (decision log, POST /v1/feedback, outcome calibrator, the x-d1a-decision-log: off and x-d1a-replay-of request headers); GET /metrics; PrefixCache.make_room ported from later upstream Kev (1d77363); CORS only for the origins in D1A_CORS_ORIGINS, and POST /v1/feedback only for a logged decision (#320), never a replay (#399).
+# Changes for D1A Copyright 2026 John Soliva: package renamed kev -> d1a (imports, module paths, KEV_* -> D1A_* environment variables); lists only d1a-latest and answers any model name; model cards name D1A; serves MLX export folders; --device with a GPU usability probe; a startup self-check of the readout and a warning when serving an uncalibrated checkpoint; recent batch latency in /v1/models; a 75 s keep-alive for proxies in front of it; --idle-unload; photos and voice clips through the same model (POST /v1/systemone/media); prefix cache keyed by state ids only (option isolation removed); self-learning hooks (decision log, POST /v1/feedback, outcome calibrator, the x-d1a-decision-log: off and x-d1a-replay-of request headers); GET /metrics; PrefixCache.make_room ported from later upstream Kev (1d77363); CORS only for the origins in D1A_CORS_ORIGINS, and POST /v1/feedback only for a logged decision (#320), never a replay (#399); chat routes in front of /v1/chat/completions (D1A_ROUTES, #419).
 """FastAPI sidecar for the playground: loads one checkpoint, exposes prefill-only decisions.
 
 Run: uv run --extra serve python -m d1a.serving.serve --run runs/d1a --port 8008
@@ -29,7 +29,8 @@ send the rule's use case (the answer then carries "rule"); the log keeps the mod
 next one; GET /v1/models answers either way without loading it, and so does GET /metrics (Prometheus text: loaded, requests,
 batches, queue depth, batch latency, prefix cache, memory). D1A_PREFIX_CACHE / D1A_PREFIX_MIN_TOKENS / D1A_PREFIX_MAX_TOKENS size the state-prefix cache; D1A_DATE_FACTS=1 opts into the
 date preprocessing (api.with_date_facts), and D1A_JA_DATES=1 into rewriting Japanese dates as "Month D, YYYY" (core.ja_dates,
-#410; a request's "ja_dates" overrides it). Backend and precision follow LoadOptions (D1A_BACKEND, D1A_DTYPE, ...): on Apple
+#410; a request's "ja_dates" overrides it). D1A_ROUTES=<file> routes each chat to the model that should answer it: a pull-request
+review to a review service, a hard request to a larger model, the rest to D1A (d1a.serving.routes, #419). Backend and precision follow LoadOptions (D1A_BACKEND, D1A_DTYPE, ...): on Apple
 Silicon the hybrid Qwen3.5 checkpoints run on MLX by default, elsewhere on torch in bf16.
 """
 import argparse, asyncio, atexit, base64, copy, hashlib, hmac, json, logging, math, os, queue, random, re, subprocess, sys, threading, time, traceback, uuid
@@ -50,7 +51,8 @@ from d1a.backends.checkpoint import EXPORT_CONFIG, Checkpoint, LoadOptions, base
 from d1a.backends.device import allocated_bytes, default_device, empty_cache, out_of_memory, sync
 from d1a.learning.feedback import FeedbackLog, OutcomeCalibrator, load_rewrite
 from d1a.learning import flags, rules
-from d1a.serving import openai_compat
+from d1a.serving import openai_compat, routes
+from d1a.agents import presets
 from d1a.serving.media import MEDIA_DIR, MediaEncoder, MediaRequest, OnDemand, with_media
 from d1a.core.encoding import SERVE_MAX_BRANCH, SERVE_MAX_STATE, layout
 
@@ -66,6 +68,7 @@ CHAT_LOG = setting("D1A_CHAT_LOG") == "1"                           # print a li
 CHAT_CONTEXT = int(setting("D1A_CHAT_CONTEXT") or 0) or None       # a chat's prompt + completion cap below the model's context; unset: the model's
 CHAT_CACHE_MB = int(setting("D1A_CHAT_CACHE_MB"))                   # the chat prompt cache's budget (openai_compat.PromptCache); 0 disables
 CHAT_NAME = setting("D1A_CHAT_NAME")                                # the model id /v1/chat/completions answers as (#274)
+ROUTES_FILE = setting("D1A_ROUTES")                                 # set = route chats to other models (d1a.serving.routes, #419); needs D1A_API_KEY
 EMBED_GGUF, EMBED_NAME = setting("D1A_EMBED_GGUF"), setting("D1A_EMBED_NAME")   # /v1/embeddings: a GGUF embedder via llama.cpp; unset = off
 API_KEY = setting("D1A_API_KEY")                                  # unset = open server; set = require Authorization: Bearer <key>, as the TypeSafe clients always send
 CORS_ORIGINS = [o.strip() for o in setting("D1A_CORS_ORIGINS").split(",") if o.strip()]   # web origins a browser may call from ("*": any); none by default, so another site open in a browser here cannot (#320)
@@ -91,7 +94,7 @@ class PrefixCache:
     def plan(self, encs):
         """-> (key per request, None when its state is not cached; its cached prefix or None; whether to keep a new one)."""
         lengths = [enc["seg"].count(0) for enc in encs]
-        keys = [tuple(enc["ids"][:n]) if self.size and self.min_tokens <= n <= self.max_tokens and enc.get("media") is None else None   # media: same placeholder ids for different photos
+        keys = [tuple(enc["ids"][:n]) if self.size and self.min_tokens <= n <= self.max_tokens and enc.get("media") is None and not enc.get("uncached") else None   # media: same placeholder ids for different photos
                 for enc, n in zip(encs, lengths)]
         survivors, tokens = set(), 0
         for key in dict.fromkeys(k for k in reversed(keys) if k is not None):   # most recent first, as store() keeps them
@@ -179,18 +182,20 @@ class Server:
             self.tasks.get_nowait()[1].set_exception(RuntimeError("the server stopped"))
         sys.setswitchinterval(self.switch_interval)
 
-    def submit(self, rec, media=None, use_case=None):
+    def submit(self, rec, media=None, use_case=None, cache=True):
         """Queue one record for the model thread. -> a Future of (probabilities, stats). The state prefix (tokens up to the
         first question) is cached across requests, so a repeated state only pays for its question rows. latency_ms is the
         model time of the batch the request ran in (not its wait in the queue). media: MediaEncoder.encode's output, put
         right after <state>. use_case: the request's (SystemOneRequest.use_case); the readout reads it off the encoding
-        (d1a.backends.torch.temperature_of)."""
+        (d1a.backends.torch.temperature_of). cache=False: its state is neither read from nor kept in the prefix cache (a
+        chat route's pass, #419)."""
         if self.stopping.is_set(): raise HTTPException(503, "the server is stopping")
         try:
             enc = self.model.encode(self.tok, rec, max_state=SERVE_MAX_STATE, max_branch=SERVE_MAX_BRANCH)
             if media is not None: enc = with_media(enc, len(layout(self.tok)[0]) + 1, *media)
         except ValueError as e: raise HTTPException(422, str(e))
         if use_case is not None: enc["use_case"] = use_case
+        if not cache: enc["uncached"] = True
         done = Future()
         self.queue.put((enc, done))
         return done
@@ -515,6 +520,10 @@ def prepare(req):
 
 app = FastAPI(title="d1a")
 app.state.embedder = None   # /v1/embeddings: loaded on first use (D1A_EMBED_GGUF)
+app.state.routes = None     # chat routes (D1A_ROUTES, set by main): None passes every chat straight to chat_completions
+# added first, so it runs inside the CORS and auth middleware added after it: a routed chat needs the API key as any other
+app.add_middleware(routes.ChatRoutes, routes=lambda: app.state.routes, p_review=lambda text: is_review_p(text),
+                   tier=lambda text: route_tier(text), model_name=lambda: CHAT_NAME)
 app.add_middleware(CORSMiddleware, allow_origins=CORS_ORIGINS, allow_methods=["*"], allow_headers=["*"], expose_headers=["x-typesafe-request-id", "server-timing"])
 
 
@@ -597,6 +606,34 @@ def chat_cache(s):
     if s.chat_prompts is None and CHAT_CACHE_MB > 0:
         s.chat_prompts = openai_compat.PromptCache(CHAT_CACHE_MB << 20)
     return s.chat_prompts
+
+
+async def is_review_p(text):
+    """P(yes) of routes.IS_REVIEW about a chat message (#419), read as its zero-shot check read it: the raw text as the state,
+    no use case, no date rewriting, and no calibrator, flags or rules; kept out of the decision log and the prefix cache."""
+    rec, meta = to_record(SystemOneRequest(state=text, questions={"is_review": {"type": "noul", "instructions": routes.IS_REVIEW}}))
+    async with server_async() as s:
+        ps, _ = await asyncio.wrap_future(s.submit(rec, cache=False))
+    return to_answers(ps, meta)["is_review"]["noul"]
+
+
+async def route_tier(text):
+    """The route preset's tier for a chat message (#419): small, medium or large, by fail-up advice (presets.advise) on the
+    answer a /v1/systemone client of the preset gets with its use case, read at the temperature that use case selects; never
+    logged."""
+    req = SystemOneRequest(state=text, questions=presets.PRESETS["route"], use_case=presets.USE_CASES["route"])
+    async with server_async() as s:
+        answers = (await s.answer_async(req, log=False))["answers"]
+    return presets.advise("route", answers, temperatures=getattr(app.state, "card", None), use_case=req.use_case)["tier"]
+
+
+def load_routes(path, api_key):
+    """The Routes in the D1A_ROUTES file, or None when it is unset. Refuses to serve (SystemExit) routes without D1A_API_KEY,
+    since anyone who reached the port could then start long jobs on a target, and a file that does not check out."""
+    if not path: return None
+    if not api_key: raise SystemExit("D1A_ROUTES is set but D1A_API_KEY is not: routes send chats to other models, so the server must require a key (#419)")
+    try: return routes.load(path)
+    except ValueError as e: raise SystemExit(str(e))
 
 
 @app.post("/v1/chat/completions")
@@ -718,6 +755,7 @@ def models():
     s, card = od.model, dict(app.state.card)
     card["loaded"], card["idle_unload_s"], card["learning"] = s is not None, od.idle_s, LEARNING.card()
     if pre := preprocessing(): card["preprocessing"] = pre
+    if app.state.routes is not None: card["routes"] = app.state.routes.card()
     if s is not None:
         card.update({"cuda_graphs": graphs.stats() if (graphs := getattr(s.model, "graphs", None)) else None,
                      "prefix_cache": {"size": s.prefix_cache.size, "min_state_tokens": s.prefix_cache.min_tokens, "max_tokens": s.prefix_cache.max_tokens, "hits": s.prefix_cache.hits,
@@ -825,6 +863,7 @@ def main():
         print(show(extra=[("self-learning settings", source + (f" (ERROR: {error})" if error else "")),
                           ("flags", f"--run {a.run} --host {a.host} --port {a.port} --device {a.device} --idle-unload {a.idle_unload}")]))
         return
+    app.state.routes = load_routes(ROUTES_FILE, API_KEY)   # before the model loads: a bad file fails at once
     run = a.run if is_hub_id(a.run) or os.path.exists(f"{a.run}/head.pt") or os.path.exists(f"{a.run}/{EXPORT_CONFIG}") else a.fallback
     if run != a.run: print(f"{a.run} not found, falling back to {run}")
     dev = default_device() if a.device == "auto" else a.device
@@ -859,7 +898,8 @@ def main():
         print("!!! serving an uncalibrated checkpoint (temperature 1.0): probabilities will be overconfident. Fit one with "
               "python -m d1a.training.calibrate before publishing; thresholds on probabilities assume it.", flush=True)
     print(f"serving {ck.requested} ({ck.path}) on {dev} via {model.backend} ({model.dtype}) {a.host}:{a.port}"   # /v1/models reports the run as given, not the resolved cache path
-          + (f"; unloads after {a.idle_unload} s idle" if a.idle_unload > 0 else ""), flush=True)
+          + (f"; unloads after {a.idle_unload} s idle" if a.idle_unload > 0 else "")
+          + (f"; chat routes: {', '.join(r['name'] for r in app.state.routes.card())}" if app.state.routes else ""), flush=True)
     del model, s
     log_chats()
     import uvicorn

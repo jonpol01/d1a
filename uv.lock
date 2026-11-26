@@ -521,6 +521,7 @@ mlx = [
 ]
 serve = [
     { name = "fastapi" },
+    { name = "httpx" },
     { name = "mlx-lm", marker = "platform_machine == 'arm64' and sys_platform == 'darwin'" },
     { name = "typesafe-sdk" },
     { name = "uvicorn" },
@@ -540,6 +541,7 @@ requires-dist = [
     { name = "av", marker = "extra == 'media'", specifier = ">=14" },
     { name = "datasets", specifier = ">=3.0" },
     { name = "fastapi", marker = "extra == 'serve'", specifier = ">=0.115" },
+    { name = "httpx", marker = "extra == 'serve'", specifier = ">=0.28.1" },
     { name = "llama-cpp-python", marker = "extra == 'embed'", specifier = ">=0.3.36" },
     { name = "mcp", marker = "extra == 'mcp'", specifier = ">=2.2,<3" },
     { name = "mlx-lm", marker = "platform_machine == 'arm64' and sys_platform == 'darwin' and extra == 'mlx'", specifier = ">=0.31.3,<0.32" },

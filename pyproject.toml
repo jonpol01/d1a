@@ -43,6 +43,7 @@ serve = [
     "fastapi>=0.115",
     "typesafe-sdk>=0.6.0",
     "uvicorn>=0.30",
+    "httpx>=0.28.1",   # chat routes (d1a.serving.routes, #419): forwarding a chat to another model
     "mlx-lm>=0.31.3,<0.32; sys_platform == 'darwin' and platform_machine == 'arm64'",   # the Apple Silicon backend (d1a.backends.mlx); a no-op elsewhere
 ]
 mlx = [
