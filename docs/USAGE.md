@@ -217,7 +217,7 @@ r = client.chat.completions.create(model="d1a-chat", messages=[{"role": "user", 
 With `D1A_ROUTES` set, `POST /v1/chat/completions` picks the model that answers each chat (#419). A client points at D1A
 alone:
 - a request to review a pull request or a piece of code goes to a review service;
-- a hard request goes to a larger OpenAI-compatible model;
+- a chat that needs a larger model goes to an OpenAI-compatible one;
 - everything else is answered by D1A, as above.
 
 Unset, the endpoint is unchanged.
@@ -226,38 +226,50 @@ Unset, the endpoint is unchanged.
 {"routes": [
   {"name": "review", "target": {"kind": "review", "url": "http://127.0.0.1:<port>/v1/review", "key_file": "<secret file>", "timeout_s": 300},
    "repos": ["<owner>/*"], "is_review_min_p": 0.8},
-  {"name": "large", "target": {"kind": "openai", "url": "http://127.0.0.1:<port>/v1/chat/completions", "model": "<model name>", "key_file": "<secret file>", "timeout_s": 300}}]}
+  {"name": "large", "target": {"kind": "openai", "url": "http://127.0.0.1:<port>/v1/chat/completions", "model": "<model name>", "key_file": "<secret file>", "timeout_s": 300},
+   "max_in_flight": 2, "min_tier": "large"}]}
 ```
 
 ```bash
-D1A_API_KEY=<key> D1A_ROUTES=routes.json uv run --extra serve python -m d1a.serving.serve --run <chat-capable model> --port 8009
+D1A_ROUTES=routes.json uv run --extra serve python -m d1a.serving.serve --run <chat-capable model> --port 8009
 ```
+
+**Who is routed.** Every caller of the chat endpoint is routed: anyone who can reach the server, or a relay in front of
+it, can send work to the targets. The server says so at startup. Two settings restrict it:
+- `"client_key_file": "<secret file>"` at the top of the file: only a chat that sends `Authorization: Bearer <that key>`
+  is routed. Any other chat is answered by D1A exactly as without routes, with no route header.
+- `D1A_API_KEY`: the server then refuses every request without it, and routes every chat it accepts.
 
 **Setup**
 - Either route may be left out.
-- The server refuses to start with `D1A_ROUTES` set and no `D1A_API_KEY`, since anyone who reached the port could then
-  start long jobs on a target.
-- Target URLs and keys come from the file only, never from a request. The key file holds one key on one line; it is sent
+- Target URLs and keys come from the file only, never from a request. A key file holds one key on one line. It is sent
   as `Authorization: Bearer <key>` (never the client's own header) and is never logged.
-- Startup checks the file and never contacts a target. Redirects are not followed, and proxy settings in the environment
-  are not used.
+- Startup checks the file and never contacts a target. Unknown keys, a URL that is not http(s) or carries credentials,
+  and a key file of more than one line are refused.
+- Redirects are not followed, and proxy settings in the environment are not used.
+- Routing runs before D1A reads the request, so D1A's own limits (its context, `max_tokens`) never stop a chat meant for
+  another model.
 
-**Which chats are routed:** only a chat whose last message is the user's. In the middle of a tool loop (the last message
-is a tool result) the chat stays with D1A. Routing runs before D1A reads the request, so D1A's own limits (its context,
-`max_tokens`) never stop a chat meant for another model.
-
-**Review.** One yes/no question is read on the last user message:
+**Review.** Only a chat whose last message is the user's. One yes/no question is read on that message:
 
 > Is this a request to review an existing pull request (read its diff and give feedback), rather than to write or change code?
 
 It is read raw: no use case, no date rewriting, no calibrator, and it is kept out of the decision log and the prefix cache.
-On 40 hand-written English and Japanese requests without links it was right on 38 (AUROC 0.96). Then, in this order:
+On 40 hand-written English and Japanese requests without links it was right on 38 (AUROC 0.96). Then, in this order, on
+the text outside a fenced code block:
 1. A GitHub pull-request link and P(yes) ≥ 0.5: that pull request is reviewed (`{"mode": "pr", "pr": "owner/repo#N"}`).
-   A message that only mentions a pull request is answered by D1A.
-2. A fenced code block, with a review verb outside it (review, レビュー, look over, check) or P(yes) ≥ 0.5: that code is
-   reviewed (`{"mode": "code", "files": {"<path>": "<the text inside the fence>"}}`). The path comes from "… from
-   `<path>`:", else `snippet.py`.
-3. P(yes) ≥ `is_review_min_p` (0.8): the pull request named as `owner/repo#N`.
+   A message that only mentions a pull request is answered by D1A. A known edge: "Can you summarise what <link>
+   changed?" read 0.86 on the served model, so it gets a review.
+2. A fenced code block (```` ``` ```` or `~~~`) is reviewed (`{"mode": "code", "files": {"<path>": "<the text inside the fence>"}}`)
+   in either of two cases:
+   - P(yes) ≥ 0.5;
+   - a review verb (review, reviewing, look over, レビュー) when the block is code. Code here means a language tag that
+     is not text, markdown, JSON or a log, or a path named "… from `<path>`:".
+
+   The path comes from "… from `<path>`:" (never a URL, an absolute path or `..`), else `snippet.py`. A fenced draft,
+   config or log under "review this" stays with D1A.
+3. P(yes) ≥ `is_review_min_p` (0.8) with a pull request named as `owner/repo#N`, or with a review verb and none named
+   (then D1A asks which). A bare "continue" read 0.76, which is why a review verb is required when none is named.
 
 The review service's `text` comes back verbatim, whatever its status, so its own "no review was written" replies reach
 the user. D1A never writes review text itself; instead it sends one of these fixed replies:
@@ -266,15 +278,24 @@ the user. D1A never writes review text itself; instead it sends one of these fix
 - a review already running (one runs at a time): "The reviewer is busy — no review was written. Try again in a few minutes.";
 - no reply text (connection refused, timeout, a status without text): "reviewer unavailable — no review was written.".
 
-A streamed review sends the role chunk at once, then a keep-alive comment every 10 s, then the text. `tools` are ignored.
+A streamed review sends the role chunk at once, then a keep-alive comment every 10 s, then the text. A client that
+leaves stops its review. `tools` are ignored.
 
-**Large.** The route preset (`d1a.agents.presets`, use case `routing`, fail-up advice: an unsure answer goes up) is read
-on the first and on the last user message. The larger tier wins, so a "continue" mid-task stays with the large model.
-- On "large", the request body goes to the target as the client sent it (`tools`, `stream_options` and all), with only
-  `model` replaced. The target's response, streamed or not, comes back verbatim, its `model` included.
+**Large.** The route preset (`d1a.agents.presets`, use case `routing`, fail-up advice: an unsure answer goes up) is read on
+the first user message and the last three. The largest tier wins:
+- a "continue" mid-task stays with the large model;
+- an agent's tool turn (the last message is a tool result) is read the same way, so a task stays with the model it
+  started on.
+
+A chat at `min_tier` or above goes to the target. The default `large` sends only hard requests; `medium` sends
+everything but small ones (greetings, simple facts, short rewrites). Then:
+- The request body goes to the target as the client sent it (`tools`, `stream_options` and all), with only `model`
+  replaced. The target's response, streamed or not, comes back verbatim, its `model` included.
 - A 4xx comes back as the target sent it.
-- If the target cannot be reached, fails (5xx) or sends nothing within `timeout_s` before its first byte, D1A answers
-  instead. Its reply then starts with "(The large model is unavailable — answered by D1A.)".
+- If the target cannot be reached, fails (5xx, a redirect) or sends nothing within `timeout_s` before its first byte,
+  D1A answers instead. Its reply then starts with "(The large model is unavailable — answered by D1A.)".
+- At most `max_in_flight` (default 2) chats go to the target at once. Another is answered by D1A, its reply starting
+  with "(The large model is busy — answered by D1A.)".
 - `timeout_s` bounds each read from the target, not the whole answer.
 
 **Headers:** every chat answered with routes on carries `x-d1a-route` (`review`, `large` or `none`). A route that failed
@@ -282,8 +303,11 @@ also carries `x-d1a-route-error`: `which-pr`, `not-listed`, `busy`, `connect`, `
 `too-large`, `not-json` or `error`. A streamed review sends its headers before the review ends, so a failure there
 shows only in the text.
 
-**Logs:** the chat log (`D1A_CHAT_LOG`) prints a line per routed chat: the route, P(yes), the tiers and the outcome. It
-never prints message text or a key.
+**Cost:** a routed chat pays D1A's passes before it is answered or sent on: the review question on the last user
+message, and the route preset on up to four user messages. They run in one model batch.
+
+**Logs:** the chat log (`D1A_CHAT_LOG`) prints a line per chat: the route, P(yes), the tiers and the outcome. It never
+prints message text or a key.
 
 ## Photos, Voice and Video
 

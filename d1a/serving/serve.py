@@ -521,8 +521,9 @@ def prepare(req):
 app = FastAPI(title="d1a")
 app.state.embedder = None   # /v1/embeddings: loaded on first use (D1A_EMBED_GGUF)
 app.state.routes = None     # chat routes (D1A_ROUTES, set by main): None passes every chat straight to chat_completions
-# added first, so it runs inside the CORS and auth middleware added after it: a routed chat needs the API key as any other
-app.add_middleware(routes.ChatRoutes, routes=lambda: app.state.routes, p_review=lambda text: is_review_p(text),
+# added first, so it runs inside the CORS and auth middleware added after it: with D1A_API_KEY set, every chat it sees has
+# passed the key check
+app.add_middleware(routes.ChatRoutes, routes=lambda: app.state.routes, keyed=lambda: bool(API_KEY), p_review=lambda text: is_review_p(text),
                    tier=lambda text: route_tier(text), model_name=lambda: CHAT_NAME)
 app.add_middleware(CORSMiddleware, allow_origins=CORS_ORIGINS, allow_methods=["*"], allow_headers=["*"], expose_headers=["x-typesafe-request-id", "server-timing"])
 
@@ -628,12 +629,15 @@ async def route_tier(text):
 
 
 def load_routes(path, api_key):
-    """The Routes in the D1A_ROUTES file, or None when it is unset. Refuses to serve (SystemExit) routes without D1A_API_KEY,
-    since anyone who reached the port could then start long jobs on a target, and a file that does not check out."""
+    """The Routes in the D1A_ROUTES file, or None when it is unset. Refuses to serve (SystemExit) a file that does not check
+    out. With neither D1A_API_KEY nor a client_key_file every caller is routed, by design (#419): it says so at startup."""
     if not path: return None
-    if not api_key: raise SystemExit("D1A_ROUTES is set but D1A_API_KEY is not: routes send chats to other models, so the server must require a key (#419)")
-    try: return routes.load(path)
+    try: loaded = routes.load(path)
     except ValueError as e: raise SystemExit(str(e))
+    if not api_key and not loaded.client_key:
+        print("chat routes are open to every caller: anyone who can reach this server can send work to the routes' targets "
+              "(set client_key_file in D1A_ROUTES, or D1A_API_KEY, to restrict them)", flush=True)
+    return loaded
 
 
 @app.post("/v1/chat/completions")
@@ -899,7 +903,7 @@ def main():
               "python -m d1a.training.calibrate before publishing; thresholds on probabilities assume it.", flush=True)
     print(f"serving {ck.requested} ({ck.path}) on {dev} via {model.backend} ({model.dtype}) {a.host}:{a.port}"   # /v1/models reports the run as given, not the resolved cache path
           + (f"; unloads after {a.idle_unload} s idle" if a.idle_unload > 0 else "")
-          + (f"; chat routes: {', '.join(r['name'] for r in app.state.routes.card())}" if app.state.routes else ""), flush=True)
+          + (f"; chat routes: {', '.join(r.name for r in (app.state.routes.review, app.state.routes.large) if r)}" if app.state.routes else ""), flush=True)
     del model, s
     log_chats()
     import uvicorn

@@ -20,7 +20,7 @@ default unless this page names a reason to change it.
 - `learning`: whether decisions are logged, the calibrator file, and the questions it corrects;
 - the prefix cache's size and limits, and recent batch latency.
 - `routes`, when `D1A_ROUTES` is set: each route's name and kind, the review route's `repos` and threshold, the large
-  route's model (never a URL or key).
+  route's model, `max_in_flight` and `min_tier`, and whether a client key restricts them (never a URL or key).
 
 ```bash
 curl -s 127.0.0.1:8009/v1/models | python -m json.tool
@@ -37,7 +37,7 @@ settings come from. The list lives in `d1a/core/settings.py`; every module reads
 | serve a released model | `--run JohnP1/d1a-e4b-mlx-q8@v0.6.1` (Apple Silicon) or `--run JohnP1/d1a-e4b@v0.6.1` (CUDA, CPU); pin the tag |
 | reach the server from another machine or a container | `--host 0.0.0.0`, and set `D1A_API_KEY` |
 | require a key | `D1A_API_KEY=<key>`; clients send `Authorization: Bearer <key>` |
-| send pull-request and code reviews and hard chats to other models | `D1A_ROUTES=<file>` with `D1A_API_KEY` ([Route chats to other models](USAGE.md#route-chats-to-other-models)) |
+| send pull-request and code reviews and hard chats to other models | `D1A_ROUTES=<file>` ([Route chats to other models](USAGE.md#route-chats-to-other-models)) |
 | call the server from a web page on another origin | `D1A_CORS_ORIGINS=https://app.example` (comma-separated) |
 | free memory when idle | `--idle-unload 600` |
 | answer about photos, voice and video | install the `media` extra and serve an MLX export that carries `media/` |
@@ -78,7 +78,7 @@ and `--extra mcp` for the MCP server.
 | `D1A_CHAT_CONTEXT` | unset (the model's context: 131,072 for D1A-E4B-it) | The longest prompt plus `max_tokens` a chat may ask for. A longer request gets an immediate 400 (`context_length_exceeded`), which clients such as Hermes answer by compressing. | Set it below the model's context when several clients share the server: one chat holds the model while it reads its prompt (~230 tokens/s on an M4, so 32k tokens ~2 minutes, 131k ~9 minutes). |
 | `D1A_CHAT_LOG` | `1` | Prints a line per chat: prompt tokens, how many came from the prompt cache, completion tokens and time ([Logs](#logs)). `0` turns it off. | `0` to keep the output to request lines only. |
 | `D1A_CHAT_NAME` | `d1a-chat` | The model id `/v1/chat/completions` answers as and `/v1/models` lists. Any id a client sends is answered. | When an OpenAI client insists on a particular id. |
-| `D1A_ROUTES` | unset (off) | A JSON file of chat routes ([Route chats to other models](USAGE.md#route-chats-to-other-models)): a request to review a pull request or a piece of code goes to a review service, a hard chat to a larger OpenAI-compatible model, the rest to D1A. Each answer then carries `x-d1a-route`. Target URLs and keys come from this file only; the server refuses to start with it set and `D1A_API_KEY` unset, or with a file that does not check out (unknown keys, a URL with credentials, a key file of more than one line). `GET /v1/models` lists the routes in force (`"routes"`, no URL or key). | To let one chat endpoint hand work to the model that should do it. Unset, `/v1/chat/completions` is unchanged. |
+| `D1A_ROUTES` | unset (off) | A JSON file of chat routes ([Route chats to other models](USAGE.md#route-chats-to-other-models)): a request to review a pull request or a piece of code goes to a review service, a chat that needs a larger model to an OpenAI-compatible one (`min_tier`, at most `max_in_flight` at once), the rest to D1A. Each answer then carries `x-d1a-route`. Target URLs and keys come from this file only; startup refuses a file that does not check out (unknown keys, a URL with credentials, a key file of more than one line). Without `client_key_file` in the file (or `D1A_API_KEY`), anyone who can reach the server can send work to the targets, and the server says so at startup. `GET /v1/models` lists the routes in force (`"routes"`, no URL or key). | To let one chat endpoint hand work to the model that should do it. Set `client_key_file` to restrict routing to the callers that hold its key. Unset, `/v1/chat/completions` is unchanged. |
 | `D1A_EMBED_GGUF` | unset (off) | A GGUF embedding model `/v1/embeddings` serves through llama.cpp (the `embed` extra), e.g. `nomic-embed-text-v1.5.Q4_K_M.gguf`. | To serve embeddings, e.g. for mem0 ([Chat with D1A](USAGE.md#chat-with-d1a)). |
 | `D1A_EMBED_NAME` | `text-embedding-nomic-embed-text-v1.5` | The embedding model id `/v1/models` lists (LM Studio's id for nomic, so clients set up for it need no change). | With a different embedder. |
 

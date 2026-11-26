@@ -17,7 +17,8 @@ from fastapi.testclient import TestClient
 from d1a.serving import openai_compat, routes, serve
 from test_serving import StandInModel, packed
 
-KEY, D1A_TEXT, REVIEW_TEXT = "target-key-5f2c", "D1A's own answer", "Looks good: one nit in serve.py."
+KEY, CLIENT_KEY, D1A_TEXT, REVIEW_TEXT = "target-key-5f2c", "client-key-9d1e", "D1A's own answer", "Looks good: one nit in serve.py."
+SIGNED = {"authorization": f"Bearer {CLIENT_KEY}"}
 LINK = "https://github.com/jonpol01/d1a/pull/92"
 
 
@@ -65,15 +66,18 @@ def targets():
     for t in made: t.close()
 
 
-def configure(tmp_path, monkeypatch, review_url=None, large_url=None, timeout_s=5, p=0.0, tiers=None, repos=("jonpol01/*",)):
-    """Routes from a real D1A_ROUTES file, stand-in passes (P(yes) = p, tier by text from `tiers`, default small) and a
+def configure(tmp_path, monkeypatch, review_url=None, large_url=None, timeout_s=5, p=0.0, tiers=None, repos=("jonpol01/*",),
+              client_key=False, large=None):
+    """Routes from a real D1A_ROUTES file (a client key only with client_key; `large`: more fields for the large route),
+    no D1A_API_KEY, stand-in passes (P(yes) = p, tier by text from `tiers`, default small) and a
     stand-in D1A chat. -> the calls the passes and D1A's chat got."""
     key_file = tmp_path / "key"; key_file.write_text(KEY + "\n", encoding="utf-8")
     spec = []
     if review_url: spec.append({"name": "review", "target": {"kind": "review", "url": review_url, "key_file": str(key_file), "timeout_s": timeout_s}, "repos": list(repos)})
-    if large_url: spec.append({"name": "large", "target": {"kind": "openai", "url": large_url, "model": "big-model", "key_file": str(key_file), "timeout_s": timeout_s}})
-    (tmp_path / "routes.json").write_text(json.dumps({"routes": spec}), encoding="utf-8")
-    monkeypatch.setattr(serve.app.state, "routes", serve.load_routes(str(tmp_path / "routes.json"), "server-key"))
+    if large_url: spec.append({"name": "large", "target": {"kind": "openai", "url": large_url, "model": "big-model", "key_file": str(key_file), "timeout_s": timeout_s}} | (large or {}))
+    client_key_file = tmp_path / "client-key"; client_key_file.write_text(CLIENT_KEY, encoding="utf-8")
+    (tmp_path / "routes.json").write_text(json.dumps({"routes": spec} | ({"client_key_file": str(client_key_file)} if client_key else {})), encoding="utf-8")
+    monkeypatch.setattr(serve.app.state, "routes", serve.load_routes(str(tmp_path / "routes.json"), None))
     calls = {"p": [], "tier": [], "chat": []}
 
     async def p_review(text): calls["p"].append(text); return p
@@ -106,9 +110,9 @@ def held():
     return server_async
 
 
-def chat(client, text, stream=False, **extra):
+def chat(client, text, stream=False, headers=SIGNED, **extra):
     body = {"model": "d1a-chat", "messages": [{"role": "user", "content": text}], "stream": stream} | extra
-    return client.post("/v1/chat/completions", json=body)
+    return client.post("/v1/chat/completions", json=body, headers=headers)
 
 
 def content(r):
@@ -133,16 +137,38 @@ def test_off_every_chat_reaches_d1a_untouched(monkeypatch, tmp_path):
     assert calls["p"] == calls["tier"] == [] and len(calls["chat"]) == 1
 
 
-def test_a_turn_that_does_not_end_with_the_user_is_not_routed(monkeypatch, tmp_path, targets):
-    """Mid tool loop (the last message is a tool result) the chat stays with D1A: no pass runs, nothing is forwarded."""
-    large = targets(json_reply(200, {"choices": []}))
-    calls = configure(tmp_path, monkeypatch, large_url=large.url, tiers={"debug the scheduler": "large"})
-    messages = [{"role": "user", "content": "debug the scheduler"},
-                {"role": "assistant", "content": None, "tool_calls": [{"id": "c1", "type": "function", "function": {"name": "read", "arguments": "{}"}}]},
-                {"role": "tool", "tool_call_id": "c1", "content": "file text"}]
+TOOL_TURN = [{"role": "user", "content": "debug the scheduler"},
+             {"role": "assistant", "content": None, "tool_calls": [{"id": "c1", "type": "function", "function": {"name": "read", "arguments": "{}"}}]},
+             {"role": "tool", "tool_call_id": "c1", "content": "file text"}]
+TOOLS = [{"type": "function", "function": {"name": "read", "parameters": {}}}]
+
+
+@pytest.mark.parametrize("tier", ["large", "small"])
+def test_a_tool_turn_stays_with_the_model_its_task_started_on(monkeypatch, tmp_path, targets, tier):
+    """Mid tool loop (the last message is a tool result) the tier is read on the user messages as for any turn, so a task
+    the large model started stays with it, and one D1A started stays with D1A. A tool turn is never a review request."""
+    large, review = targets(json_reply(200, LARGE_REPLY)), targets(json_reply(200, {"text": REVIEW_TEXT}))
+    calls = configure(tmp_path, monkeypatch, review_url=review.url, large_url=large.url, p=0.99, tiers={"debug the scheduler": tier})
     with TestClient(serve.app) as client:
-        r = client.post("/v1/chat/completions", json={"messages": messages, "tools": [{"type": "function", "function": {"name": "read", "parameters": {}}}]})
-    assert r.status_code == 200 and r.headers["x-d1a-route"] == "none" and calls["tier"] == [] and large.requests == []
+        r = client.post("/v1/chat/completions", headers=SIGNED, json={"messages": TOOL_TURN, "tools": TOOLS})
+    assert calls["p"] == [] and review.requests == [] and calls["tier"] == ["debug the scheduler"]
+    if tier == "large":
+        assert r.json() == LARGE_REPLY and r.headers["x-d1a-route"] == "large" and large.requests[0]["body"]["messages"] == TOOL_TURN
+    else:
+        assert content(r) == D1A_TEXT and r.headers["x-d1a-route"] == "none" and large.requests == []
+
+
+@pytest.mark.parametrize("users, tier", [(["hi", "Find why the scheduler deadlocks under load", "continue"], "large"),
+                                         (["hi", "Find why the scheduler deadlocks under load", "ok", "thanks", "continue", "go on"], "small"),
+                                         (["Find why the scheduler deadlocks under load", "a", "b", "c", "d", "e"], "large")])
+def test_the_tier_is_the_largest_of_the_first_and_the_last_three_user_messages(monkeypatch, tmp_path, targets, users, tier):
+    large = targets(json_reply(200, LARGE_REPLY))
+    calls = configure(tmp_path, monkeypatch, large_url=large.url, tiers={"Find why the scheduler deadlocks under load": "large"})
+    messages = [m for text in users for m in ({"role": "user", "content": text}, {"role": "assistant", "content": "…"})][:-1]
+    with TestClient(serve.app) as client:
+        r = client.post("/v1/chat/completions", headers=SIGNED, json={"messages": messages})
+    assert r.headers["x-d1a-route"] == ("large" if tier == "large" else "none") and len(calls["tier"]) <= 4
+    assert sorted(calls["tier"]) == sorted(dict.fromkeys(users[:1] + users[-3:]))
 
 
 def test_small_and_medium_chats_stay_with_d1a(monkeypatch, tmp_path, targets):
@@ -155,15 +181,33 @@ def test_small_and_medium_chats_stay_with_d1a(monkeypatch, tmp_path, targets):
     assert large.requests == [] and len(calls["chat"]) == 2
 
 
-def test_a_routed_chat_needs_the_api_key_like_any_other(monkeypatch, tmp_path, targets):
+def test_without_a_client_key_every_caller_is_routed(monkeypatch, tmp_path, targets):
     review = targets(json_reply(200, {"text": REVIEW_TEXT}))
-    calls = configure(tmp_path, monkeypatch, review_url=review.url, p=0.99)
+    configure(tmp_path, monkeypatch, review_url=review.url, p=0.99)
+    with TestClient(serve.app) as client:
+        r = chat(client, f"review {LINK}", headers={})
+    assert content(r) == REVIEW_TEXT and r.headers["x-d1a-route"] == "review"
+
+
+def test_a_client_key_restricts_routing_to_the_chats_that_carry_it(monkeypatch, tmp_path, targets):
+    """With client_key_file, only a chat carrying that key is routed: a keyless one (a relay publishing the chat endpoint
+    on a network, a demo page) or one with a wrong key is answered by D1A exactly as without routes, no pass run and no
+    route header. With D1A_API_KEY set too, the server refuses every request without it, and routes every chat it
+    accepts."""
+    review = targets(json_reply(200, {"text": REVIEW_TEXT}))
+    calls = configure(tmp_path, monkeypatch, review_url=review.url, p=0.99, client_key=True)
+    with TestClient(serve.app) as client:
+        keyless = chat(client, f"review {LINK}", headers={})
+        wrong = chat(client, f"review {LINK}", headers={"authorization": f"Bearer {CLIENT_KEY}x"})
+        signed = chat(client, f"review {LINK}")
+    for r in (keyless, wrong):
+        assert content(r) == D1A_TEXT and "x-d1a-route" not in r.headers
+    assert content(signed) == REVIEW_TEXT and calls["p"] == [f"review {LINK}"] and len(review.requests) == 1
     monkeypatch.setattr(serve, "API_KEY", "server-key")
     with TestClient(serve.app) as client:
-        r = chat(client, f"review {LINK}")
-        ok = client.post("/v1/chat/completions", headers={"authorization": "Bearer server-key"},
-                         json={"messages": [{"role": "user", "content": f"review {LINK}"}]})
-    assert r.status_code == 401 and calls["p"] == [f"review {LINK}"] * 1 and content(ok) == REVIEW_TEXT and len(review.requests) == 1
+        refused = chat(client, f"review {LINK}")
+        keyed = chat(client, f"review {LINK}", headers={"authorization": "Bearer server-key"})
+    assert refused.status_code == 401 and content(keyed) == REVIEW_TEXT and len(review.requests) == 2
 
 
 # --- review ---------------------------------------------------------------------------------------------------------------
@@ -177,21 +221,23 @@ def test_a_review_request_is_forwarded_and_its_text_returned_verbatim(monkeypatc
     monkeypatch.setenv("HTTP_PROXY", f"http://127.0.0.1:{closed_port()}"); monkeypatch.setenv("ALL_PROXY", f"http://127.0.0.1:{closed_port()}")
     message = f"このPRをレビューして {LINK}をお願い"
     with caplog.at_level(logging.INFO, logger="d1a.chat"), TestClient(serve.app) as client:
-        r = client.post("/v1/chat/completions", headers={"authorization": "Bearer client-key"}, json={"messages": [{"role": "user", "content": message}]})
+        r = client.post("/v1/chat/completions", headers=SIGNED, json={"messages": [{"role": "user", "content": message}]})
     assert r.status_code == 200 and content(r) == REVIEW_TEXT and r.json()["model"] == serve.CHAT_NAME
     assert r.headers["x-d1a-route"] == "review" and "x-d1a-route-error" not in r.headers and calls["chat"] == []
     (sent,) = review.requests
     assert sent["body"] == {"mode": "pr", "pr": "jonpol01/d1a#92"} and sent["headers"]["authorization"] == f"Bearer {KEY}"
-    assert KEY not in caplog.text and "レビュー" not in caplog.text and "route review" in caplog.text
+    assert KEY not in caplog.text and CLIENT_KEY not in caplog.text and "レビュー" not in caplog.text and "route review" in caplog.text
 
 
 def test_review_routing_follows_the_link_and_the_two_thresholds(monkeypatch, tmp_path, targets):
-    """With a link, P(yes) >= 0.5 routes; without one, is_review_min_p (0.8). A message that only mentions a pull request
-    is D1A's. Routed without exactly one pull request named, D1A asks which instead of answering."""
+    """With a link, P(yes) >= 0.5 routes; without one, is_review_min_p (0.8), and naming no pull request it must say
+    "review" (a bare "continue" read 0.76 on the served model). A message that only mentions a pull request is D1A's.
+    Routed without exactly one pull request named, D1A asks which instead of answering."""
     review = targets(json_reply(200, {"text": REVIEW_TEXT}))
     cases = [(0.4, f"what changed in {LINK}?", D1A_TEXT, None), (0.6, f"review {LINK}", REVIEW_TEXT, "jonpol01/d1a#92"),
              (0.7, "review jonpol01/d1a#5 please", D1A_TEXT, None), (0.85, "review jonpol01/d1a#5 please", REVIEW_TEXT, "jonpol01/d1a#5"),
              (0.9, "can you review my pull request?", routes.WHICH_PR, None),
+             (0.9, "continue", D1A_TEXT, None), (0.9, "please take a look at my PR", D1A_TEXT, None),
              (0.9, f"review {LINK} and jonpol01/d1a#93", routes.WHICH_PR, None),
              (0.9, f"review {LINK} (jonpol01/d1a#92)", REVIEW_TEXT, "jonpol01/d1a#92")]
     for p, message, expected, forwarded in cases:
@@ -216,16 +262,21 @@ CODE = 'def gate(paths):\n    """A docstring with ```fences``` and a link https:
 
 
 def test_code_to_review_goes_to_the_review_service_as_files(monkeypatch, tmp_path, targets):
-    """A fenced code block (``` or ~~~, CRLF too) with a review verb in the prose (or P(yes) >= 0.5) is sent as {"mode":
-    "code", "files": {path: code}}: the exact text inside the fence, under the path named "from <path>:" (never a URL, an
-    absolute path or one climbing with ..), else snippet.py. Links and verbs inside the code count for nothing, "check",
-    "checkout" and "checkbox" are not review verbs, and code with no review asked for stays with D1A."""
+    """A fenced code block (``` or ~~~, CRLF too) is sent as {"mode": "code", "files": {path: code}} with P(yes) >= 0.5,
+    or with a review verb in the prose when the block is code: a language tag that is not text, markdown, JSON or a log,
+    or a path named "from <path>:" (never a URL, an absolute path or one climbing with ..). The code is the exact text
+    inside the fence, under that path, else snippet.py. Links and verbs inside the code count for nothing, "check",
+    "checkout" and "checkbox" are not review verbs, and a fenced draft, config or log under "review this" stays with D1A."""
     review = targets(json_reply(200, {"text": "NOT VALIDATED: findings below\nline 3: fine"}))
     cases = [(0.1, f"Please review this code from scripts/gate_required.py:\n\n```python\n{CODE}\n```", {"scripts/gate_required.py": CODE}),
              (0.1, f"コードをレビューしてください\n```py\n{CODE}\n```\nありがとう", {"snippet.py": CODE}),
              (0.6, f"thoughts on this? It is from `lib/x.py`:\n~~~\n{CODE}\n~~~", {"lib/x.py": CODE}),
              (0.1, f"Please review this code from scripts/w.py:\r\n\r\n```python\r\n{CODE}\r\n```", {"scripts/w.py": CODE}),
-             (0.1, f"review this, from https://example.com/a.py: and ../../etc/passwd:\n```\n{CODE}\n```", {"snippet.py": CODE}),
+             (0.1, f"review this, from https://example.com/a.py: and ../../etc/passwd:\n```python\n{CODE}\n```", {"snippet.py": CODE}),
+             (0.1, "Please review this draft:\n```\nDear team, the launch moves to May.\n```", None),
+             (0.1, "review this config\n```json\n{\"a\": 1}\n```", None),
+             (0.1, "look over this log\n```text\nERROR boom\n```", None),
+             (0.6, "please review this:\n```markdown\n# Notes\n```", {"snippet.py": "# Notes"}),
              (0.1, f"make this faster\n```python\n{CODE}\n```", None),
              (0.3, f"fix the bug in it\n```python\ndef check(): return 'please review'\n```", None),
              (0.05, f"can you check why and fix it\n```py\n{CODE}\n```", None),
@@ -311,7 +362,7 @@ def test_a_hard_chat_goes_whole_to_the_large_model_and_its_answer_comes_back_ver
     large = targets(json_reply(200, LARGE_REPLY))
     calls = configure(tmp_path, monkeypatch, large_url=large.url, tiers={"Find why the scheduler deadlocks under load": "large", "continue": "small"})
     with TestClient(serve.app) as client:
-        r = client.post("/v1/chat/completions", headers={"authorization": "Bearer client-key"}, json=AGENT_REQUEST)
+        r = client.post("/v1/chat/completions", headers=SIGNED, json=AGENT_REQUEST)
     assert r.status_code == 200 and r.json() == LARGE_REPLY and r.headers["x-d1a-route"] == "large" and calls["chat"] == []
     (sent,) = large.requests
     assert sent["body"] == AGENT_REQUEST | {"model": "big-model"} and sent["headers"]["authorization"] == f"Bearer {KEY}"
@@ -328,6 +379,33 @@ def test_a_streamed_hard_chat_passes_the_large_models_stream_through(monkeypatch
     with TestClient(serve.app) as client:
         r = chat(client, "prove it", stream=True)
     assert r.content == events and r.headers["x-d1a-route"] == "large" and large.requests[0]["body"]["stream"] is True
+
+
+@pytest.mark.parametrize("min_tier, tier, routed", [(None, "medium", False), ("medium", "medium", True), ("medium", "small", False),
+                                                    (None, "small", False), (None, "large", True), ("medium", "large", True)])
+def test_min_tier_sets_how_hard_a_chat_must_be_to_go_to_the_large_model(monkeypatch, tmp_path, targets, min_tier, tier, routed):
+    large = targets(json_reply(200, LARGE_REPLY))
+    configure(tmp_path, monkeypatch, large_url=large.url, tiers={"write an email": tier}, large={"min_tier": min_tier} if min_tier else None)
+    with TestClient(serve.app) as client:
+        r = chat(client, "write an email")
+    assert (r.json() == LARGE_REPLY) == routed and len(large.requests) == routed and r.headers["x-d1a-route"] == ("large" if routed else "none")
+
+
+def test_chats_over_max_in_flight_are_answered_by_d1a_with_the_note(monkeypatch, tmp_path, targets):
+    """The large model takes max_in_flight chats at once (here 1); one more is answered by D1A, its reply starting with
+    the busy note. The slot is free again once the forward ends."""
+    release = threading.Event()
+    large = targets(lambda h, b: release.wait(5) and (200, "application/json", json.dumps(LARGE_REPLY).encode()))
+    calls = configure(tmp_path, monkeypatch, large_url=large.url, tiers={"prove it": "large"}, large={"max_in_flight": 1})
+    with TestClient(serve.app) as client:
+        first = []
+        t = threading.Thread(target=lambda: first.append(chat(client, "prove it"))); t.start()
+        assert large.got.wait(5)
+        busy = chat(client, "prove it")
+        release.set(); t.join(5)
+        again = chat(client, "prove it")
+    assert content(busy) == f"{routes.NOTE_LARGE_BUSY}\n{D1A_TEXT}" and busy.headers["x-d1a-route-error"] == "busy" and len(calls["chat"]) == 1
+    assert first[0].json() == again.json() == LARGE_REPLY and len(large.requests) == 2
 
 
 def test_a_compressed_stream_from_the_large_model_reaches_the_client_as_text(monkeypatch, tmp_path, targets):
@@ -465,16 +543,25 @@ def test_the_model_thread_and_server_are_free_while_a_review_runs(monkeypatch, t
 
 # --- the routes file and startup ------------------------------------------------------------------------------------------
 
-def test_startup_refuses_routes_without_an_api_key_or_with_a_bad_file(tmp_path):
+def test_startup_refuses_a_bad_routes_file_and_says_when_routes_are_open_to_every_caller(tmp_path, capsys):
     key_file = tmp_path / "key"; key_file.write_text(KEY, encoding="utf-8")
     good = {"name": "review", "target": {"kind": "review", "url": "http://127.0.0.1:1/v1/review", "key_file": str(key_file)}, "repos": ["jonpol01/*"]}
     path = tmp_path / "routes.json"; path.write_text(json.dumps({"routes": [good]}), encoding="utf-8")
-    with pytest.raises(SystemExit, match="D1A_API_KEY"):
-        serve.load_routes(str(path), None)
     assert serve.load_routes(None, None) is None and serve.load_routes(str(path), "k").review.target.timeout_s == 300
+    assert "open to every caller" not in capsys.readouterr().out
+    assert serve.load_routes(str(path), None).review is not None and "open to every caller" in capsys.readouterr().out
+    client_key = tmp_path / "client"; client_key.write_text(CLIENT_KEY, encoding="utf-8")
+    path.write_text(json.dumps({"client_key_file": str(client_key), "routes": [good]}), encoding="utf-8")
+    keyed = serve.load_routes(str(path), None)
+    assert keyed.client_key == CLIENT_KEY and CLIENT_KEY not in repr(keyed) and CLIENT_KEY not in json.dumps(keyed.card())
+    client_key.write_text("two words", encoding="utf-8")
+    with pytest.raises(SystemExit, match="client key file must hold one key"):
+        serve.load_routes(str(path), None)
     bad = [good | {"is_review_minp": 0.9}, good | {"repos": ["*"]}, good | {"target": good["target"] | {"url": f"http://user:{KEY}@127.0.0.1/"}},
            good | {"target": good["target"] | {"url": "file:///etc/passwd"}}, good | {"target": good["target"] | {"kind": "shell"}},
-           {"name": "large", "target": {"kind": "openai", "url": "http://127.0.0.1:1/v1/chat/completions"}}]
+           {"name": "large", "target": {"kind": "openai", "url": "http://127.0.0.1:1/v1/chat/completions"}},
+           {"name": "large", "target": {"kind": "openai", "url": "http://127.0.0.1:1/", "model": "m"}, "max_in_flight": 0},
+           {"name": "large", "target": {"kind": "openai", "url": "http://127.0.0.1:1/", "model": "m"}, "min_tier": "small"}]
     for spec in bad:
         path.write_text(json.dumps({"routes": [spec]}), encoding="utf-8")
         with pytest.raises(SystemExit) as e:
