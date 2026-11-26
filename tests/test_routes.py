@@ -281,7 +281,9 @@ def test_code_to_review_goes_to_the_review_service_as_files(monkeypatch, tmp_pat
              (0.3, f"fix the bug in it\n```python\ndef check(): return 'please review'\n```", None),
              (0.05, f"can you check why and fix it\n```py\n{CODE}\n```", None),
              (0.05, "Why does git checkout fail?\n```\nerror: pathspec did not match\n```", None),
-             (0.05, f"Add a checkbox to this form\n```js\n{CODE}\n```", None)]
+             (0.05, f"Add a checkbox to this form\n```js\n{CODE}\n```", None),
+             (0.1, "review the output from v1.2:\n```\nok\n```", None), (0.1, "review this from notes.md:\n```text\nok\n```", None),
+             (0.1, f"review this from lib/x:\n```\n{CODE}\n```", None)]
     for p, message, files in cases:
         review.requests.clear()
         calls = configure(tmp_path, monkeypatch, review_url=review.url, p=p)
@@ -406,6 +408,15 @@ def test_chats_over_max_in_flight_are_answered_by_d1a_with_the_note(monkeypatch,
         again = chat(client, "prove it")
     assert content(busy) == f"{routes.NOTE_LARGE_BUSY}\n{D1A_TEXT}" and busy.headers["x-d1a-route-error"] == "busy" and len(calls["chat"]) == 1
     assert first[0].json() == again.json() == LARGE_REPLY and len(large.requests) == 2
+
+
+def test_a_streamed_forward_frees_its_slot_when_the_stream_ends(monkeypatch, tmp_path, targets):
+    events = b'data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n'
+    large = targets(lambda h, b: (200, "text/event-stream", events))
+    configure(tmp_path, monkeypatch, large_url=large.url, tiers={"prove it": "large"}, large={"max_in_flight": 1})
+    with TestClient(serve.app) as client:
+        replies = [chat(client, "prove it", stream=True) for _ in range(3)]
+    assert all(r.content == events and "x-d1a-route-error" not in r.headers for r in replies) and len(large.requests) == 3
 
 
 def test_a_compressed_stream_from_the_large_model_reaches_the_client_as_text(monkeypatch, tmp_path, targets):

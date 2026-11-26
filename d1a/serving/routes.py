@@ -277,8 +277,10 @@ class Outcome:
 
 
 def _relative_path(path):
-    """A repository-relative file path such as scripts/x.py: not a URL, an absolute or home path, or one climbing with ..."""
-    return ("/" in path or "." in path) and "://" not in path and not path.startswith(("/", "~", "\\")) and ".." not in path.split("/")
+    """A repository-relative file path such as scripts/x.py: a file name with an extension that has a letter in it (not
+    "v1.2"), and not a URL, an absolute or home path, or one climbing with ..."""
+    return (re.fullmatch(r"[^/]+\.[A-Za-z0-9]*[A-Za-z][A-Za-z0-9]*", path.rsplit("/", 1)[-1]) is not None and len(path.rsplit(".", 1)[-1]) <= 8
+            and "://" not in path and not path.startswith(("/", "~", "\\")) and ".." not in path.split("/"))
 
 
 def review_request(text, p, min_p):
@@ -295,7 +297,8 @@ def review_request(text, p, min_p):
         return ("pr", prs[0]) if len(prs) == 1 else ("which", None)
     if fence:
         path = next((m for m in FROM_PATH.findall(text[:fence.start()]) if _relative_path(m)), None)
-        code_like = path is not None or (fence.group(2).split() or [""])[0].lower() not in NOT_CODE
+        tag = (fence.group(2).split() or [""])[0].lower()
+        code_like = tag not in NOT_CODE or not tag and path is not None   # a text, JSON or log tag is never code, whatever path is named
         if p >= LINK_MIN_P or code_like and REVIEW_VERB.search(prose):
             return "code", {path or CODE_PATH: code}
     if p >= min_p and (prs or REVIEW_VERB.search(prose)):   # naming no pull request, it must say "review": a bare "continue" read 0.76

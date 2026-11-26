@@ -264,9 +264,10 @@ the text outside a fenced code block:
    in either of two cases:
    - P(yes) ≥ 0.5;
    - a review verb (review, reviewing, look over, レビュー) when the block is code. Code here means a language tag that
-     is not text, markdown, JSON or a log, or a path named "… from `<path>`:".
+     is not text, markdown, JSON or a log, or an untagged block under "… from `<path>`:".
 
-   The path comes from "… from `<path>`:" (never a URL, an absolute path or `..`), else `snippet.py`. A fenced draft,
+   The path comes from "… from `<path>`:" (a file name with an extension; never a URL, an absolute path or `..`), else
+   `snippet.py`. A fenced draft,
    config or log under "review this" stays with D1A.
 3. P(yes) ≥ `is_review_min_p` (0.8) with a pull request named as `owner/repo#N`, or with a review verb and none named
    (then D1A asks which). A bare "continue" read 0.76, which is why a review verb is required when none is named.
