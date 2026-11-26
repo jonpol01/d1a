@@ -406,10 +406,11 @@ def test_chats_over_max_in_flight_are_answered_by_d1a_with_the_note(monkeypatch,
         first = []
         t = threading.Thread(target=lambda: first.append(chat(client, "prove it"))); t.start()
         assert large.got.wait(5)
-        busy = chat(client, "prove it")
+        busy = chat(client, "prove it", max_completion_tokens=50_000)
         release.set(); t.join(5)
         again = chat(client, "prove it")
     assert content(busy) == f"{routes.NOTE_LARGE_BUSY}\n{D1A_TEXT}" and busy.headers["x-d1a-route-error"] == "busy" and len(calls["chat"]) == 1
+    assert calls["chat"][0].max_completion_tokens == openai_compat.MAX_TOKENS
     assert first[0].json() == again.json() == LARGE_REPLY and len(large.requests) == 2
 
 
@@ -454,10 +455,11 @@ REDIRECT = lambda h, b: (h.send_response(302), h.send_header("location", "http:/
 def test_large_model_down_d1a_answers_with_the_note(monkeypatch, tmp_path, targets, reply, error, stream):
     url = targets(reply).url if reply else f"http://127.0.0.1:{closed_port()}"
     calls = configure(tmp_path, monkeypatch, large_url=url, tiers={"prove it": "large"}, timeout_s=0.5)
-    with TestClient(serve.app) as client:
-        r = chat(client, "prove it", stream=stream)
+    with TestClient(serve.app) as client:   # an agent's max_tokens past D1A's limit: D1A answers at its limit, not a 422
+        r = chat(client, "prove it", stream=stream, max_tokens=100_000)
     text = streamed(r)[0] if stream else content(r)
     assert r.status_code == 200 and text == f"{routes.NOTE_LARGE_DOWN}\n{D1A_TEXT}" and len(calls["chat"]) == 1
+    assert calls["chat"][0].max_tokens == openai_compat.MAX_TOKENS
     assert r.headers["x-d1a-route"] == "large" and r.headers["x-d1a-route-error"] == error
 
 

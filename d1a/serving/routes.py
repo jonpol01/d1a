@@ -391,6 +391,7 @@ class ChatRoutes:
             response = await self._review(route, chat, ask, stream)
         elif not route.slots.acquire(blocking=False):   # the large model has max_in_flight chats already: D1A answers, with the note
             log.info("route %s (%s): busy, answered by D1A", route.name, why)
+            body = _within_d1a_limits(chat, body)
             return await self.app(scope, replay, _noted(send, {"x-d1a-route": route.name, "x-d1a-route-error": "busy"}, name, NOTE_LARGE_BUSY))
         else:
             try: response = await self._large(route, chat, stream)
@@ -404,6 +405,7 @@ class ChatRoutes:
                 route.slots.release()
         if isinstance(response, str):   # the large model failed before its first byte: D1A answers, with the note
             log.info("route %s (%s): unavailable (%s), answered by D1A, %.1f s", route.name, why, response, time.time() - t)
+            body = _within_d1a_limits(chat, body)
             return await self.app(scope, replay, _noted(send, {"x-d1a-route": route.name, "x-d1a-route-error": response}, name, NOTE_LARGE_DOWN))
         log.info("route %s (%s): %s", route.name, why, response.headers.get("x-d1a-route-error") or "sent")
         try: await response(scope, receive, send)
@@ -467,6 +469,15 @@ async def _close(upstream, client):
 
 async def _cancel(task):
     task.cancel()
+
+
+def _within_d1a_limits(chat, body):
+    """The request D1A answers in the large model's place: a max_tokens past D1A's own limit (openai_compat.MAX_TOKENS: an
+    agent asked the larger model for more) cut to that limit, so D1A answers instead of refusing the request; otherwise
+    the bytes as sent."""
+    capped = {k: openai_compat.MAX_TOKENS for k in ("max_tokens", "max_completion_tokens")
+              if isinstance(chat.get(k), int) and not isinstance(chat.get(k), bool) and chat[k] > openai_compat.MAX_TOKENS}
+    return json.dumps(chat | capped).encode() if capped else body
 
 
 def _completion_response(body, stream, headers):

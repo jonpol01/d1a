@@ -297,6 +297,8 @@ everything but small ones (greetings, simple facts, short rewrites). Then:
   D1A answers instead. Its reply then starts with "(The large model is unavailable — answered by D1A.)".
 - At most `max_in_flight` (default 2) chats go to the target at once. Another is answered by D1A, its reply starting
   with "(The large model is busy — answered by D1A.)".
+- When D1A answers in the large model's place, a `max_tokens` past D1A's own limit (8192) is cut to it, so D1A answers
+  rather than refusing the request.
 - `timeout_s` bounds each read from the target, not the whole answer.
 
 **Headers:** every chat answered with routes on carries `x-d1a-route` (`review`, `large` or `none`). A route that failed
