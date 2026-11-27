@@ -5,5 +5,6 @@
   answers with "(The large model is at capacity — answered by D1A.)"; a large model that times out gets "(The large
   model did not answer in time — answered by D1A.)", and one that answers 503 with `Retry-After` (being started on
   demand) "(The large model is starting up — answered by D1A; try again in about N s.)" with `x-d1a-route-error:
-  starting`. The large route's `timeout_s` defaults to 900 s (was 300): it bounds each read, and an unstreamed answer
-  sends nothing until it is done.
+  starting`. An agent's chat (with `tools`, or a tool turn in its history) gets HTTP 503 instead, with `Retry-After` (at
+  most 60 s) and `x-should-retry: true`, so its client retries rather than acting on a note. The large route's
+  `timeout_s` defaults to 900 s (was 300): it bounds each read, and an unstreamed answer sends nothing until it is done.

@@ -30,7 +30,9 @@ answered by D1A exactly as without routes. Routing runs before the chat endpoint
   and all), with only `model` replaced, and the target's response comes back verbatim, streamed when the client streams.
   If the target cannot be reached or fails (5xx) before its first byte, D1A answers instead, its reply starting with
   NOTE_LARGE_DOWN; if it does not answer within timeout_s, with NOTE_LARGE_LATE; if it answers 503 with Retry-After
-  (a model being started on demand), with NOTE_LARGE_STARTING and those seconds. A 4xx comes back as the target sent it.
+  (a model being started on demand), with NOTE_LARGE_STARTING and those seconds. An agent's chat (with `tools`, or a
+  tool turn in its history) gets no such note while the model starts, which the agent would act on as the model's
+  reply: it gets 503 with Retry-After (at most 60 s, the most OpenAI's clients wait on it) and an OpenAI-style error. A 4xx comes back as the target sent it.
   At most max_in_flight (2) chats are forwarded at once. Another waits for a free slot, first come first served, up to
   LARGE_WAIT_S, with at most max_in_flight waiting; a client that leaves gives up its place. Past that wait, or with the
   waiting places full, D1A answers, its reply starting with NOTE_LARGE_BUSY.
@@ -490,6 +492,11 @@ class ChatRoutes:
             log.info("route %s (%s): unavailable (%s), answered by D1A, %.1f s", route.name, why, response, time.time() - t)
             body = _within_d1a_limits(chat, body)
             error, note = response, NOTE_LARGE_LATE if response == "timeout" else NOTE_LARGE_DOWN
+            if response.startswith("starting ") and _agentic(chat):   # an agent would take a note for the model's reply: it retries instead
+                wait = int(response.split()[1])
+                error_body = {"error": {"message": f"The large model is starting up; try again in about {wait} s.", "type": "server_error", "code": "model_starting"}}
+                return await JSONResponse(error_body, 503, {"x-d1a-route": route.name, "x-d1a-route-error": "starting", "retry-after": str(min(wait, 60)),
+                                                            "x-should-retry": "true"})(scope, replay, send)
             if response.startswith("starting "): error, note = "starting", NOTE_LARGE_STARTING.format(s=response.split()[1])
             return await self.app(scope, replay, _noted(send, {"x-d1a-route": route.name, "x-d1a-route-error": error}, name, note))
         log.info("route %s (%s): %s", route.name, why, response.headers.get("x-d1a-route-error") or "sent")
@@ -546,6 +553,13 @@ class ChatRoutes:
             return _reason(e)
         finally:
             if not keep: await _close(upstream, client)
+
+
+def _agentic(chat):
+    """Whether a chat comes from an agent: it offers tools, or its history has a tool call or a tool result."""
+    if chat.get("tools"): return True
+    messages = chat.get("messages") if isinstance(chat.get("messages"), list) else []
+    return any(isinstance(m, dict) and (m.get("role") == "tool" or m.get("role") == "assistant" and m.get("tool_calls")) for m in messages)
 
 
 def _retry_after(value):

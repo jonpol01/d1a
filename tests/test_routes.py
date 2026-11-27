@@ -532,6 +532,20 @@ def test_large_model_down_d1a_answers_with_the_note(monkeypatch, tmp_path, targe
     assert r.headers["x-d1a-route"] == "large" and r.headers["x-d1a-route-error"] == error
 
 
+@pytest.mark.parametrize("extra", [{"tools": [{"type": "function", "function": {"name": "f", "parameters": {}}}]},
+                                   {"messages": [{"role": "user", "content": "prove it"}, {"role": "assistant", "content": None, "tool_calls": [{"id": "c1", "type": "function", "function": {"name": "f", "arguments": "{}"}}]},
+                                                 {"role": "tool", "tool_call_id": "c1", "content": "42"}]}])
+def test_an_agents_chat_while_the_large_model_starts_gets_503_to_retry_not_a_note(monkeypatch, tmp_path, targets, extra):
+    """An agent would act on D1A's note as the model's reply: it gets a 503 its client retries, Retry-After capped at 60 s."""
+    calls = configure(tmp_path, monkeypatch, large_url=targets(starting).url, tiers={"prove it": "large"})
+    with TestClient(serve.app) as client:
+        r = chat(client, "prove it", **extra)
+        plain = chat(client, "prove it")
+    assert r.status_code == 503 and r.headers["retry-after"] == "60" and r.headers["x-should-retry"] == "true" and r.headers["x-d1a-route-error"] == "starting"
+    assert r.json()["error"]["code"] == "model_starting" and "about 240 s" in r.json()["error"]["message"]
+    assert content(plain) == f"{routes.NOTE_LARGE_STARTING.format(s=240)}\n{D1A_TEXT}" and len(calls["chat"]) == 1, "a plain chat still gets D1A's answer"
+
+
 def test_a_failed_pass_leaves_the_chat_to_d1a(monkeypatch, tmp_path, targets):
     review = targets(json_reply(200, {"text": REVIEW_TEXT}))
     calls = configure(tmp_path, monkeypatch, review_url=review.url)

@@ -301,7 +301,12 @@ everything but small ones (greetings, simple facts, short rewrites). Then:
   starts with "(The large model is unavailable — answered by D1A.)". If it sends nothing within `timeout_s`, the reply
   starts with "(The large model did not answer in time — answered by D1A.)". If it answers 503 with `Retry-After` in
   seconds (a model being started on demand, behind a proxy that starts it), the reply starts with "(The large model is
-  starting up — answered by D1A; try again in about N s.)" and `x-d1a-route-error` is `starting`.
+  starting up — answered by D1A; try again in about N s.)" and `x-d1a-route-error` is `starting`. An agent's chat
+  (one with `tools`, or with a tool call or tool result in its history) gets no note then, since an agent would act on
+  it as the model's reply: it gets HTTP 503 with an OpenAI-style error (`code: model_starting`, the seconds in its
+  message), `Retry-After` of at most 60 s and `x-should-retry: true`. OpenAI's Python and Node clients retry a 503
+  twice by default and wait out a `Retry-After` of up to 60 s, so they give up after about two minutes; for a model
+  that takes four minutes to start, set the client's `max_retries` to 4 or more.
 - At most `max_in_flight` (default 2) chats go to the target at once. Another waits for a free slot, first come first
   served, for up to 30 s, with at most `max_in_flight` chats waiting; a client that hangs up gives its place back. A
   chat still waiting after 30 s, or one that finds every waiting place taken, is answered by D1A, its reply starting
