@@ -208,6 +208,8 @@ r = client.chat.completions.create(model="d1a-chat", messages=[{"role": "user", 
 - **The model's context is a hard limit:** a request whose prompt and `max_tokens` (1024 when not sent) exceed it
   (131,072 tokens for D1A-E4B-it, `max_position_embeddings` in the model's config) gets a 400 at once, OpenAI's
   `context_length_exceeded`, and is never run. Clients that compress on that error (Hermes does) shorten and resend.
+- **Tool calls** are read where the chat template writes them: one call right after each `<|tool_call>` marker. Text
+  elsewhere that looks like a call, in the answer or inside a call's own argument, is never returned as a tool call.
 - **A tool call cut off by `max_tokens`** is dropped: the answer keeps the text before it, with no tool call and
   `finish_reason` `"length"`, so retry with a larger `max_tokens`.
 - **mem0:** set the OpenAI LLM and embedder base URL to the server. Measured with D1A-E2B-it: facts extracted, graph relations

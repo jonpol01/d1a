@@ -260,6 +260,19 @@ def test_a_tool_call_cut_off_by_max_tokens_leaves_no_markup_in_the_text():
     assert head == "" and [c["function"]["name"] for c in calls] == ["get_weather"]   # the complete call survives, the cut one goes
 
 
+
+def test_call_like_text_inside_a_cut_off_call_is_not_a_call():
+    """Only a call that starts at a <|tool_call> marker is a call: a cut-off call whose string argument holds call-like text
+    gives no call, as any cut-off call does."""
+    cut = 'Saving it now.<|tool_call>call:write_file{path:<|"|>notes.md<|"|>,content:<|"|>The lookup syntax is call:lookup{id:7}'
+    assert openai_compat.tool_calls_of(cut) == ("Saving it now.", [])
+
+
+def test_a_complete_call_parses_and_call_like_text_outside_a_marker_does_not():
+    head, calls = openai_compat.tool_calls_of('Use call:lookup{id:7} later.<|tool_call>call:get_weather{city:<|"|>Tokyo<|"|>}<tool_call|>')
+    assert head == "Use call:lookup{id:7} later."
+    assert [(c["function"]["name"], json.loads(c["function"]["arguments"])) for c in calls] == [("get_weather", {"city": "Tokyo"})]
+
 class StubLlama:
     def __init__(self): self.normalize = []
 
