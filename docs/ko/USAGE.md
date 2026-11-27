@@ -204,6 +204,8 @@ r = client.chat.completions.create(model="d1a-chat", messages=[{"role": "user", 
 - **모델의 컨텍스트는 엄격한 한계입니다:** 프롬프트와 `max_tokens`(보내지 않으면 1024)가 이를 넘는 요청
   (D1A-E4B-it의 경우 131,072 토큰, 모델 설정의 `max_position_embeddings`)은 곧바로 400을 받으며, OpenAI의
   `context_length_exceeded`로 반환되고 실행되지 않습니다. 이 오류를 받으면 내용을 압축하는 클라이언트(Hermes가 그렇습니다)는 줄여서 다시 보냅니다.
+- **도구 호출**은 채팅 템플릿이 쓰는 위치, 즉 각 `<|tool_call>` 마커 바로 뒤의 호출 하나만 읽습니다. 그 밖의 위치에서
+  호출처럼 보이는 텍스트(답 안이나 호출 자체의 인수 안)는 도구 호출로 반환하지 않습니다.
 - **`max_tokens`로 잘린 도구 호출**은 버려집니다. 답에는 그 앞의 텍스트만 남고 도구 호출은 없으며
   `finish_reason`은 `"length"`이므로, 더 큰 `max_tokens`로 다시 시도하십시오.
 - **mem0:** OpenAI LLM과 임베더의 base URL을 이 서버로 설정합니다. D1A-E2B-it로 측정한 결과: 사실이 추출되고, 그래프 관계가
