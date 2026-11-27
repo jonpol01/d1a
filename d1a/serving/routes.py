@@ -8,7 +8,7 @@ D1A_ROUTES names a JSON file. Target URLs and keys come from that file only, nev
      "routes": [
       {"name": "review", "target": {"kind": "review", "url": "http://127.0.0.1:<port>/v1/review", "key_file": "<secret file>", "timeout_s": 300},
        "repos": ["<owner>/*", "<owner>/<repo>"], "is_review_min_p": 0.8},
-      {"name": "large", "target": {"kind": "openai", "url": "http://127.0.0.1:<port>/v1/chat/completions", "model": "<name>", "key_file": "<secret file>", "timeout_s": 300},
+      {"name": "large", "target": {"kind": "openai", "url": "http://127.0.0.1:<port>/v1/chat/completions", "model": "<name>", "key_file": "<secret file>", "timeout_s": 900},
        "max_in_flight": 2, "min_tier": "large"}]}
 
 Either route may be left out, and so may client_key_file. Without it every caller of the chat endpoint is routed: anyone
@@ -28,15 +28,18 @@ answered by D1A exactly as without routes. Routing runs before the chat endpoint
   agent's tool turn (last message from a tool), whose tier is read the same way. At min_tier or above ("large" by default;
   "medium" sends everything but small requests) the request body is sent as the client sent it (tools, stream options
   and all), with only `model` replaced, and the target's response comes back verbatim, streamed when the client streams.
-  If the target cannot be reached, times out or fails (5xx) before its first byte, D1A answers instead, its reply
-  starting with NOTE_LARGE_DOWN. A 4xx comes back as the target sent it. At most max_in_flight (2) chats are forwarded at
-  once; another is answered by D1A, its reply starting with NOTE_LARGE_BUSY.
+  If the target cannot be reached or fails (5xx) before its first byte, D1A answers instead, its reply starting with
+  NOTE_LARGE_DOWN; if it does not answer within timeout_s, with NOTE_LARGE_LATE. A 4xx comes back as the target sent it.
+  At most max_in_flight (2) chats are forwarded at once. Another waits for a free slot, first come first served, up to
+  LARGE_WAIT_S, with at most max_in_flight waiting; a client that leaves gives up its place. Past that wait, or with the
+  waiting places full, D1A answers, its reply starting with NOTE_LARGE_BUSY.
 
 Every chat answered with routes on carries `x-d1a-route` (the route's name, or "none"), and a route that failed also
 `x-d1a-route-error` (ERRORS). The serving side (the passes, the middleware's place in the app) is in d1a.serving.serve;
 this module loads no model.
 """
 import asyncio
+import collections
 import hmac
 import json
 import logging
@@ -64,7 +67,9 @@ NOT_LISTED = "That repository is not on the review list — no review was writte
 BUSY = "The reviewer is busy — no review was written. Try again in a few minutes."
 UNAVAILABLE = "reviewer unavailable — no review was written."   # the review service's own wording for this case
 NOTE_LARGE_DOWN = "(The large model is unavailable — answered by D1A.)"
-NOTE_LARGE_BUSY = "(The large model is busy — answered by D1A.)"
+NOTE_LARGE_LATE = "(The large model did not answer in time — answered by D1A.)"
+NOTE_LARGE_BUSY = "(The large model is at capacity — answered by D1A.)"
+LARGE_WAIT_S = 30   # how long a chat waits for a free large-model slot before D1A answers it
 # x-d1a-route-error values: which-pr, not-listed, busy, connect, timeout, status <code>, empty, too-large, not-json, error.
 # Fixed words and a status number only: never an exception's text, which can carry a URL.
 
@@ -90,6 +95,79 @@ REVIEW_VERB = re.compile(r"\b(?:review|reviewing|look over)\b|レビュー", re.
 CODE_PATH = "snippet.py"
 
 
+class Slots:
+    """`cap` forwards at once, and up to `cap` chats waiting for one, first come first served. Waiting is asyncio, in the
+    server's event loop, never a blocking acquire; a freed slot goes straight to the longest waiter. Every call comes from
+    the event loop's thread."""
+
+    def __init__(self, cap):
+        self.cap, self.used, self.waiters, self.lock = cap, 0, collections.deque(), threading.Lock()
+
+    def try_take(self):
+        """A slot now, or False."""
+        with self.lock:
+            if self.used < self.cap and not self.waiters:
+                self.used += 1
+                return True
+            return False
+
+    async def take(self, wait_s):
+        """None once a slot is held; "busy" when the waiting places are full or none came within wait_s. Cancelled (the
+        client left), the place is freed, and a slot handed over at that moment is passed on."""
+        with self.lock:
+            if self.used < self.cap and not self.waiters:
+                self.used += 1
+                return None
+            if len(self.waiters) >= self.cap: return "busy"
+            turn = asyncio.get_running_loop().create_future()
+            self.waiters.append(turn)
+        try:
+            await asyncio.wait_for(asyncio.shield(turn), wait_s)
+            return None
+        except BaseException as e:
+            with self.lock:
+                handed = turn.done() and not turn.cancelled()
+                if not handed:
+                    turn.cancel()
+                    try: self.waiters.remove(turn)
+                    except ValueError: pass
+            if handed: self.release()
+            if isinstance(e, (asyncio.TimeoutError, TimeoutError)): return "busy"
+            raise
+
+    def release(self):
+        with self.lock:
+            while self.waiters:
+                turn = self.waiters.popleft()
+                if not turn.done():
+                    turn.set_result(None)   # the slot passes to this waiter: `used` stays
+                    return
+            if self.used == 0: raise ValueError("Slots released more often than taken")
+            self.used -= 1
+
+
+async def _disconnected(receive):
+    """Returns once the client has gone (its body was read already, so the next message is the disconnect)."""
+    while (await receive())["type"] != "http.disconnect": pass
+
+
+async def _slot(slots, receive):
+    """A large-model slot for this chat: None once held, "busy" (D1A answers), or "gone" (the client left while waiting)."""
+    if slots.try_take(): return None
+    waiting, gone = asyncio.ensure_future(slots.take(LARGE_WAIT_S)), asyncio.ensure_future(_disconnected(receive))
+    try:
+        done, _ = await asyncio.wait({waiting, gone}, return_when=asyncio.FIRST_COMPLETED)
+    except BaseException:
+        waiting.cancel(); gone.cancel(); raise
+    if waiting in done:
+        gone.cancel()
+        return waiting.result()
+    waiting.cancel()
+    try: await waiting   # frees the place, or passes on a slot handed over just now
+    except asyncio.CancelledError: pass
+    return "gone"
+
+
 @dataclass(frozen=True)
 class Target:
     kind: str        # "review" or "openai"
@@ -107,10 +185,10 @@ class Route:
     is_review_min_p: float = 0.8
     max_in_flight: int = 1        # forwards at once: one review; large: max_in_flight in the file (2)
     min_tier: str = "large"       # large: the smallest tier sent to the target
-    slots: threading.BoundedSemaphore = field(init=False, repr=False, compare=False)   # taken without waiting: a chat over the cap is told so
+    slots: "Slots" = field(init=False, repr=False, compare=False)   # review: taken without waiting; large: waited for
 
     def __post_init__(self):
-        object.__setattr__(self, "slots", threading.BoundedSemaphore(self.max_in_flight))
+        object.__setattr__(self, "slots", Slots(self.max_in_flight))
 
     def allows(self, pr):
         owner, repo, _ = pr
@@ -165,7 +243,7 @@ def _target(t, where):
     if kind == "openai" and (not isinstance(t["model"], str) or not t["model"]):
         raise ValueError(f"D1A_ROUTES: {where}'s target needs a model name")
     key = _key(t["key_file"], f"{where}'s key file") if t.get("key_file") is not None else None
-    return Target(kind, t["url"], _number(t.get("timeout_s"), f"{where}'s timeout_s", 0, 3600, 300), t.get("model"), key)
+    return Target(kind, t["url"], _number(t.get("timeout_s"), f"{where}'s timeout_s", 0, 3600, 900 if kind == "openai" else 300), t.get("model"), key)
 
 
 def load(path):
@@ -389,8 +467,11 @@ class ChatRoutes:
         name = chat.get("model") or self.model_name()
         if route is routes.review:
             response = await self._review(route, chat, ask, stream)
-        elif not route.slots.acquire(blocking=False):   # the large model has max_in_flight chats already: D1A answers, with the note
-            log.info("route %s (%s): busy, answered by D1A", route.name, why)
+        elif (waited := await _slot(route.slots, receive)) == "gone":
+            log.info("route %s (%s): the client left while waiting for a slot, %.1f s", route.name, why, time.time() - t)
+            return
+        elif waited:   # max_in_flight chats forwarded, the waiting places full or the wait over: D1A answers, with the note
+            log.info("route %s (%s): busy, answered by D1A, %.1f s", route.name, why, time.time() - t)
             body = _within_d1a_limits(chat, body)
             return await self.app(scope, replay, _noted(send, {"x-d1a-route": route.name, "x-d1a-route-error": "busy"}, name, NOTE_LARGE_BUSY))
         else:
@@ -406,7 +487,8 @@ class ChatRoutes:
         if isinstance(response, str):   # the large model failed before its first byte: D1A answers, with the note
             log.info("route %s (%s): unavailable (%s), answered by D1A, %.1f s", route.name, why, response, time.time() - t)
             body = _within_d1a_limits(chat, body)
-            return await self.app(scope, replay, _noted(send, {"x-d1a-route": route.name, "x-d1a-route-error": response}, name, NOTE_LARGE_DOWN))
+            return await self.app(scope, replay, _noted(send, {"x-d1a-route": route.name, "x-d1a-route-error": response}, name,
+                                                         NOTE_LARGE_LATE if response == "timeout" else NOTE_LARGE_DOWN))
         log.info("route %s (%s): %s", route.name, why, response.headers.get("x-d1a-route-error") or "sent")
         try: await response(scope, receive, send)
         finally:
@@ -419,7 +501,7 @@ class ChatRoutes:
         if kind == "which": return reply(Outcome(WHICH_PR, "which-pr"))
         if kind == "pr" and not route.allows(what): return reply(Outcome(NOT_LISTED, "not-listed"))
         body = {"mode": "pr", "pr": f"{what[0]}/{what[1]}#{what[2]}"} if kind == "pr" else {"mode": "code", "files": what}
-        if not route.slots.acquire(blocking=False): return reply(Outcome(BUSY, "busy"))
+        if not route.slots.try_take(): return reply(Outcome(BUSY, "busy"))
         try:
             task = asyncio.ensure_future(review(route.target, body))
             self.tasks.add(task)

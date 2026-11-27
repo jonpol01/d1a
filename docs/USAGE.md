@@ -230,7 +230,7 @@ Unset, the endpoint is unchanged.
 {"routes": [
   {"name": "review", "target": {"kind": "review", "url": "http://127.0.0.1:<port>/v1/review", "key_file": "<secret file>", "timeout_s": 300},
    "repos": ["<owner>/*"], "is_review_min_p": 0.8},
-  {"name": "large", "target": {"kind": "openai", "url": "http://127.0.0.1:<port>/v1/chat/completions", "model": "<model name>", "key_file": "<secret file>", "timeout_s": 300},
+  {"name": "large", "target": {"kind": "openai", "url": "http://127.0.0.1:<port>/v1/chat/completions", "model": "<model name>", "key_file": "<secret file>", "timeout_s": 900},
    "max_in_flight": 2, "min_tier": "large"}]}
 ```
 
@@ -297,13 +297,20 @@ everything but small ones (greetings, simple facts, short rewrites). Then:
 - The request body goes to the target as the client sent it (`tools`, `stream_options` and all), with only `model`
   replaced. The target's response, streamed or not, comes back verbatim, its `model` included.
 - A 4xx comes back as the target sent it.
-- If the target cannot be reached, fails (5xx, a redirect) or sends nothing within `timeout_s` before its first byte,
-  D1A answers instead. Its reply then starts with "(The large model is unavailable — answered by D1A.)".
-- At most `max_in_flight` (default 2) chats go to the target at once. Another is answered by D1A, its reply starting
-  with "(The large model is busy — answered by D1A.)".
+- If the target cannot be reached or fails (5xx, a redirect) before its first byte, D1A answers instead. Its reply then
+  starts with "(The large model is unavailable — answered by D1A.)". If it sends nothing within `timeout_s`, the reply
+  starts with "(The large model did not answer in time — answered by D1A.)".
+- At most `max_in_flight` (default 2) chats go to the target at once. Another waits for a free slot, first come first
+  served, for up to 30 s, with at most `max_in_flight` chats waiting; a client that hangs up gives its place back. A
+  chat still waiting after 30 s, or one that finds every waiting place taken, is answered by D1A, its reply starting
+  with "(The large model is at capacity — answered by D1A.)" and `x-d1a-route-error: busy`. Set `max_in_flight` to what
+  the target can serve at once without slowing each chat too much; several servers that share one target share its
+  capacity.
 - When D1A answers in the large model's place, a `max_tokens` past D1A's own limit (8192) is cut to it, so D1A answers
   rather than refusing the request.
-- `timeout_s` bounds each read from the target, not the whole answer.
+- `timeout_s` bounds each read from the target, not the whole answer. An unstreamed answer sends nothing until it is
+  done, so there it bounds the whole answer: the default for the large route is 900 s (the review route's stays 300 s),
+  enough for about 4,500 tokens at 5 tokens a second.
 
 **Headers:** every chat answered with routes on carries `x-d1a-route` (`review`, `large` or `none`). A route that failed
 also carries `x-d1a-route-error`: `which-pr`, `not-listed`, `busy`, `connect`, `timeout`, `status <code>`, `empty`,
