@@ -18,9 +18,13 @@ default unless this page names a reason to change it.
 - the checkpoint (`run`), `device`, `backend` and `dtype`;
 - the temperature and per-use-case temperatures, and whether it is `calibrated`;
 - `learning`: whether decisions are logged, the calibrator file, and the questions it corrects;
-- the prefix cache's size and limits, and recent batch latency.
+- the prefix cache's size and limits, and recent batch latency;
+- `route_rule`: the route preset's fail-up thresholds as applied at the routing temperature (`small`: the p(small) a
+  request needs to count as small; `medium`: the p(small) + p(medium) it needs to count as medium), the rule the chat
+  routes and a page showing D1A's routing decision use.
 - `routes`, when `D1A_ROUTES` is set: each route's name and kind, the review route's `repos` and threshold, the large
-  route's model, `max_in_flight` and `min_tier`, and whether a client key restricts them (never a URL or key).
+  route's model, `max_in_flight` and `min_tier`, and whether a client key restricts them (never a URL or key). Each
+  route also has its live `state` (`ready`, `busy` or `offline`), `in_flight` and `waiting`.
 
 ```bash
 curl -s 127.0.0.1:8009/v1/models | python -m json.tool

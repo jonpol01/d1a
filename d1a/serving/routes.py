@@ -38,7 +38,9 @@ answered by D1A exactly as without routes. Routing runs before the chat endpoint
   waiting places full, D1A answers, its reply starting with NOTE_LARGE_BUSY.
 
 Every chat answered with routes on carries `x-d1a-route` (the route's name, or "none"), and a route that failed also
-`x-d1a-route-error` (ERRORS). The serving side (the passes, the middleware's place in the app) is in d1a.serving.serve;
+`x-d1a-route-error` (ERRORS). GET /v1/models shows each route's state (Health): ready, busy (every slot taken) or offline
+(its target could not be reached lately), with the slots in use and the chats waiting; never a URL, a key or the
+target's own error text. The serving side (the passes, the middleware's place in the app) is in d1a.serving.serve;
 this module loads no model.
 """
 import asyncio
@@ -74,6 +76,10 @@ NOTE_LARGE_LATE = "(The large model did not answer in time — answered by D1A.)
 NOTE_LARGE_BUSY = "(The large model is at capacity — answered by D1A.)"
 NOTE_LARGE_STARTING = "(The large model is starting up — answered by D1A; try again in about {s} s.)"
 LARGE_WAIT_S = 30   # how long a chat waits for a free large-model slot before D1A answers it
+OFFLINE_S = 120     # a target that could not be reached this recently, with no success since, reads as offline
+PROBE_AFTER_S = 60  # with no forward this recent, the card asks the target's /health (once per PROBE_EVERY_S at most)
+PROBE_EVERY_S = 15
+PROBE_TIMEOUT_S = 1.5
 # x-d1a-route-error values: which-pr, not-listed, busy, starting, connect, timeout, status <code>, empty, too-large, not-json, error.
 # Fixed words and a status number only: never an exception's text, which can carry a URL.
 
@@ -150,6 +156,55 @@ class Slots:
             self.used -= 1
 
 
+def _unreachable(error):
+    """Whether a route error means the target could not be reached or failed (not a refusal by D1A itself)."""
+    e = str(error)
+    return e.split(" ", 1)[0] in ("connect", "timeout", "error", "starting", "empty", "not-json", "too-large") or e.startswith("status 5")   # "starting <s>" too
+
+
+class Health:
+    """A route's recent outcomes, for the state GET /v1/models shows: ready, busy or offline. Only outcome kinds are
+    kept, never the target's text."""
+
+    def __init__(self, url):
+        from urllib.parse import urlsplit
+        u = urlsplit(url)
+        self.scheme, self.host, self.port = u.scheme, u.hostname, u.port or (443 if u.scheme == "https" else 80)
+        self.ok_at = self.fail_at = self.probed_at = 0.0
+        self.probe_ok = None
+        self.lock = threading.Lock()
+
+    def outcome(self, error):
+        """After a forward: error None (the target answered, a 4xx included) or the route error."""
+        with self.lock:
+            if error is not None and _unreachable(error): self.fail_at = time.time()
+            else: self.ok_at = time.time()
+
+    def probe(self):
+        """GET the target's /health, without its key: any HTTP answer means it is reachable."""
+        import http.client
+        conn = (http.client.HTTPSConnection if self.scheme == "https" else http.client.HTTPConnection)(self.host, self.port, timeout=PROBE_TIMEOUT_S)
+        try:
+            conn.request("GET", "/health"); conn.getresponse().read(1024)
+            return True
+        except Exception:
+            return False
+        finally:
+            conn.close()
+
+    def state(self, slots, now=None):
+        now = time.time() if now is None else now
+        with self.lock: ok, fail = self.ok_at, self.fail_at
+        if fail > ok and now - fail < OFFLINE_S: return "offline"
+        if slots.used >= slots.cap: return "busy"
+        if now - max(ok, fail) >= PROBE_AFTER_S:
+            if now - self.probed_at >= PROBE_EVERY_S:
+                reached = self.probe()
+                with self.lock: self.probed_at, self.probe_ok = now, reached
+            if self.probe_ok is False: return "offline"
+        return "ready"
+
+
 async def _disconnected(receive):
     """Returns once the client has gone (its body was read already, so the next message is the disconnect)."""
     while (await receive())["type"] != "http.disconnect": pass
@@ -190,9 +245,15 @@ class Route:
     max_in_flight: int = 1        # forwards at once: one review; large: max_in_flight in the file (2)
     min_tier: str = "large"       # large: the smallest tier sent to the target
     slots: "Slots" = field(init=False, repr=False, compare=False)   # review: taken without waiting; large: waited for
+    health: "Health" = field(init=False, repr=False, compare=False)
 
     def __post_init__(self):
         object.__setattr__(self, "slots", Slots(self.max_in_flight))
+        object.__setattr__(self, "health", Health(self.target.url))
+
+    def status(self):
+        """The card's live part: state, slots in use, chats waiting."""
+        return {"state": self.health.state(self.slots), "in_flight": self.slots.used, "max_in_flight": self.max_in_flight, "waiting": len(self.slots.waiters)}
 
     def allows(self, pr):
         owner, repo, _ = pr
@@ -206,9 +267,9 @@ class Routes:
     client_key: str | None = field(default=None, repr=False)   # a chat carrying it is routed; never printed
 
     def card(self):
-        """What GET /v1/models shows: no URL, no key."""
+        """What GET /v1/models shows: no URL, no key, no error text."""
         return [{"name": r.name, "kind": r.target.kind} | ({"repos": list(r.repos), "is_review_min_p": r.is_review_min_p} if r is self.review else {"model": r.target.model, "max_in_flight": r.max_in_flight, "min_tier": r.min_tier})
-                for r in (self.review, self.large) if r is not None] + ([{"client_key": True}] if self.client_key else [])
+                | r.status() for r in (self.review, self.large) if r is not None] + ([{"client_key": True}] if self.client_key else [])
 
 
 def _keys(obj, where, required, optional):
@@ -481,6 +542,7 @@ class ChatRoutes:
         else:
             try: response = await self._large(route, chat, stream)
             except BaseException: route.slots.release(); raise
+            route.health.outcome(response if isinstance(response, str) else None)
             if isinstance(response, StreamingResponse):   # the slot is held until the stream ends or its client goes
                 async def close_and_release(close_upstream=response.close_upstream):
                     try: await close_upstream()
@@ -517,7 +579,7 @@ class ChatRoutes:
             self.tasks.add(task)
         except BaseException:
             route.slots.release(); raise
-        task.add_done_callback(lambda done: (self.tasks.discard(done), route.slots.release()))   # done, failed or cancelled: a client gone before its stream started included
+        task.add_done_callback(lambda done: (self.tasks.discard(done), route.slots.release(), _review_outcome(route, done)))   # done, failed or cancelled: a client gone before its stream started included
         if not stream: return reply(await task)
         response = StreamingResponse(_review_stream(task, chat, self.model_name()), media_type="text/event-stream", headers=headers)
         response.close_upstream = lambda: _cancel(task)   # a client gone before or during the stream frees the slot now, not at timeout_s
@@ -567,6 +629,10 @@ def _retry_after(value):
     try: n = int((value or "").strip())
     except ValueError: return None
     return n if 1 <= n <= 3600 else None
+
+
+def _review_outcome(route, done):
+    if not done.cancelled() and done.exception() is None: route.health.outcome(done.result().error)
 
 
 async def _close(upstream, client):
