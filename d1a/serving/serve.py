@@ -753,12 +753,14 @@ def models():
     temperatures a request may select (use_case_temperatures, {} for most checkpoints), where media positions read the
     pad id's per-layer embedding (media_pad_row: "export", "table", or null without per-layer embeddings), whether the model is
     in memory (--idle-unload), and while it is, prefix-cache and batch stats; and, only when the server rewrites a state before
-    the model reads it, what it rewrites (preprocessing()). Answers without loading the model, so a client polling it does not
-    keep an idle model in memory."""
+    the model reads it, what it rewrites (preprocessing()); the route preset's fail-up thresholds at the routing temperature
+    (route_rule); and with D1A_ROUTES, each route and its live state. Answers without loading the model, so a client polling
+    it does not keep an idle model in memory."""
     od = app.state.models
     s, card = od.model, dict(app.state.card)
     card["loaded"], card["idle_unload_s"], card["learning"] = s is not None, od.idle_s, LEARNING.card()
     if pre := preprocessing(): card["preprocessing"] = pre
+    card["route_rule"] = presets.route_rule(app.state.card)   # the thresholds route_tier applies (and a page shows)
     if app.state.routes is not None: card["routes"] = app.state.routes.card()
     if s is not None:
         card.update({"cuda_graphs": graphs.stats() if (graphs := getattr(s.model, "graphs", None)) else None,

@@ -84,7 +84,17 @@ def temperature_ratio(temperatures, use_case):
     return own / (temperatures.get("use_case_temperatures") or {}).get(use_case.strip(), own)
 
 
-def fail_up(probs, small=0.7, medium=0.5, ratio=1.0):
+FAIL_UP_SMALL, FAIL_UP_MEDIUM = 0.7, 0.5   # fail_up's thresholds, set for answers read at the checkpoint's temperature
+
+
+def route_rule(temperatures):
+    """The route preset's fail-up thresholds as the server applies them to answers read at the routing use case's
+    temperature: {"small": p(small) needed for small, "medium": p(small) + p(medium) needed for medium}. GET /v1/models
+    shows it, so a page can say why a request went where it went."""
+    return {"small": round(carried(FAIL_UP_SMALL, temperature_ratio(temperatures, USE_CASES["route"])), 4), "medium": FAIL_UP_MEDIUM}
+
+
+def fail_up(probs, small=FAIL_UP_SMALL, medium=FAIL_UP_MEDIUM, ratio=1.0):
     """The smallest tier the model is sure enough is enough: small only if p(small) >= `small`, medium only if
     p(small) + p(medium) >= `medium`, else large. `small` is set for answers read at the checkpoint's temperature; at a
     use case's temperature (`ratio`, temperature_ratio) it is carried through the ratio (carried), `medium` is not.

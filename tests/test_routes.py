@@ -681,3 +681,80 @@ def test_pull_requests_are_read_from_links_and_references_only():
     assert found("see jonpol01/d1a#12 and https://GitHub.com/JonPol01/D1A/pull/12/files") == ([("JonPol01", "D1A", "12")], True)
     assert found("x.github.com/a/b/pull/3 user@github.com/a/b/pull/4 notgithub.com/a/b/pull/5 https://evil.com/github.com/a/b/pull/6") == ([], False)
     assert found("issue #12, a/b#0, a/b/pull/9, ../..#3") == ([], False)
+
+
+# --- the routes' live state on GET /v1/models -----------------------------------------------------------------------------
+
+CARD_KEYS = {"name", "kind", "repos", "is_review_min_p", "model", "max_in_flight", "min_tier", "state", "in_flight", "waiting", "client_key"}
+
+
+def test_the_card_shows_each_routes_state_and_slots_and_never_a_url_key_or_error_text(monkeypatch, tmp_path, targets):
+    """A failed forward makes the large route offline; a forward that reached the target makes it ready again. The card
+    keeps only an allow-list of keys: no URL, no key, no route error or target text."""
+    monkeypatch.setattr(routes.Health, "probe", lambda self: pytest.fail("probed despite a forward just now") if self.ok_at or self.fail_at else True)   # a route that just had an outcome is never probed
+    down = f"http://127.0.0.1:{closed_port()}"
+    configure(tmp_path, monkeypatch, large_url=down, review_url=down, tiers={"prove it": "large"}, client_key=True)
+    with TestClient(serve.app) as client:
+        chat(client, "prove it")
+    card = serve.app.state.routes.card()
+    large = next(r for r in card if r.get("name") == "large")
+    assert large["state"] == "offline" and large["in_flight"] == 0 and large["waiting"] == 0 and large["max_in_flight"] == 2
+    assert all(set(r) <= CARD_KEYS for r in card)
+    text = json.dumps(card)
+    assert down not in text and "127.0.0.1" not in text and KEY not in text and CLIENT_KEY not in text and "connect" not in text
+    up = targets(json_reply(200, LARGE_REPLY))
+    configure(tmp_path, monkeypatch, large_url=up.url, tiers={"prove it": "large"})
+    with TestClient(serve.app) as client:
+        assert chat(client, "prove it").json() == LARGE_REPLY
+    assert next(r for r in serve.app.state.routes.card() if r["name"] == "large")["state"] == "ready"
+
+
+def test_a_route_with_every_slot_taken_is_busy_and_shows_its_waiters():
+    route = routes.Route("large", routes.Target("openai", "http://127.0.0.1:1/v1/chat/completions", 5, "big-model"), max_in_flight=1)
+    route.health.ok_at = time.time()
+    assert route.slots.try_take()
+    st = route.status()
+    assert st["state"] == "busy" and st["in_flight"] == 1 and st["max_in_flight"] == 1
+    route.slots.release()
+    assert route.status()["state"] == "ready"
+
+
+def test_with_no_recent_forward_the_card_asks_the_targets_health_at_most_every_probe_every_s(monkeypatch, targets):
+    """No forward for PROBE_AFTER_S: GET /health on the target, without its key; any HTTP answer is reachable. A target
+    that cannot be reached reads offline. The probe runs at most once per PROBE_EVERY_S."""
+    up = targets(json_reply(404, {}))   # a target with no /health route still answers: reachable
+    route = routes.Route("large", routes.Target("openai", up.url + "/v1/chat/completions", 5, "big-model", key=KEY), max_in_flight=2)
+    assert route.status()["state"] == "ready"
+    assert up.requests == [] or all("authorization" not in {k.lower() for k in r["headers"]} for r in up.requests)
+    gone = routes.Route("large", routes.Target("openai", f"http://127.0.0.1:{closed_port()}/v1/chat/completions", 5, "big-model"), max_in_flight=2)
+    calls = []
+    real = gone.health.probe
+    monkeypatch.setattr(gone.health, "probe", lambda: calls.append(1) or real())
+    now = time.time()
+    assert gone.health.state(gone.slots, now) == "offline"
+    assert gone.health.state(gone.slots, now + 5) == "offline" and len(calls) == 1, "cached for PROBE_EVERY_S"
+    assert gone.health.state(gone.slots, now + routes.PROBE_EVERY_S + 1) == "offline" and len(calls) == 2
+
+
+def test_a_review_that_cannot_reach_its_service_makes_the_review_route_offline(monkeypatch, tmp_path):
+    monkeypatch.setattr(routes.Health, "probe", lambda self: pytest.fail("probed despite a review just now") if self.ok_at or self.fail_at else True)
+    configure(tmp_path, monkeypatch, review_url=f"http://127.0.0.1:{closed_port()}", p=0.99)
+    with TestClient(serve.app) as client:
+        chat(client, f"Please review {LINK}")
+    review = next(r for r in serve.app.state.routes.card() if r["name"] == "review")
+    assert review["state"] == "offline" and review["in_flight"] == 0
+
+
+def test_the_route_rule_on_the_card_is_the_threshold_route_tier_applies():
+    """route_rule's small threshold is fail_up's, carried to the routing temperature exactly as advise carries it."""
+    from d1a.agents import presets
+    plain = presets.route_rule(None)
+    assert plain == {"small": presets.FAIL_UP_SMALL, "medium": presets.FAIL_UP_MEDIUM}
+    temps = {"temperature": 1.78, "use_case_temperatures": {"routing": 0.85}}
+    rule = presets.route_rule(temps)
+    assert abs(rule["small"] - presets.carried(0.7, 1.78 / 0.85)) < 1e-4 and rule["medium"] == 0.5
+    probs = {"small": rule["small"] - 0.001, "medium": 0.3, "large": 0.0}
+    answers = {"route": {"probabilities": probs}}
+    assert presets.advise("route", answers, temperatures=temps, use_case="routing")["tier"] == "medium", "just under the card's threshold: up a tier"
+    probs["small"] = rule["small"] + 0.001
+    assert presets.advise("route", answers, temperatures=temps, use_case="routing")["tier"] == "small"

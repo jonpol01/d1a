@@ -319,6 +319,16 @@ everything but small ones (greetings, simple facts, short rewrites). Then:
   done, so there it bounds the whole answer: the default for the large route is 900 s (the review route's stays 300 s),
   enough for about 4,500 tokens at 5 tokens a second.
 
+**State on the card:** `GET /v1/models` shows each route's `state`, with `in_flight` (slots in use), `max_in_flight` and
+`waiting` (chats waiting for a slot):
+- `offline`: the last time a chat went to the target it could not be reached or failed (cannot connect, timed out, 5xx,
+  starting up), within the last 2 minutes and with no success since;
+- `busy`: every slot is in use;
+- `ready`: otherwise.
+With no chat to the target for a minute, reading the card asks the target's `/health` (without its key, at most every
+15 s): any HTTP answer counts as reachable, none as `offline`. The card never shows a URL, a key or the target's own
+error text.
+
 **Headers:** every chat answered with routes on carries `x-d1a-route` (`review`, `large` or `none`). A route that failed
 also carries `x-d1a-route-error`: `which-pr`, `not-listed`, `busy`, `starting`, `connect`, `timeout`, `status <code>`, `empty`,
 `too-large`, `not-json` or `error`. A streamed review sends its headers before the review ends, so a failure there
