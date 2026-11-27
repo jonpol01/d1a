@@ -511,7 +511,13 @@ def test_a_4xx_from_the_large_model_comes_back_as_it_sent_it(monkeypatch, tmp_pa
 REDIRECT = lambda h, b: (h.send_response(302), h.send_header("location", "http://example.invalid/"), h.send_header("content-length", "0"), h.end_headers()) and None
 
 
-@pytest.mark.parametrize("reply, error", [(None, "connect"), (json_reply(503, {"error": "overloaded"}), "status 503"), (REDIRECT, "status 302"),
+def starting(h, b):   # a model being started on demand (a wake-on-demand proxy in front of it)
+    data = json.dumps({"error": {"message": "the large model is starting up"}}).encode()
+    h.send_response(503); h.send_header("retry-after", "240"); h.send_header("content-type", "application/json")
+    h.send_header("content-length", str(len(data))); h.end_headers(); h.wfile.write(data)
+
+
+@pytest.mark.parametrize("reply, error", [(None, "connect"), (json_reply(503, {"error": "overloaded"}), "status 503"), (REDIRECT, "status 302"), (starting, "starting"),
                                           (lambda h, b: time.sleep(1.5) or (200, "application/json", b"{}"), "timeout")])
 @pytest.mark.parametrize("stream", [False, True])
 def test_large_model_down_d1a_answers_with_the_note(monkeypatch, tmp_path, targets, reply, error, stream):
@@ -520,7 +526,7 @@ def test_large_model_down_d1a_answers_with_the_note(monkeypatch, tmp_path, targe
     with TestClient(serve.app) as client:   # an agent's max_tokens past D1A's limit: D1A answers at its limit, not a 422
         r = chat(client, "prove it", stream=stream, max_tokens=100_000)
     text = streamed(r)[0] if stream else content(r)
-    note = routes.NOTE_LARGE_LATE if error == "timeout" else routes.NOTE_LARGE_DOWN
+    note = {"timeout": routes.NOTE_LARGE_LATE, "starting": routes.NOTE_LARGE_STARTING.format(s=240)}.get(error, routes.NOTE_LARGE_DOWN)
     assert r.status_code == 200 and text == f"{note}\n{D1A_TEXT}" and len(calls["chat"]) == 1
     assert calls["chat"][0].max_tokens == openai_compat.MAX_TOKENS
     assert r.headers["x-d1a-route"] == "large" and r.headers["x-d1a-route-error"] == error

@@ -29,7 +29,8 @@ answered by D1A exactly as without routes. Routing runs before the chat endpoint
   "medium" sends everything but small requests) the request body is sent as the client sent it (tools, stream options
   and all), with only `model` replaced, and the target's response comes back verbatim, streamed when the client streams.
   If the target cannot be reached or fails (5xx) before its first byte, D1A answers instead, its reply starting with
-  NOTE_LARGE_DOWN; if it does not answer within timeout_s, with NOTE_LARGE_LATE. A 4xx comes back as the target sent it.
+  NOTE_LARGE_DOWN; if it does not answer within timeout_s, with NOTE_LARGE_LATE; if it answers 503 with Retry-After
+  (a model being started on demand), with NOTE_LARGE_STARTING and those seconds. A 4xx comes back as the target sent it.
   At most max_in_flight (2) chats are forwarded at once. Another waits for a free slot, first come first served, up to
   LARGE_WAIT_S, with at most max_in_flight waiting; a client that leaves gives up its place. Past that wait, or with the
   waiting places full, D1A answers, its reply starting with NOTE_LARGE_BUSY.
@@ -69,8 +70,9 @@ UNAVAILABLE = "reviewer unavailable — no review was written."   # the review s
 NOTE_LARGE_DOWN = "(The large model is unavailable — answered by D1A.)"
 NOTE_LARGE_LATE = "(The large model did not answer in time — answered by D1A.)"
 NOTE_LARGE_BUSY = "(The large model is at capacity — answered by D1A.)"
+NOTE_LARGE_STARTING = "(The large model is starting up — answered by D1A; try again in about {s} s.)"
 LARGE_WAIT_S = 30   # how long a chat waits for a free large-model slot before D1A answers it
-# x-d1a-route-error values: which-pr, not-listed, busy, connect, timeout, status <code>, empty, too-large, not-json, error.
+# x-d1a-route-error values: which-pr, not-listed, busy, starting, connect, timeout, status <code>, empty, too-large, not-json, error.
 # Fixed words and a status number only: never an exception's text, which can carry a URL.
 
 REVIEW_MAX_BYTES = 256 * 1024   # the review service's reply
@@ -487,8 +489,9 @@ class ChatRoutes:
         if isinstance(response, str):   # the large model failed before its first byte: D1A answers, with the note
             log.info("route %s (%s): unavailable (%s), answered by D1A, %.1f s", route.name, why, response, time.time() - t)
             body = _within_d1a_limits(chat, body)
-            return await self.app(scope, replay, _noted(send, {"x-d1a-route": route.name, "x-d1a-route-error": response}, name,
-                                                         NOTE_LARGE_LATE if response == "timeout" else NOTE_LARGE_DOWN))
+            error, note = response, NOTE_LARGE_LATE if response == "timeout" else NOTE_LARGE_DOWN
+            if response.startswith("starting "): error, note = "starting", NOTE_LARGE_STARTING.format(s=response.split()[1])
+            return await self.app(scope, replay, _noted(send, {"x-d1a-route": route.name, "x-d1a-route-error": error}, name, note))
         log.info("route %s (%s): %s", route.name, why, response.headers.get("x-d1a-route-error") or "sent")
         try: await response(scope, receive, send)
         finally:
@@ -522,7 +525,8 @@ class ChatRoutes:
             upstream = await client.send(request, stream=True)
             status, kind = upstream.status_code, upstream.headers.get("content-type", "application/json")
             if status != 200 and not 400 <= status < 500:   # 5xx, and a redirect, which is not followed
-                return f"status {status}"
+                wait = _retry_after(upstream.headers.get("retry-after")) if status == 503 else None
+                return f"status {status}" if wait is None else f"starting {wait}"
             if status != 200 or not stream:   # a 4xx verbatim, or the whole completion
                 body = await _read(upstream, LARGE_MAX_BYTES)
                 if body is None: return "too-large"
@@ -542,6 +546,13 @@ class ChatRoutes:
             return _reason(e)
         finally:
             if not keep: await _close(upstream, client)
+
+
+def _retry_after(value):
+    """A Retry-After of whole seconds (1 to 3600), or None: a date or anything else is not read."""
+    try: n = int((value or "").strip())
+    except ValueError: return None
+    return n if 1 <= n <= 3600 else None
 
 
 async def _close(upstream, client):

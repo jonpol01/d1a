@@ -299,7 +299,9 @@ everything but small ones (greetings, simple facts, short rewrites). Then:
 - A 4xx comes back as the target sent it.
 - If the target cannot be reached or fails (5xx, a redirect) before its first byte, D1A answers instead. Its reply then
   starts with "(The large model is unavailable — answered by D1A.)". If it sends nothing within `timeout_s`, the reply
-  starts with "(The large model did not answer in time — answered by D1A.)".
+  starts with "(The large model did not answer in time — answered by D1A.)". If it answers 503 with `Retry-After` in
+  seconds (a model being started on demand, behind a proxy that starts it), the reply starts with "(The large model is
+  starting up — answered by D1A; try again in about N s.)" and `x-d1a-route-error` is `starting`.
 - At most `max_in_flight` (default 2) chats go to the target at once. Another waits for a free slot, first come first
   served, for up to 30 s, with at most `max_in_flight` chats waiting; a client that hangs up gives its place back. A
   chat still waiting after 30 s, or one that finds every waiting place taken, is answered by D1A, its reply starting
@@ -313,7 +315,7 @@ everything but small ones (greetings, simple facts, short rewrites). Then:
   enough for about 4,500 tokens at 5 tokens a second.
 
 **Headers:** every chat answered with routes on carries `x-d1a-route` (`review`, `large` or `none`). A route that failed
-also carries `x-d1a-route-error`: `which-pr`, `not-listed`, `busy`, `connect`, `timeout`, `status <code>`, `empty`,
+also carries `x-d1a-route-error`: `which-pr`, `not-listed`, `busy`, `starting`, `connect`, `timeout`, `status <code>`, `empty`,
 `too-large`, `not-json` or `error`. A streamed review sends its headers before the review ends, so a failure there
 shows only in the text.
 
