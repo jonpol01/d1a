@@ -1,6 +1,8 @@
 """Chat routes (d1a.serving.routes, #419): with D1A_ROUTES set, POST /v1/chat/completions sends a pull-request review to a
 review service and a hard chat to a larger model, and leaves the rest to D1A. No model: the passes are stand-ins, or a real
 Server on a stand-in model, and the targets are local HTTP services on this machine."""
+import asyncio
+import collections
 import json
 import logging
 import socket
@@ -396,22 +398,82 @@ def test_min_tier_sets_how_hard_a_chat_must_be_to_go_to_the_large_model(monkeypa
     assert (r.json() == LARGE_REPLY) == routed and len(large.requests) == routed and r.headers["x-d1a-route"] == ("large" if routed else "none")
 
 
-def test_chats_over_max_in_flight_are_answered_by_d1a_with_the_note(monkeypatch, tmp_path, targets):
-    """The large model takes max_in_flight chats at once (here 1); one more is answered by D1A, its reply starting with
-    the busy note. The slot is free again once the forward ends."""
+def waiting(n):
+    """Until n chats wait for a large-model slot (5 s at most)."""
+    for _ in range(500):
+        if len(serve.app.state.routes.large.slots.waiters) == n: return True
+        time.sleep(0.01)
+    return False
+
+
+def test_a_chat_over_max_in_flight_waits_for_a_slot_and_one_past_the_waiting_places_gets_the_note(monkeypatch, tmp_path, targets):
+    """max_in_flight (here 1) chats go to the large model and as many again wait their turn; the waiter is answered by the
+    large model once a slot is free. One more while every place is taken is answered by D1A at once, with the busy note."""
     release = threading.Event()
     large = targets(lambda h, b: release.wait(5) and (200, "application/json", json.dumps(LARGE_REPLY).encode()))
     calls = configure(tmp_path, monkeypatch, large_url=large.url, tiers={"prove it": "large"}, large={"max_in_flight": 1})
     with TestClient(serve.app) as client:
-        first = []
-        t = threading.Thread(target=lambda: first.append(chat(client, "prove it"))); t.start()
+        first, second = [], []
+        threading.Thread(target=lambda: first.append(chat(client, "prove it"))).start()
         assert large.got.wait(5)
-        busy = chat(client, "prove it", max_completion_tokens=50_000)
+        t = threading.Thread(target=lambda: second.append(chat(client, "prove it"))); t.start()
+        assert waiting(1) and len(large.requests) == 1, "the second chat waits; it is not sent yet"
+        t0 = time.time(); busy = chat(client, "prove it", max_completion_tokens=50_000); took = time.time() - t0
         release.set(); t.join(5)
-        again = chat(client, "prove it")
-    assert content(busy) == f"{routes.NOTE_LARGE_BUSY}\n{D1A_TEXT}" and busy.headers["x-d1a-route-error"] == "busy" and len(calls["chat"]) == 1
-    assert calls["chat"][0].max_completion_tokens == openai_compat.MAX_TOKENS
-    assert first[0].json() == again.json() == LARGE_REPLY and len(large.requests) == 2
+    assert content(busy) == f"{routes.NOTE_LARGE_BUSY}\n{D1A_TEXT}" and busy.headers["x-d1a-route-error"] == "busy" and took < 2
+    assert len(calls["chat"]) == 1 and calls["chat"][0].max_completion_tokens == openai_compat.MAX_TOKENS
+    assert first[0].json() == second[0].json() == LARGE_REPLY and "x-d1a-route-error" not in second[0].headers and len(large.requests) == 2
+
+
+def test_a_chat_still_waiting_after_large_wait_s_is_answered_by_d1a(monkeypatch, tmp_path, targets):
+    release = threading.Event()
+    large = targets(lambda h, b: release.wait(5) and (200, "application/json", json.dumps(LARGE_REPLY).encode()))
+    configure(tmp_path, monkeypatch, large_url=large.url, tiers={"prove it": "large"}, large={"max_in_flight": 1})
+    monkeypatch.setattr(routes, "LARGE_WAIT_S", 0.3)
+    with TestClient(serve.app) as client:
+        threading.Thread(target=lambda: chat(client, "prove it")).start()
+        assert large.got.wait(5)
+        t0 = time.time(); late = chat(client, "prove it"); took = time.time() - t0
+        release.set()
+    assert content(late) == f"{routes.NOTE_LARGE_BUSY}\n{D1A_TEXT}" and late.headers["x-d1a-route-error"] == "busy" and 0.3 <= took < 3
+    assert serve.app.state.routes.large.slots.waiters == collections.deque() and len(large.requests) == 1
+
+
+def test_timeout_s_defaults_to_900_s_for_the_large_model_and_300_s_for_the_reviewer(tmp_path):
+    """An unstreamed answer sends nothing until it is done, so the large route's per-read limit bounds the whole answer."""
+    spec = {"routes": [{"name": "review", "target": {"kind": "review", "url": "http://127.0.0.1:1/v1/review"}, "repos": ["o/*"]},
+                       {"name": "large", "target": {"kind": "openai", "url": "http://127.0.0.1:1/v1/chat/completions", "model": "m"}}]}
+    (tmp_path / "routes.json").write_text(json.dumps(spec), encoding="utf-8")
+    r = serve.load_routes(str(tmp_path / "routes.json"), None)
+    assert (r.large.target.timeout_s, r.review.target.timeout_s) == (900, 300)
+    with pytest.raises(ValueError): routes.Slots(1).release()
+
+
+def test_a_client_that_leaves_while_waiting_frees_its_place():
+    """The place is given back at once, and the slot it would have had goes to the next waiter, not to a client that left."""
+    async def run():
+        slots = routes.Slots(1)
+        assert slots.try_take()
+        left = asyncio.Event()
+        async def receive():
+            await left.wait(); return {"type": "http.disconnect"}
+        leaving = asyncio.ensure_future(routes._slot(slots, receive))
+        await asyncio.sleep(0.05)
+        assert len(slots.waiters) == 1
+        assert await slots.take(0.01) == "busy", "the one waiting place is taken"
+        left.set()
+        assert await leaving == "gone" and len(slots.waiters) == 0
+        never = asyncio.Event()
+        async def stays():
+            await never.wait()
+        nxt = asyncio.ensure_future(routes._slot(slots, stays))
+        await asyncio.sleep(0.05)
+        assert len(slots.waiters) == 1, "the place came back: the next chat waits instead of being turned away"
+        slots.release()
+        assert await nxt is None and slots.used == 1, "the slot went to the waiter that stayed"
+        slots.release()
+        assert slots.used == 0 and slots.try_take()
+    asyncio.run(run())
 
 
 def test_a_streamed_forward_frees_its_slot_when_the_stream_ends(monkeypatch, tmp_path, targets):
@@ -449,7 +511,13 @@ def test_a_4xx_from_the_large_model_comes_back_as_it_sent_it(monkeypatch, tmp_pa
 REDIRECT = lambda h, b: (h.send_response(302), h.send_header("location", "http://example.invalid/"), h.send_header("content-length", "0"), h.end_headers()) and None
 
 
-@pytest.mark.parametrize("reply, error", [(None, "connect"), (json_reply(503, {"error": "overloaded"}), "status 503"), (REDIRECT, "status 302"),
+def starting(h, b):   # a model being started on demand (a wake-on-demand proxy in front of it)
+    data = json.dumps({"error": {"message": "the large model is starting up"}}).encode()
+    h.send_response(503); h.send_header("retry-after", "240"); h.send_header("content-type", "application/json")
+    h.send_header("content-length", str(len(data))); h.end_headers(); h.wfile.write(data)
+
+
+@pytest.mark.parametrize("reply, error", [(None, "connect"), (json_reply(503, {"error": "overloaded"}), "status 503"), (REDIRECT, "status 302"), (starting, "starting"),
                                           (lambda h, b: time.sleep(1.5) or (200, "application/json", b"{}"), "timeout")])
 @pytest.mark.parametrize("stream", [False, True])
 def test_large_model_down_d1a_answers_with_the_note(monkeypatch, tmp_path, targets, reply, error, stream):
@@ -458,9 +526,24 @@ def test_large_model_down_d1a_answers_with_the_note(monkeypatch, tmp_path, targe
     with TestClient(serve.app) as client:   # an agent's max_tokens past D1A's limit: D1A answers at its limit, not a 422
         r = chat(client, "prove it", stream=stream, max_tokens=100_000)
     text = streamed(r)[0] if stream else content(r)
-    assert r.status_code == 200 and text == f"{routes.NOTE_LARGE_DOWN}\n{D1A_TEXT}" and len(calls["chat"]) == 1
+    note = {"timeout": routes.NOTE_LARGE_LATE, "starting": routes.NOTE_LARGE_STARTING.format(s=240)}.get(error, routes.NOTE_LARGE_DOWN)
+    assert r.status_code == 200 and text == f"{note}\n{D1A_TEXT}" and len(calls["chat"]) == 1
     assert calls["chat"][0].max_tokens == openai_compat.MAX_TOKENS
     assert r.headers["x-d1a-route"] == "large" and r.headers["x-d1a-route-error"] == error
+
+
+@pytest.mark.parametrize("extra", [{"tools": [{"type": "function", "function": {"name": "f", "parameters": {}}}]},
+                                   {"messages": [{"role": "user", "content": "prove it"}, {"role": "assistant", "content": None, "tool_calls": [{"id": "c1", "type": "function", "function": {"name": "f", "arguments": "{}"}}]},
+                                                 {"role": "tool", "tool_call_id": "c1", "content": "42"}]}])
+def test_an_agents_chat_while_the_large_model_starts_gets_503_to_retry_not_a_note(monkeypatch, tmp_path, targets, extra):
+    """An agent would act on D1A's note as the model's reply: it gets a 503 its client retries, Retry-After capped at 60 s."""
+    calls = configure(tmp_path, monkeypatch, large_url=targets(starting).url, tiers={"prove it": "large"})
+    with TestClient(serve.app) as client:
+        r = chat(client, "prove it", **extra)
+        plain = chat(client, "prove it")
+    assert r.status_code == 503 and r.headers["retry-after"] == "60" and r.headers["x-should-retry"] == "true" and r.headers["x-d1a-route-error"] == "starting"
+    assert r.json()["error"]["code"] == "model_starting" and "about 240 s" in r.json()["error"]["message"]
+    assert content(plain) == f"{routes.NOTE_LARGE_STARTING.format(s=240)}\n{D1A_TEXT}" and len(calls["chat"]) == 1, "a plain chat still gets D1A's answer"
 
 
 def test_a_failed_pass_leaves_the_chat_to_d1a(monkeypatch, tmp_path, targets):
