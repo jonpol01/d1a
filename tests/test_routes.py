@@ -758,3 +758,14 @@ def test_the_route_rule_on_the_card_is_the_threshold_route_tier_applies():
     assert presets.advise("route", answers, temperatures=temps, use_case="routing")["tier"] == "medium", "just under the card's threshold: up a tier"
     probs["small"] = rule["small"] + 0.001
     assert presets.advise("route", answers, temperatures=temps, use_case="routing")["tier"] == "small"
+
+
+def test_a_large_model_starting_up_makes_the_large_route_offline(monkeypatch, tmp_path, targets):
+    """A 503 with Retry-After reaches Health as "starting <seconds>": the route is offline until a forward succeeds."""
+    monkeypatch.setattr(routes.Health, "probe", lambda self: pytest.fail("probed despite a forward just now") if self.ok_at or self.fail_at else True)
+    configure(tmp_path, monkeypatch, large_url=targets(starting).url, tiers={"prove it": "large"})
+    with TestClient(serve.app) as client:
+        r = chat(client, "prove it")
+    assert r.headers["x-d1a-route-error"] == "starting"
+    assert next(x for x in serve.app.state.routes.card() if x["name"] == "large")["state"] == "offline"
+    assert routes._unreachable("starting 240") and routes._unreachable("status 503") and not routes._unreachable("status 400") and not routes._unreachable("busy")

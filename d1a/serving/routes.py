@@ -158,7 +158,8 @@ class Slots:
 
 def _unreachable(error):
     """Whether a route error means the target could not be reached or failed (not a refusal by D1A itself)."""
-    return error in ("connect", "timeout", "error", "starting", "empty", "not-json", "too-large") or str(error).startswith("status 5")
+    e = str(error)
+    return e.split(" ", 1)[0] in ("connect", "timeout", "error", "starting", "empty", "not-json", "too-large") or e.startswith("status 5")   # "starting <s>" too
 
 
 class Health:
